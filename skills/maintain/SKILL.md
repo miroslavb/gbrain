@@ -59,9 +59,29 @@ Pages where compiled_truth is older than the latest timeline entry. The assessme
 - For each stale page: read the page from gbrain, review timeline, determine if compiled_truth needs rewriting
 
 ### Orphan pages
+
 Pages with zero inbound links. Nobody references them.
-- Review orphans: are they genuinely isolated or just missing links?
-- Add links in gbrain from related pages or flag for deletion
+
+**Categorization workflow (DO THIS FIRST):**
+1. Run `gbrain orphans` and group by domain/prefix
+2. Separate into categories:
+   - **sessions/** — auto-ingested transcripts (usually 80-90% of orphans; normal)
+   - **test/e2e/fixtures** — test data (irrelevant)
+   - **content pages** — projects/, concepts/, meetings/, people/, companies/, api/
+   - **reference docs** — docs/, skills/, optional-skills/, plugins/ (fine as orphans)
+3. Focus link population on **content pages** — these should approach 100% link coverage
+4. Link clusters of related pages (e.g. Seraph project + its sub-pages) internally first
+5. Link meta index pages (readmes) to their children via `index_of`
+6. Cross-link concepts to projects/infra they relate to
+
+**Creating links efficiently:**
+- For wikilinks already in page content (`→ [[companies/onfy]]`) — use `add_link` manually; auto_link is skipped for remote callers
+- For clusters (2-4 related pages): use `mcp_gbrain_add_link` in parallel
+- Batch common link operations: `index_of` for readmes, `related_to` for concept clusters
+
+**Verification:** after linking, check `mcp_gbrain_get_links <slug>` to confirm links registered.
+
+**For session orphans (the 87% case):** see `references/session-entity-linking.md` for the improved linker.
 
 ### Dead links
 Links pointing to pages that don't exist.
@@ -76,8 +96,24 @@ If link_count is 0 or low relative to page_count, run batch extraction:
 ```bash
 gbrain extract links --dir ~/brain
 ```
-This scans all markdown files for entity references, See Also sections, and
+This scans all markdown files for `[Text](url)` references, See Also sections, and
 frontmatter fields, then creates typed links in the database.
+
+**What `extract links` does NOT cover:** wikilinks `[[slug]]` or `[[slug|label]]` in
+page body text. These require `auto_link` via `put_page`, which in turn requires a
+working embedding service (OPENAI_API_KEY). The only fallback is manual `add_link`.
+
+**Wikilink extraction via SQL:** if you need to find pages with wikilinks not yet
+in the graph, query `pages.compiled_truth LIKE '%[[%'` and cross-reference with
+`links` table. The `links` table uses `from_page_id`/`to_page_id` (integer FK),
+not slugs — resolve via `pages` table JOIN. See `references/brain-link-audit.md`
+for the full SQL audit script.
+
+**Orphan page interpretation:** in a brain dominated by session pages (6000+
+auto-ingested transcripts), 90%+ orphan rate is **normal and expected**. Session
+pages are the most numerous but least-linked. Focus link population on non-session
+pages: projects, concepts, methodology, infrastructure, people, companies. These
+should approach 100% link coverage.
 
 ### Timeline extraction
 If timeline_entry_count is 0, extract structured timeline from markdown:
