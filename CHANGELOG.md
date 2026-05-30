@@ -2,6 +2,106 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.41.34.0] - 2026-05-30
+
+**Search now finds a page by its name, even when you only remember what you
+called it.** Ask for "Greek amphitheater" and the page you titled "The Mingtang —
+Indoor Greek Amphitheater" comes back first, not buried at a weak 0.64 behind two
+unrelated pages. Give a page `aliases:` in its frontmatter ("Hall of Light", "明堂")
+and any of those names finds it too. And every result now tells your agent *why*
+it matched, so it stops writing duplicate pages on top of ones you already have.
+
+A real miss prompted this: an agent searched "Greek amphitheater," didn't
+confidently find the existing concept page, and wrote a duplicate stub on top of
+2,000 words of work. The page was right there — search just represented it by a
+throwaway body chunk instead of its title. Four things changed so that can't
+happen again:
+
+- **A page is now scored by its best chunk, not a random one.** Vector search
+  pools to one row per page (its strongest match) before ranking, so a strong
+  page can't get crowded out of the results by another page's chunks. Same
+  behavior on both the embedded (PGLite) and Postgres engines.
+- **A query that's a phrase in the title gets a boost.** "Greek amphitheater" is
+  in the title, so that page wins by design instead of by luck. Bounded and gated
+  so it can't float an irrelevant page to the top.
+- **Chosen names actually resolve.** Add `aliases:` to a page's frontmatter and
+  those names route to it at query time — the only thing that bridges "Hall of
+  Light" to the Mingtang when no words overlap. Run `gbrain reindex --aliases`
+  once to backfill names on pages you already have.
+- **Results carry evidence, not just a number.** Each result says how it matched
+  (`exact_title_match`, `alias_hit`, `weak_semantic`, …) and a `create_safety`
+  hint (`exists` / `probable` / `unknown`). Your agent keys "is this already in
+  the brain?" off that, not a fuzzy score — which is what stops the duplicate.
+
+`gbrain search "<text>"` is now the good hybrid path (it used to be keyword-only);
+`gbrain search modes/stats/tune` still work. New: `gbrain search diagnose
+"<query>" --target <slug>` traces exactly which layer surfaces (or misses) a
+page. `gbrain search stats` now shows an average rank-1 match score so a
+retrieval regression shows up before you hit it in chat. And `gbrain eval
+retrieval-quality` is a CI gate (NamedThingBench) that fails any change which
+regresses name-based search.
+
+### To take advantage of v0.41.34.0
+
+`gbrain upgrade` applies migrations v110 (page_aliases) and v111 (telemetry
+columns) automatically. If `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Backfill aliases for pages you already have** (one time):
+   ```bash
+   gbrain reindex --aliases
+   ```
+   To make a page findable by a chosen name, add `aliases:` to its frontmatter
+   and re-sync, or pass the names there before the backfill.
+3. **Verify:**
+   ```bash
+   gbrain search "<a phrase from one of your page titles>"
+   gbrain search diagnose "<that phrase>" --target <the page slug>
+   gbrain doctor
+   ```
+4. **If anything looks wrong,** file an issue with `gbrain doctor` output:
+   https://github.com/garrytan/gbrain/issues
+
+Note: the `search` operation (CLI + MCP) now runs hybrid retrieval by default
+instead of keyword-only. If you specifically need the old cheap keyword-only
+behavior for an automated caller, set `gbrain config set search.mcp_keyword_only true`.
+
+### Itemized changes
+
+#### Added
+- Per-page max-pool in `searchVector` (both engines) via a shared
+  `buildBestPerPagePoolCte` SQL builder; collapse key is the composite
+  `(source_id, slug)` so federated brains never collapse same-slug pages across sources.
+- Title-phrase boost (`search.title_boost`, on in all modes): floor-ratio-gated,
+  capped, reads `page.title`, stamped for `--explain`.
+- Free-text alias layer: `page_aliases` table (migration v110), shared
+  `normalizeAlias`, ingest projection from frontmatter `aliases:`, query-time
+  alias hop (full-match, source-scoped, bounded inject, fail-open pre-migration),
+  and `gbrain reindex --aliases` backfill.
+- Evidence contract: every `SearchResult` carries `evidence` +
+  `create_safety` (+ `base_score`/`final_score`), so the agent's
+  don't-duplicate decision keys off why a page matched.
+- `gbrain search diagnose "<query>" --target <slug>` — Phase-0 retrieval trace
+  (keyword / vector / alias / hybrid ranks + boosts + verdict).
+- NamedThingBench: `gbrain eval retrieval-quality <fixture.jsonl>` + a hermetic
+  CI gate over 7 query families.
+- Rank-1 match-score drift telemetry (migration v111) surfaced in `gbrain search stats`.
+- Per-call `--mode` for local/trusted callers (remote uses configured mode).
+
+#### Changed
+- The `search` operation (CLI + MCP) is now cheap-hybrid by default
+  (vector + keyword + RRF + pool + title + alias, expansion off); `query`
+  remains the full-control variant. Opt back into keyword-only with
+  `search.mcp_keyword_only`.
+- `gbrain search "<freetext>"` routes to hybrid; `modes/stats/tune` stay subcommands.
+
+#### Fixed
+- A page represented by its weakest chunk in vector search (the incident).
+- Same-slug pages in different sources collapsing in per-page pooling and the
+  alias hop (source-isolation).
 ## [0.41.33.0] - 2026-05-29
 
 **`gbrain search` and `query` can now return a tight, intent-sized set of
