@@ -63,6 +63,12 @@ export function buildGatewayConfig(c: GBrainConfig): AIGatewayConfig {
   if (c.azure_openai_endpoint) envFromConfig.AZURE_OPENAI_ENDPOINT = c.azure_openai_endpoint;
   if (c.azure_openai_deployment) envFromConfig.AZURE_OPENAI_DEPLOYMENT = c.azure_openai_deployment;
   if (c.azure_openai_use_entra) envFromConfig.AZURE_OPENAI_USE_ENTRA = c.azure_openai_use_entra;
+  // FORK (a7c71359): same fold for litellm / together proxy keys — this brain's
+  // chat stack runs on together:(Ollama Cloud) + litellm:(t06); without the fold,
+  // daemon/MCP contexts go out unauthenticated. process.env still wins later.
+  const cAny = c as Record<string, unknown>;
+  if (typeof cAny.litellm_api_key === 'string') envFromConfig.LITELLM_API_KEY = cAny.litellm_api_key;
+  if (typeof cAny.together_api_key === 'string') envFromConfig.TOGETHER_API_KEY = cAny.together_api_key;
 
   // v0.32 codex finding #4+#5 fix: thread local-server _BASE_URL env vars
   // into base_urls so the gateway hits the user's configured port. Without
