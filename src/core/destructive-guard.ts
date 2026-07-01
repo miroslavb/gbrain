@@ -190,7 +190,13 @@ export async function softDeleteSource(
      SET archived = true,
          archived_at = now(),
          archive_expires_at = ${expiresClause},
-         config = COALESCE(config, '{}'::jsonb) || '{"federated": false}'::jsonb
+         -- #2339: normalise a possibly double-encoded (string) or already-
+         -- corrupted (array) config to an object BEFORE the || concat. A raw
+         -- string-concat-object yields a JSONB ARRAY, which later crashes
+         -- jsonb_each in updateSourceConfig ("cannot call jsonb_each on a
+         -- non-object"). This is the writer that originally created those
+         -- arrays. NULL/non-object becomes '{}' (federation/cycle keys regen).
+         config = (CASE WHEN jsonb_typeof(config) = 'object' THEN config ELSE '{}'::jsonb END) || '{"federated": false}'::jsonb
      WHERE id = $1 AND archived = false
      RETURNING id, name, archived_at, archive_expires_at`,
     [sourceId],
@@ -232,7 +238,8 @@ export async function restoreSource(
      SET archived = false,
          archived_at = NULL,
          archive_expires_at = NULL,
-         config = COALESCE(config, '{}'::jsonb) || $1::jsonb
+         -- #2339: normalise config to an object before || (see softDeleteSource).
+         config = (CASE WHEN jsonb_typeof(config) = 'object' THEN config ELSE '{}'::jsonb END) || $1::jsonb
      WHERE id = $2 AND archived = true
      RETURNING id`,
     [federatedPatch, sourceId],
