@@ -120,7 +120,12 @@ export async function checkEntityLinkCoverage(
     engine,
     `SELECT COUNT(*) AS count FROM pages
        WHERE type IN ('person', 'company', 'organization', 'entity')
-         AND deleted_at IS NULL`,
+         AND deleted_at IS NULL
+         -- Exclude gbrain's own test fixtures: the gbrain source indexes the
+         -- repo including test/, so test/e2e/fixtures + test/fixtures entity
+         -- pages (~half the entity universe) inflate this denominator with
+         -- never-linkable fixtures and drag the coverage number.
+         AND slug NOT LIKE 'test/%' AND slug NOT LIKE 'tools/gbrain/test/%'`,
   );
 
   if (totalEntities === 0) {
@@ -144,6 +149,7 @@ export async function checkEntityLinkCoverage(
        SELECT p.id FROM pages p ${sampleClause}
        WHERE p.type IN ('person', 'company', 'organization', 'entity')
          AND p.deleted_at IS NULL
+         AND p.slug NOT LIKE 'test/%' AND p.slug NOT LIKE 'tools/gbrain/test/%'
          AND EXISTS (SELECT 1 FROM links l WHERE l.to_page_id = p.id)
      ) sub`,
   );
@@ -215,7 +221,9 @@ export async function checkTimelineCoverage(
     engine,
     `SELECT COUNT(*) AS count FROM pages
        WHERE type IN ('person', 'company', 'organization', 'entity')
-         AND deleted_at IS NULL`,
+         AND deleted_at IS NULL
+         -- Exclude gbrain's own test fixtures (see checkEntityLinkCoverage).
+         AND slug NOT LIKE 'test/%' AND slug NOT LIKE 'tools/gbrain/test/%'`,
   );
 
   if (totalEntities === 0) {
@@ -237,6 +245,7 @@ export async function checkTimelineCoverage(
        SELECT p.id FROM pages p ${sampleClause}
        WHERE p.type IN ('person', 'company', 'organization', 'entity')
          AND p.deleted_at IS NULL
+         AND p.slug NOT LIKE 'test/%' AND p.slug NOT LIKE 'tools/gbrain/test/%'
          AND EXISTS (SELECT 1 FROM timeline_entries t WHERE t.page_id = p.id)
      ) sub`,
   );

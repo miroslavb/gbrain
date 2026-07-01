@@ -1323,8 +1323,25 @@ export class PostgresEngine implements BrainEngine {
              WHEN jsonb_typeof(config) = 'array'
                THEN COALESCE(
                  (SELECT jsonb_object_agg(kv.key, kv.value)
-                    FROM jsonb_array_elements(config) elem,
-                         jsonb_each(elem) kv),
+                    FROM jsonb_array_elements(config) elem
+                    -- #2339: array elements are NOT guaranteed objects. A
+                    -- double-encoded config that got concat-merged yields e.g.
+                    -- an array of [json-string, patch-object, scalar, null]; calling
+                    -- jsonb_each() on the string/scalar/null elems throws
+                    -- "cannot call jsonb_each on a non-object" and aborts the
+                    -- whole UPDATE, so the cycle can never mark the source
+                    -- done (it re-dispatches forever, starving embeddings).
+                    -- Guard: parse string elems that are JSON objects, pass
+                    -- object elems through, coerce everything else to '{}'
+                    -- (jsonb_each on '{}' yields no rows — safe).
+                    CROSS JOIN LATERAL jsonb_each(
+                      CASE
+                        WHEN jsonb_typeof(elem) = 'object' THEN elem
+                        WHEN jsonb_typeof(elem) = 'string' AND (elem #>> '{}') IS JSON OBJECT
+                          THEN (elem #>> '{}')::jsonb
+                        ELSE '{}'::jsonb
+                      END
+                    ) kv),
                  '{}'::jsonb
                )
              ELSE '{}'::jsonb
