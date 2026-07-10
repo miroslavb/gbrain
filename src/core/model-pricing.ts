@@ -102,6 +102,18 @@ export const CANONICAL_PRICING: Record<string, ModelPricing> = {
   // DeepSeek v4 (verified 2026-07-27 at api-docs.deepseek.com): cache-miss rates.
   'deepseek:deepseek-v4-flash':           { input:  0.14, output:  0.28 },
   'deepseek:deepseek-v4-pro':             { input:  0.435, output: 0.87 },
+
+  // ── Ollama Cloud via the `together` recipe (base_url ollama.com/v1) ────
+  // Local fork addition (2026-07-10): without pricing entries, BudgetTracker
+  // TX2 hard-fails every budget-capped call (conversation_facts, enrich, …)
+  // for these models → silent zero-extraction. Numbers are deliberate
+  // OVER-estimates of Ollama Cloud usage pricing so budget caps stay
+  // protective; update when Ollama publishes exact per-token rates.
+  'together:deepseek-v4-flash':           { input:  0.30, output:  0.60 },
+  'together:deepseek-v4-pro':             { input:  1.20, output:  2.40 },
+  'together:glm-5.2':                     { input:  1.00, output:  2.00 },
+  // t06 LiteLLM local qwen — genuinely free (self-hosted, no metering).
+  'litellm:local-qwen2.5-7b':             { input:  0.00, output:  0.00 },
 };
 
 /**
