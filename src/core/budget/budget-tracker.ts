@@ -32,6 +32,7 @@ import { mkdirSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { gbrainPath } from '../config.ts';
 import { ANTHROPIC_PRICING, type ModelPricing } from '../anthropic-pricing.ts';
+import { canonicalLookup } from '../model-pricing.ts';
 import { EMBEDDING_PRICING, lookupEmbeddingPrice } from '../embedding-pricing.ts';
 import { splitProviderModelId } from '../model-id.ts';
 import { isoWeekFilename, resolveAuditDir } from '../audit-week-file.ts';
@@ -194,6 +195,16 @@ function lookupPricing(modelId: string, kind: BudgetKind): ModelPricing | null {
     const tailHit = ANTHROPIC_PRICING[modelTail];
     if (tailHit) return tailHit;
   }
+  // Local fork fix (2026-07-10): fall through to the CANONICAL table for
+  // non-Anthropic chat/rerank models (together:, deepseek:, google:, litellm:).
+  // ANTHROPIC_PRICING is a derived view filtered to `anthropic:` keys, so
+  // non-Anthropic models could NEVER price here — every budget-capped feature
+  // (conversation_facts $1/source cap, enrich, …) TX2 hard-failed → silent
+  // zero-extraction on non-Anthropic gateways. The error text even points at
+  // anthropic-pricing.ts, where such entries are impossible by construction.
+  // canonicalLookup keeps TX2 fail-closed for genuinely unknown models.
+  const canonical = canonicalLookup(modelId);
+  if (canonical) return canonical;
   // v0.40.6.1: zero-price local-inference rerank providers so the budget
   // tracker's TX2 hard-fail doesn't trip on `llama-server-reranker:<model>`
   // under `--max-cost`. Only the rerank kind — chat/embed already have
