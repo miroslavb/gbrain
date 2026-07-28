@@ -3273,7 +3273,47 @@ export function toAISDKTools(tools: ChatToolDef[] | undefined): Record<string, a
   }, {} as Record<string, any>);
 }
 
+/**
+ * 2026-07-28 (fork): make `chat_fallback_chain` LIVE. Upstream shipped the
+ * config field ("plumbed for chatWithFallback(), commit 3") but never landed
+ * the walker — the chain was a dead knob. This wrapper retries `chatOnce`
+ * against each chain entry on transport/provider failure. Never falls back on:
+ *   - BudgetExhausted (cost ceiling is a hard stop, not a provider fault)
+ *   - AbortError (caller cancelled)
+ *   - guardrail blocks (safety decision, not availability)
+ */
+function fallbackEligible(err: unknown): boolean {
+  const name = (err as Error)?.constructor?.name ?? '';
+  const msg = (err as Error)?.message ?? '';
+  if (name === 'BudgetExhausted' || name === 'AbortError') return false;
+  if (name.toLowerCase().includes('guardrail') || msg.toLowerCase().includes('guardrail')) return false;
+  return true;
+}
+
 export async function chat(opts: ChatOpts): Promise<ChatResult> {
+  try {
+    return await chatOnce(opts);
+  } catch (err) {
+    if (!fallbackEligible(err)) throw err;
+    const requested = opts.model ?? getChatModel();
+    const chain = getChatFallbackChain().filter((m) => m !== requested);
+    let lastErr: unknown = err;
+    for (const fb of chain) {
+      console.warn(
+        `[gateway.chat] model "${requested}" failed (${(lastErr as Error)?.message ?? lastErr}); falling back to "${fb}"`,
+      );
+      try {
+        return await chatOnce({ ...opts, model: fb });
+      } catch (e2) {
+        if (!fallbackEligible(e2)) throw e2;
+        lastErr = e2;
+      }
+    }
+    throw lastErr;
+  }
+}
+
+async function chatOnce(opts: ChatOpts): Promise<ChatResult> {
   const tracker = __budgetStore.getStore() ?? null;
   const modelStrEarly = opts.model ?? getChatModel();
 
