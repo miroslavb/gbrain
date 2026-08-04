@@ -151,5 +151,17 @@ export function canonicalLookup(
   const { provider, model } = splitProviderModelId(modelId);
   if (!model) return undefined;
   const key = provider ? `${provider}:${model}` : `anthropic:${model}`;
-  return CANONICAL_PRICING[key];
+  const hit = CANONICAL_PRICING[key];
+  if (hit) return hit;
+  // 3. FORK (2026-08-04): dated snapshot suffix fallback. Providers ship
+  //    date-pinned variants (`together:deepseek-v4-flash:0731`) that price
+  //    identically to the base model. Without this, a `models.default`
+  //    pointing at a snapshot id makes EVERY budget-capped call hard-fail
+  //    with no_pricing — observed: extract-conversation-facts aborting each
+  //    source at $0.0000 because the LLM-fallback parser resolved through
+  //    the snapshot id. Strip ONE trailing `:<2-8 digits>` segment and retry
+  //    the exact-key path. Never strips named suffixes (`:free`, `:latest`).
+  const snap = modelId.match(/^(.+):(\d{2,8})$/);
+  if (snap) return canonicalLookup(snap[1]);
+  return undefined;
 }
