@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
+import { defaultFactVisibility } from './fact-visibility.ts';
 import type { Transaction } from '@electric-sql/pglite';
 // Engine-live path: static top-level import (no lazy `import()`). Supplies
 // PGLite's WASM/fsBundle/extension assets embedded via `with { type: 'file' }`
@@ -4136,7 +4137,7 @@ export class PGLiteEngine implements BrainEngine {
     const vh = valueHash(obs.value);
     const conf = obs.confidence ?? 0.7;
     const status = obs.status ?? (isNovelDimension(dimension) ? 'quarantined' : 'active');
-    const visibility = obs.visibility ?? 'private';
+    const visibility = obs.visibility ?? defaultFactVisibility();
     const validFrom = obs.validFrom ?? null;
     const validUntil = obs.validTo ?? null;
     const factText = `${dimension}: ${obs.value}`;
@@ -4420,7 +4421,7 @@ export class PGLiteEngine implements BrainEngine {
     const validFrom = input.valid_from ?? new Date();
     const validUntil = input.valid_until ?? null;
     const kind = input.kind ?? 'fact';
-    const visibility = input.visibility ?? 'private';
+    const visibility = input.visibility ?? defaultFactVisibility();
     const notability = input.notability ?? 'medium';
     const confidence = input.confidence ?? 1.0;
     const entitySlug = input.entity_slug ?? null;
@@ -4532,7 +4533,7 @@ export class PGLiteEngine implements BrainEngine {
         const validFrom = input.valid_from ?? new Date();
         const validUntil = input.valid_until ?? null;
         const kind = input.kind ?? 'fact';
-        const visibility = input.visibility ?? 'private';
+        const visibility = input.visibility ?? defaultFactVisibility();
         const notability = input.notability ?? 'medium';
         const confidence = input.confidence ?? 1.0;
         const entitySlug = input.entity_slug ?? null;
