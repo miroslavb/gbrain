@@ -166,20 +166,27 @@ export async function resolveModel(
       }
     }
 
-    // 4. Global default
-    const def = await engine.getConfig('models.default');
-    if (def && def.trim()) {
-      const resolved = await resolveAlias(engine, def.trim());
-      return enforceSubagentCapable(resolved, opts.tier, 'models.default');
-    }
-
-    // 5. Tier override (v0.31.12)
+    // 4. Tier override — FORK (2026-08-04): consulted BEFORE the global
+    // default. Upstream ordered models.default above models.tier.<tier>,
+    // which makes the subagent_capability warning's own remedy
+    // ("gbrain config set models.tier.subagent …") a no-op whenever
+    // models.default is set — the tier key was unreachable dead config.
+    // An explicit per-tier override is strictly more specific than the
+    // global default, so it wins. With no tier key set, behavior is
+    // byte-identical to upstream.
     if (opts.tier) {
       const tierVal = await engine.getConfig(`models.tier.${opts.tier}`);
       if (tierVal && tierVal.trim()) {
         const resolved = await resolveAlias(engine, tierVal.trim());
         return enforceSubagentCapable(resolved, opts.tier, `models.tier.${opts.tier}`);
       }
+    }
+
+    // 5. Global default
+    const def = await engine.getConfig('models.default');
+    if (def && def.trim()) {
+      const resolved = await resolveAlias(engine, def.trim());
+      return enforceSubagentCapable(resolved, opts.tier, 'models.default');
     }
   }
 
