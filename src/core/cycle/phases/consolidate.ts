@@ -50,7 +50,16 @@ export async function runPhaseConsolidate(
   opts: ConsolidatePhaseOpts = {},
 ): Promise<PhaseResult> {
   const dryRun = opts.dryRun === true;
-  const threshold = opts.clusterThreshold ?? 0.85;
+  // Fork (2026-08-04): the 0.85 default was tuned against OpenAI-style
+  // embeddings. On a bge-m3 (1024d) index, distinct facts about one entity
+  // sit around 0.80-0.84 cosine, so 0.85 clustered NOTHING on a live brain
+  // (measured: 73 unconsolidated facts on one entity → 73 singleton clusters
+  // → 0 takes, while the cycle still reported status ok). 0.80 promotes.
+  // Env override so operators can retune without a code edit; the cycle
+  // itself passes no clusterThreshold, so this is the only knob it honors.
+  const envThreshold = Number(process.env.GBRAIN_CONSOLIDATE_CLUSTER_THRESHOLD);
+  const threshold = opts.clusterThreshold
+    ?? (Number.isFinite(envThreshold) && envThreshold > 0 && envThreshold <= 1 ? envThreshold : 0.80);
   const minPerBucket = opts.minFactsPerBucket ?? 3;
   const minOldestAgeMs = opts.minOldestAgeMs ?? 24 * 60 * 60 * 1000;
 
