@@ -23,17 +23,21 @@ export const anthropic: Recipe = {
     },
     chat: {
       models: [
+        'claude-opus-5',
+        'claude-opus-4-8',
         'claude-opus-4-7',
+        'claude-sonnet-5',
         'claude-sonnet-4-6',
         'claude-haiku-4-5-20251001',
       ],
       supports_tools: true,
       supports_subagent_loop: true,
       supports_prompt_cache: true,
-      max_context_tokens: 200000,
+      // 5-series and 4.7+ ship a 1M-token context window.
+      max_context_tokens: 1000000,
       cost_per_1m_input_usd: 3.0, // sonnet-class baseline
       cost_per_1m_output_usd: 15.0,
-      price_last_verified: '2026-05-10',
+      price_last_verified: '2026-08-02',
     },
   },
   // Friendly aliases. Starting with Claude 4.6, Anthropic API IDs are dateless

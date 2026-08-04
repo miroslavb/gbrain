@@ -30,7 +30,19 @@ export const openai: Recipe = {
       price_last_verified: '2026-04-20',
     },
     chat: {
-      models: ['gpt-5.2', 'gpt-4o-mini'],
+      // Verified present on /v1/models 2026-08-02 with the account's own key.
+      // NOTE: upstream still ships only ['gpt-5.2','gpt-4o-mini'] — this list is
+      // a local addition and WILL conflict on the next upstream merge (keep ours).
+      models: [
+        'gpt-5.6-terra',
+        'gpt-5.3-codex',
+        'gpt-5.2-codex',
+        'gpt-5.2',
+        'gpt-5-pro',
+        'gpt-5',
+        'gpt-5-mini',
+        'gpt-4o-mini',
+      ],
       supports_tools: true,
       supports_subagent_loop: true,
       supports_prompt_cache: false,
