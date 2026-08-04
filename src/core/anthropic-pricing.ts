@@ -19,7 +19,7 @@
  * per process.
  */
 
-import { CANONICAL_PRICING, type ModelPricing } from './model-pricing.ts';
+import { CANONICAL_PRICING, canonicalLookup, type ModelPricing } from './model-pricing.ts';
 import { splitProviderModelId } from './model-id.ts';
 
 export type { ModelPricing };
@@ -62,6 +62,13 @@ export function estimateMaxCostUsd(
     const { model: tail } = splitProviderModelId(modelId);
     if (tail) p = ANTHROPIC_PRICING[tail];
   }
+  // FORK (2026-08-05): fall through to the CANONICAL table so non-Anthropic
+  // models (openai:, together:/ollama-cloud, litellm:, dated snapshot ids)
+  // keep the cycle budget gate ARMED instead of tripping
+  // BUDGET_METER_NO_PRICING and running ungated. ANTHROPIC_PRICING is only
+  // the bare-keyed Claude view of the same canonical table (CLAUDE.md
+  // "one canonical chat-pricing table" invariant).
+  if (!p) p = canonicalLookup(modelId);
   if (!p) return null;
   return (
     (estimatedInputTokens / 1_000_000) * p.input +
