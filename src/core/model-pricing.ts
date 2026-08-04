@@ -82,6 +82,14 @@ export const CANONICAL_PRICING: Record<string, ModelPricing> = {
   // slot A from the --max-usd pre-flight and est_cost_usd audit rows.
   'openai:gpt-5.2':                       { input:  1.25, output: 10.00 },
   'openai:gpt-5.5':                       { input:  4.00, output: 16.00 },
+  // gpt-5.6-terra (fork 2026-08-04): operator-chosen fallback for the
+  // budget-capped extraction phases (conversation_facts, extract_atoms) when
+  // the Anthropic subscription shim hits its monthly cap. No published rate
+  // on hand — deliberate OVER-estimate above gpt-5.5 so cost ceilings stay
+  // protective (same posture as the together:/ollama-cloud rows). Without a
+  // row here, TX2 hard-fails every budget-capped call on the fallback model
+  // → silent zero-extraction (the 2026-07-10 bug class).
+  'openai:gpt-5.6-terra':                 { input:  6.00, output: 24.00 },
 
   // ── Google ─────────────────────────────────────────────────────────────
   // `gemini-1.5-pro` was retired by Google (#3510); kept so historical
