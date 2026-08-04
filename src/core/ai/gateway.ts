@@ -417,7 +417,13 @@ export function resolveNativeBaseUrl(
   cfg: AIGatewayConfig,
 ): string | undefined {
   const envKey = provider === 'anthropic' ? 'ANTHROPIC_BASE_URL' : 'OPENAI_BASE_URL';
-  const raw = cfg.env[envKey];
+  // FORK (2026-08-04, re-applies bd6158356 semantics on the upstream shape):
+  // ALSO honor config.json `provider_base_urls.<provider>` (threaded into
+  // cfg.base_urls by buildGatewayConfig) so a local subscription shim
+  // (Claude Code OAuth passthrough on 127.0.0.1:9377) can front
+  // api.anthropic.com without every caller exporting ANTHROPIC_BASE_URL.
+  // Env still wins — it's the incident-time escape hatch.
+  const raw = cfg.env[envKey] ?? cfg.base_urls?.[provider];
   if (!raw || !raw.trim()) return undefined;
   const trimmed = raw.trim().replace(/\/+$/, '');
   return /\/v1$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
