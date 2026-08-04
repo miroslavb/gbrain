@@ -54,6 +54,32 @@ const STOPWORDS = new Set<string>([
   // greetings / discourse markers / polite openers
   'hi', 'hey', 'hello', 'thanks', 'thank', 'please', 'yes', 'no', 'ok', 'okay', 'sure',
   'maybe', 'well', 'oh', 'let', "let's", 'lets',
+  // ── Russian (fork 2026-08-04). Russian capitalizes ONLY the sentence-start
+  // word, so nearly every noise candidate is a sentence opener: an imperative
+  // ("Обнови Гермес"), a pronoun, or a question word. Same lowercase-compare
+  // contract as the English rows.
+  // pronouns / determiners
+  'я', 'ты', 'вы', 'мы', 'он', 'она', 'оно', 'они', 'мне', 'мной', 'тебе', 'тебя',
+  'вам', 'вас', 'нам', 'нас', 'ему', 'ей', 'им', 'их', 'его', 'её', 'ее', 'них',
+  'мой', 'моя', 'моё', 'мои', 'твой', 'наш', 'наша', 'наше', 'наши', 'ваш', 'ваша', 'ваше', 'ваши',
+  'это', 'этот', 'эта', 'эти', 'этом', 'этого', 'тот', 'та', 'те', 'то', 'том',
+  'кто', 'кого', 'кому', 'кем', 'что', 'чего', 'чему', 'чем', 'чей', 'чья', 'чьё',
+  // question words / conjunctions / particles / preps (common openers)
+  'когда', 'где', 'куда', 'откуда', 'почему', 'зачем', 'как', 'какой', 'какая',
+  'какие', 'какое', 'каком', 'который', 'которая', 'которые', 'сколько',
+  'и', 'а', 'но', 'или', 'либо', 'если', 'чтобы', 'хотя', 'пока', 'ведь', 'же',
+  'ну', 'вот', 'уже', 'ещё', 'еще', 'только', 'даже', 'тоже', 'также',
+  'на', 'в', 'во', 'с', 'со', 'к', 'ко', 'по', 'за', 'из', 'у', 'о', 'об', 'обо',
+  'от', 'до', 'для', 'при', 'над', 'под', 'про', 'без', 'через', 'после', 'перед', 'между',
+  // agent-prompt imperatives / modals / discourse
+  'обнови', 'проверь', 'посмотри', 'смотри', 'глянь', 'сделай', 'запусти', 'покажи',
+  'найди', 'создай', 'добавь', 'удали', 'убери', 'исправь', 'почини', 'поправь',
+  'напиши', 'опиши', 'расскажи', 'скажи', 'объясни', 'переведи', 'продолжи',
+  'поставь', 'установи', 'настрой', 'перезапусти', 'останови', 'включи', 'выключи',
+  'отключи', 'подключи', 'протестируй', 'задеплой', 'залей', 'запушь', 'закоммить',
+  'собери', 'разбери', 'допили', 'склонируй', 'перенеси', 'зафиксируй',
+  'давай', 'надо', 'нужно', 'можно', 'нельзя', 'пожалуйста', 'привет', 'спасибо',
+  'ок', 'ага', 'да', 'нет', 'хорошо', 'отлично', 'плохо',
 ]);
 
 /**
@@ -70,6 +96,19 @@ const COMMON_WORDS = new Set<string>([
   'afternoon', 'evening', 'week', 'month', 'year', 'meeting', 'call', 'note', 'task',
   'here', 'there', 'every', 'some', 'any', 'all', 'one', 'two', 'three', 'first', 'last',
   'next', 'new', 'old', 'good', 'bad', 'great', 'nice', 'thing', 'something', 'anything',
+  // ── Russian (fork 2026-08-04): weekdays / months / time words / generic
+  // tech nouns that open agent prompts. Soft list — kept when seen
+  // capitalized mid-sentence (real-name collision escape hatch).
+  'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье',
+  'январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август',
+  'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+  'сегодня', 'завтра', 'вчера', 'сейчас', 'потом', 'позже', 'скоро', 'утром',
+  'вечером', 'днём', 'днем', 'ночью', 'неделя', 'месяц', 'год',
+  'встреча', 'звонок', 'заметка', 'задача', 'вопрос', 'проблема',
+  'новый', 'новая', 'новое', 'новые', 'первый', 'последний', 'следующий',
+  'каждый', 'весь', 'вся', 'всё', 'все', 'один', 'два', 'три',
+  'хост', 'хосте', 'сервер', 'сервере', 'проект', 'проекте', 'агент', 'агенте',
+  'бот', 'боте', 'код', 'коде', 'файл', 'файле', 'репо', 'конфиг', 'логи', 'лог',
 ]);
 
 const HANDLE_RE = /@([A-Za-z0-9_]{2,})/g;
@@ -84,6 +123,19 @@ const CAP_RUN_RE = new RegExp(`${CAP_TOKEN}(?:\\s+${CAP_TOKEN}){0,3}`, 'gu');
 function stripPossessive(s: string): string {
   return s.replace(/['’]s$/i, '').replace(/['’]$/i, '');
 }
+
+/**
+ * Fork (2026-08-04): common Russian case endings, longest-first so the
+ * greedier match wins ("Мирославами" strips "ами", not "и"). Used by the
+ * single-token Cyrillic de-inflection pass in extractCandidates() — strip at
+ * most ONE ending, keep a stem of ≥4 chars, always as an added variant.
+ */
+const CYRILLIC_CASE_ENDINGS: readonly string[] = [
+  'иями', 'ями', 'ами', 'иях', 'иям',
+  'ов', 'ев', 'ёв', 'ей', 'ой', 'ом', 'ем', 'ём', 'ах', 'ях', 'ам', 'ям',
+  'ую', 'юю', 'ая', 'яя', 'ое', 'ее', 'ий', 'ый',
+  'а', 'я', 'у', 'ю', 'е', 'и', 'ы', 'о',
+];
 
 /** True when the match at `idx` is the first non-space char of the text or a sentence. */
 function isAtSentenceStart(text: string, idx: number): boolean {
@@ -152,7 +204,57 @@ export function extractCandidates(text: string): EntityCandidate[] {
   for (const m of text.matchAll(CAP_RUN_RE)) {
     const surface = m[0];
     const idx = m.index ?? 0;
-    consider(surface, surface, !isAtSentenceStart(text, idx));
+    const midSentence = !isAtSentenceStart(text, idx);
+    consider(surface, surface, midSentence);
+
+    // Fork (2026-08-04, Cyrillic support): a sentence-start imperative glues
+    // onto the entity that follows it — "Обнови Гермес" produces one 2-token
+    // run whose full form matches no page, hiding "Гермес" entirely. (Russian
+    // capitalizes only the sentence-start word, so this shape dominates
+    // Russian agent prompts; English "Update Onfy Maestra" has the same
+    // disease.) ALSO consider the run with leading stopword/common tokens
+    // stripped — an added variant, never a replacement, so multi-token names
+    // that legitimately start with a common word ("New York") keep their full
+    // form as a candidate too. The remainder is treated as mid-sentence: the
+    // stripped opener is what carried the sentence-start position.
+    const tokens = surface.split(/\s+/);
+    if (tokens.length >= 2) {
+      let start = 0;
+      while (
+        start < tokens.length - 1 &&
+        (STOPWORDS.has(tokens[start].toLowerCase()) || COMMON_WORDS.has(tokens[start].toLowerCase()))
+      ) start++;
+      if (start > 0) {
+        const rest = tokens.slice(start).join(' ');
+        consider(rest, rest, true);
+      }
+    }
+  }
+
+  // 2b. Fork (2026-08-04): light de-inflection for single-token CYRILLIC
+  // candidates. Russian case morphology means the surface form usually isn't
+  // the nominative the page is titled/aliased with ("у Мирослава" → candidate
+  // "Мирослава", page "Мирослав"). Full stemming is out of scope; stripping
+  // ONE common case ending (longest-first, stem stays ≥4 chars) as an ADDED
+  // variant recovers the dominant patterns. A wrong guess ("Маэстра" →
+  // "Маэстр") is harmless: the variant simply matches no page, and the
+  // original candidate is never replaced. Applied to Cyrillic only — Latin
+  // possessives are already handled by stripPossessive().
+  for (const c of Array.from(acc.values())) {
+    if (c.multiToken) continue;
+    if (!/^[Ѐ-ӿ][Ѐ-ӿ'’-]*$/u.test(c.query)) continue;
+    // Never de-inflect a stopword/common opener — "Запусти" must not
+    // resurrect as candidate "Запуст" after the filter drops the original.
+    const lcQuery = c.query.toLowerCase();
+    if (STOPWORDS.has(lcQuery) || COMMON_WORDS.has(lcQuery)) continue;
+    for (const ending of CYRILLIC_CASE_ENDINGS) {
+      if (c.query.length - ending.length < 4) continue;
+      if (c.query.toLowerCase().endsWith(ending)) {
+        const stem = c.query.slice(0, c.query.length - ending.length);
+        consider(stem, stem, c.seenMidSentence);
+        break;
+      }
+    }
   }
 
   // 3. Filter for precision.
