@@ -152,6 +152,17 @@ function isPureNumber(s: string): boolean {
 }
 
 /**
+ * Fork (2026-08-05, lexicon arm): true when a single lowercase token sits on
+ * the hard/soft stop lists. The volunteer lexicon pass must not promote these
+ * even when someone seeds one as a page alias — a stoplisted token firing at
+ * alias confidence (0.9) on every mention would be exactly the push noise the
+ * precision bias exists to prevent.
+ */
+export function isStoplistedToken(tokenLc: string): boolean {
+  return STOPWORDS.has(tokenLc) || COMMON_WORDS.has(tokenLc);
+}
+
+/**
  * Extract candidate entity surface-forms from one turn's text.
  * Deterministic, precision-biased, capped at MAX_CANDIDATES. Deduped on the
  * normalizeAlias() form (so "Garry" and "garry" collapse), first display wins.

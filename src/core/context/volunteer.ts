@@ -5,6 +5,8 @@
  *   window text ─ parseWindow() ─→ turns[] ─ extractCandidatesFromWindow()
  *        │                                       (recency + frequency +
  *        │                                        user-role weights)
+ *        │        + lexicon arm: lowercase n-grams that exactly match a
+ *        │          stored alias_norm join the candidate pool
  *        ▼
  *   resolveEntitiesToPointers(sourceIds[])    alias 0.9 / title 0.8 /
  *        │                                    slug-suffix 0.6 (+0.05 boost
@@ -28,6 +30,7 @@ import type { BrainEngine } from '../engine.ts';
 import { normalizeAlias } from '../search/alias-normalize.ts';
 import {
   extractCandidatesFromWindow,
+  isStoplistedToken,
   type WindowTurn,
   type WindowEntityCandidate,
 } from './entity-salience.ts';
@@ -43,6 +46,61 @@ export const VOLUNTEER_MAX_PAGES_CAP = 5;
 export const VOLUNTEER_DEFAULT_MIN_CONFIDENCE = 0.7;
 /** Deterministic boost for ≥2-turn or newest-turn mentions. */
 export const VOLUNTEER_SALIENCE_BOOST = 0.05;
+/** Bounds for the exact-alias lowercase lexicon arm. */
+export const LEXICON_MAX_NGRAM_TOKENS = 4;
+export const LEXICON_MAX_PROBE_NORMS = 400;
+export const LEXICON_MAX_CANDIDATES = 8;
+
+interface LexiconMention {
+  display: string;
+  occurrences: number;
+  inNewestTurn: boolean;
+  userMention: boolean;
+}
+
+/**
+ * Mine lowercase 1..4-token n-grams, but admit none directly. The caller
+ * probes the page_aliases index and promotes only exact alias_norm matches.
+ * This recovers known aliases such as "z2m" and "home assistant" without
+ * broadening the precision-biased capitalized candidate extractor.
+ */
+function collectLexiconMentions(turns: WindowTurn[]): Map<string, LexiconMention> {
+  const out = new Map<string, LexiconMention>();
+  const lastIdx = turns.length - 1;
+  for (let ti = 0; ti < turns.length; ti++) {
+    const turn = turns[ti];
+    if (!turn?.text) continue;
+    const seenThisTurn = new Set<string>();
+    const tokens = turn.text
+      .split(/\s+/)
+      .map((t) => t.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, ''))
+      .filter((t) => t.length > 0);
+    for (let i = 0; i < tokens.length; i++) {
+      for (let n = 1; n <= LEXICON_MAX_NGRAM_TOKENS && i + n <= tokens.length; n++) {
+        const surface = tokens.slice(i, i + n).join(' ');
+        const norm = normalizeAlias(surface);
+        if (norm.length < 3) continue;
+        if (/^[0-9][0-9.,]*$/.test(norm)) continue;
+        if (n === 1 && isStoplistedToken(norm)) continue;
+        const existing = out.get(norm);
+        if (existing) {
+          if (!seenThisTurn.has(norm)) existing.occurrences += 1;
+          existing.inNewestTurn ||= ti === lastIdx;
+          existing.userMention ||= turn.role === 'user';
+        } else if (out.size < LEXICON_MAX_PROBE_NORMS) {
+          out.set(norm, {
+            display: surface,
+            occurrences: 1,
+            inNewestTurn: ti === lastIdx,
+            userMention: turn.role === 'user',
+          });
+        }
+        seenThisTurn.add(norm);
+      }
+    }
+  }
+  return out;
+}
 
 export interface VolunteeredPage {
   slug: string;
@@ -195,6 +253,40 @@ export async function volunteerContext(
 ): Promise<VolunteeredPage[]> {
   if (!turns.length || !opts.sourceIds?.length) return [];
   const candidates = extractCandidatesFromWindow(turns);
+
+  // Exact-alias lexicon arm for known lowercase entities. It runs before the
+  // empty-candidate return because an all-lowercase window intentionally has
+  // no candidates in the capitalized extractor. Resolver failures fail open
+  // to the existing behavior.
+  const existingNorms = candidatesByNorm(candidates);
+  const lexicon = collectLexiconMentions(turns);
+  for (const norm of existingNorms.keys()) lexicon.delete(norm);
+  if (lexicon.size) {
+    const probeNorms = Array.from(lexicon.keys());
+    const probes = await Promise.allSettled(
+      opts.sourceIds.map((sourceId) => engine.resolveAliases(probeNorms, { sourceId })),
+    );
+    const known = new Set<string>();
+    for (const result of probes) {
+      if (result.status !== 'fulfilled') continue;
+      for (const [norm, hits] of result.value) {
+        if (hits.length) known.add(norm);
+      }
+    }
+    let admitted = 0;
+    for (const [norm, mention] of lexicon) {
+      if (admitted >= LEXICON_MAX_CANDIDATES) break;
+      if (!known.has(norm)) continue;
+      candidates.push({
+        display: mention.display,
+        query: mention.display,
+        occurrences: mention.occurrences,
+        inNewestTurn: mention.inNewestTurn,
+        userMention: mention.userMention,
+      });
+      admitted++;
+    }
+  }
   if (!candidates.length) return [];
 
   // Resolve up to the hard cap so the confidence gate sees the full pool —
