@@ -182,6 +182,58 @@ describe('volunteerContext', () => {
     expect(pages[0].rationale).toContain('alias match');
   });
 
+  // Fork (2026-08-05) — lexicon arm: lowercase mentions of KNOWN aliases.
+  test('lexicon arm: all-lowercase mention of a seeded alias volunteers the page', async () => {
+    await seed('zigbee-network', 'Zigbee network hub', 'Coordinator info.');
+    await engine.setPageAliases('zigbee-network', 'default', [
+      normalizeAlias('z2m'),
+      normalizeAlias('zigbee'),
+    ]);
+    const pages = await volunteerContext(
+      engine,
+      parseWindow('user: отвалился z2m на хосте, посмотри'),
+      { sourceIds: ['default'] },
+    );
+    expect(pages.length).toBe(1);
+    expect(pages[0].slug).toBe('zigbee-network');
+    expect(pages[0].arm).toBe('alias');
+    expect(pages[0].confidence).toBeCloseTo(0.95, 5); // 0.9 + newest-turn boost
+  });
+
+  test('lexicon arm: multi-token lowercase alias matches via n-grams', async () => {
+    await seed('home-assistant-x', 'Home Assistant Hub', 'Hub page.');
+    await engine.setPageAliases('home-assistant-x', 'default', [normalizeAlias('home assistant')]);
+    const pages = await volunteerContext(
+      engine,
+      parseWindow('user: проверь home assistant на пи пожалуйста'),
+      { sourceIds: ['default'] },
+    );
+    expect(pages.length).toBe(1);
+    expect(pages[0].slug).toBe('home-assistant-x');
+    expect(pages[0].arm).toBe('alias');
+  });
+
+  test('lexicon arm: lowercase text matching NO alias stays invisible (precision)', async () => {
+    await seed('people/bob-sample', 'Bob Sample', 'Engineer.'); // page exists, no aliases
+    const pages = await volunteerContext(
+      engine,
+      parseWindow('user: bob sample ping again please'),
+      { sourceIds: ['default'] },
+    );
+    expect(pages).toEqual([]);
+  });
+
+  test('lexicon arm: stoplisted single token never volunteers even when seeded as alias', async () => {
+    await seed('notes/host-page', 'Host Page', 'A page.');
+    await engine.setPageAliases('notes/host-page', 'default', [normalizeAlias('хост')]);
+    const pages = await volunteerContext(
+      engine,
+      parseWindow('user: проверь хост пожалуйста'),
+      { sourceIds: ['default'] },
+    );
+    expect(pages).toEqual([]);
+  });
+
   test('suppression is slug-only under windowing: a prior-turn MENTION does not suppress', async () => {
     await seed('people/alice-example', 'Alice Example', 'A founder.');
     // Prior context contains the TITLE (a bare mention from an earlier turn)

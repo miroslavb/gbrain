@@ -5,6 +5,8 @@
  *   window text ─ parseWindow() ─→ turns[] ─ extractCandidatesFromWindow()
  *        │                                       (recency + frequency +
  *        │                                        user-role weights)
+ *        │        + lexicon arm (fork 2026-08-05): lowercase n-grams that
+ *        │          exactly match a stored alias_norm join the candidates
  *        ▼
  *   resolveEntitiesToPointers(sourceIds[])    alias 0.9 / title 0.8 /
  *        │                                    slug-suffix 0.6 (+0.05 boost
@@ -28,6 +30,7 @@ import type { BrainEngine } from '../engine.ts';
 import { normalizeAlias } from '../search/alias-normalize.ts';
 import {
   extractCandidatesFromWindow,
+  isStoplistedToken,
   type WindowTurn,
   type WindowEntityCandidate,
 } from './entity-salience.ts';
@@ -42,6 +45,71 @@ export const VOLUNTEER_MAX_PAGES_CAP = 5;
 export const VOLUNTEER_DEFAULT_MIN_CONFIDENCE = 0.7;
 /** Deterministic boost for ≥2-turn or newest-turn mentions. */
 export const VOLUNTEER_SALIENCE_BOOST = 0.05;
+/** Fork (2026-08-05) — lexicon-arm bounds: n-gram width, distinct norms sent
+ * to the DB membership probe per window, and lowercase candidates admitted. */
+export const LEXICON_MAX_NGRAM_TOKENS = 4;
+export const LEXICON_MAX_PROBE_NORMS = 400;
+export const LEXICON_MAX_CANDIDATES = 8;
+
+interface LexiconMention {
+  display: string;
+  occurrences: number;
+  inNewestTurn: boolean;
+  userMention: boolean;
+}
+
+/**
+ * Fork (2026-08-05) — lexicon-arm candidate mining. The Capitalized-run
+ * extractor is precision-biased and therefore lowercase-blind: an
+ * all-lowercase mention of a KNOWN entity ("z2m", "sonoff", "home assistant")
+ * never became a candidate even when a page alias existed, so the page stayed
+ * invisible to push context (the miss that hid a prior migration-research
+ * page from a live conversation). This pass mines every 1..4-token n-gram of
+ * the window and lets the DATABASE decide: an n-gram is admitted as a
+ * candidate only when it exactly equals a stored alias_norm — the same
+ * precision bar the alias arm itself applies, so push noise cannot increase.
+ * Stoplisted single tokens never qualify even if seeded (see
+ * isStoplistedToken). Occurrences count distinct turns, matching
+ * extractCandidatesFromWindow semantics.
+ */
+function collectLexiconMentions(turns: WindowTurn[]): Map<string, LexiconMention> {
+  const out = new Map<string, LexiconMention>();
+  const lastIdx = turns.length - 1;
+  for (let ti = 0; ti < turns.length; ti++) {
+    const turn = turns[ti];
+    if (!turn?.text) continue;
+    const seenThisTurn = new Set<string>();
+    // Strip edge punctuation only — internal hyphens/dots stay ("zbdongle-e").
+    const tokens = turn.text
+      .split(/\s+/)
+      .map((t) => t.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, ''))
+      .filter((t) => t.length > 0);
+    for (let i = 0; i < tokens.length; i++) {
+      for (let n = 1; n <= LEXICON_MAX_NGRAM_TOKENS && i + n <= tokens.length; n++) {
+        const surface = tokens.slice(i, i + n).join(' ');
+        const norm = normalizeAlias(surface);
+        if (norm.length < 3) continue;
+        if (/^[0-9][0-9.,]*$/.test(norm)) continue;
+        if (n === 1 && isStoplistedToken(norm)) continue;
+        const existing = out.get(norm);
+        if (existing) {
+          if (!seenThisTurn.has(norm)) existing.occurrences += 1;
+          existing.inNewestTurn = existing.inNewestTurn || ti === lastIdx;
+          existing.userMention = existing.userMention || turn.role === 'user';
+        } else if (out.size < LEXICON_MAX_PROBE_NORMS) {
+          out.set(norm, {
+            display: surface,
+            occurrences: 1,
+            inNewestTurn: ti === lastIdx,
+            userMention: turn.role === 'user',
+          });
+        }
+        seenThisTurn.add(norm);
+      }
+    }
+  }
+  return out;
+}
 
 export interface VolunteeredPage {
   slug: string;
@@ -133,12 +201,47 @@ export async function volunteerContext(
 ): Promise<VolunteeredPage[]> {
   if (!turns.length || !opts.sourceIds?.length) return [];
   const candidates = extractCandidatesFromWindow(turns);
-  if (!candidates.length) return [];
   const byNorm = new Map<string, WindowEntityCandidate>();
   for (const c of candidates) {
     const norm = normalizeAlias(c.query);
     if (norm && !byNorm.has(norm)) byNorm.set(norm, c);
   }
+
+  // Fork (2026-08-05): lexicon arm — admit all-lowercase mentions of KNOWN
+  // aliases as candidates (see collectLexiconMentions). Runs BEFORE the
+  // no-candidates early return: an all-lowercase window has zero Capitalized
+  // candidates yet may still name a seeded entity. Fail-open — a resolver
+  // error (e.g. pre-v110 brain without page_aliases) degrades to the
+  // Capitalized-only behavior.
+  const lexicon = collectLexiconMentions(turns);
+  for (const norm of byNorm.keys()) lexicon.delete(norm);
+  if (lexicon.size) {
+    const probeNorms = Array.from(lexicon.keys());
+    const probes = await Promise.allSettled(
+      opts.sourceIds.map((src) => engine.resolveAliases(probeNorms, { sourceId: src })),
+    );
+    const known = new Set<string>();
+    for (const r of probes) {
+      if (r.status !== 'fulfilled') continue;
+      for (const [norm, hits] of r.value) if (hits.length) known.add(norm);
+    }
+    let admitted = 0;
+    for (const [norm, m] of lexicon) {
+      if (admitted >= LEXICON_MAX_CANDIDATES) break;
+      if (!known.has(norm)) continue;
+      const cand: WindowEntityCandidate = {
+        display: m.display,
+        query: m.display,
+        occurrences: m.occurrences,
+        inNewestTurn: m.inNewestTurn,
+        userMention: m.userMention,
+      };
+      candidates.push(cand);
+      byNorm.set(norm, cand);
+      admitted++;
+    }
+  }
+  if (!candidates.length) return [];
 
   const maxPages = clampMaxPages(opts.maxPages);
   const minConfidence =
