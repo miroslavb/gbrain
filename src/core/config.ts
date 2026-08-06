@@ -1036,6 +1036,12 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // didn't specify one: 'private' (default) | 'world'. Resolved by
   // src/core/facts/visibility.ts; explicit caller values always win.
   'facts.default_visibility',
+  // Operator-set system-prompt appendix for the facts extractor (e.g. a
+  // durable-vs-ephemeral rubric for agent work-session transcripts).
+  'facts.extraction_prompt_appendix',
+  // Kill-switch for the deterministic junk gate on extracted fact text
+  // (plan narration / provider error strings / meta-chatter). Default on.
+  'facts.extraction_junk_filter',
   // Conversation parser LLM fallback. Deliberately register the exact key,
   // not a conversation_parser.* prefix: fallback is the only live opt-in
   // consumer, while the polish scaffold remains unwired.
