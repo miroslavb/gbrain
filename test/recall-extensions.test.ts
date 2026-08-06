@@ -109,6 +109,40 @@ describe('countUnconsolidatedFacts', () => {
   });
 });
 
+describe('fact grep is applied before the row limit', () => {
+  test('finds an older matching fact outside the newest-N window', async () => {
+    await engine.insertFact(
+      {
+        fact: 'durable needle fact',
+        kind: 'fact',
+        entity_slug: 'hosts/example-node',
+        source: 'unit',
+        valid_from: new Date('2020-01-01T00:00:00Z'),
+      },
+      { source_id: 'default' },
+    );
+    for (let i = 0; i < 4; i++) {
+      await engine.insertFact(
+        {
+          fact: `newer unrelated fact ${i}`,
+          kind: 'fact',
+          entity_slug: 'hosts/example-node',
+          source: 'unit',
+          valid_from: new Date(`2021-01-0${i + 1}T00:00:00Z`),
+        },
+        { source_id: 'default' },
+      );
+    }
+
+    const rows = await engine.listFactsByEntity('default', 'hosts/example-node', {
+      limit: 2,
+      grep: 'NEEDLE',
+    });
+
+    expect(rows.map((row) => row.fact)).toEqual(['durable needle fact']);
+  });
+});
+
 describe('recall-cursor-state file helper', () => {
   test('missing file returns null (first-run case)', async () => {
     const tmpHome = makeTmpHome();

@@ -4598,7 +4598,7 @@ const recall: Operation = {
     include_expired: { type: 'boolean', description: 'When true, include expired_at IS NOT NULL rows. Default false.' },
     supersessions: { type: 'boolean', description: 'When true, return only the supersession audit log (expired_at + superseded_by both set).' },
     limit: { type: 'number', description: 'Per-arm cap: max fact rows AND max search results. Default 50, cap 100.' },
-    grep: { type: 'string', description: 'Substring filter on fact text (case-insensitive). Applied client-side after recall.' },
+    grep: { type: 'string', description: 'Substring filter on fact text (case-insensitive). Applied in SQL before the fact-row limit, so matches on high-cardinality entities are found even outside the newest-N window.' },
     include_pending: { type: 'boolean', description: 'v0.32: when true, response includes pending_consolidation_count (facts not yet promoted to takes by the dream-cycle consolidate phase). One round trip; backward-compatible (field omitted when false).' },
   },
   scope: 'read',
@@ -4630,12 +4630,14 @@ const recall: Operation = {
         activeOnly: !includeExpired,
         limit,
         visibility,
+        grep: grep ?? undefined,
       });
     } else if (typeof p.session_id === 'string' && p.session_id.length > 0) {
       rows = await ctx.engine.listFactsBySession(sourceId, p.session_id, {
         activeOnly: !includeExpired,
         limit,
         visibility,
+        grep: grep ?? undefined,
       });
     } else if (p.since !== undefined) {
       const since = parseSinceParam(p.since);
@@ -4644,6 +4646,7 @@ const recall: Operation = {
           activeOnly: !includeExpired,
           limit,
           visibility,
+          grep: grep ?? undefined,
         });
       }
     } else {
@@ -4652,10 +4655,15 @@ const recall: Operation = {
         activeOnly: !includeExpired,
         limit,
         visibility,
+        grep: grep ?? undefined,
       });
     }
 
-    if (grep) rows = rows.filter(r => r.fact.toLowerCase().includes(grep));
+    // Engines apply grep in SQL (pre-limit). This client-side pass stays only
+    // as the filter for the supersessions branch, which bypasses FactListOpts.
+    if (grep && p.supersessions === true) {
+      rows = rows.filter(r => r.fact.toLowerCase().includes(grep));
+    }
 
     // v0.32: optional pending-consolidation count piggy-backed on the recall
     // response. Single round trip on thin-client; omitted when not requested

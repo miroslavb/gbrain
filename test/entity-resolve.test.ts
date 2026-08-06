@@ -42,6 +42,7 @@ beforeAll(async () => {
     { slug: 'companies/stripe', title: 'Stripe', type: 'company' },
     { slug: 'companies/stripe-atlas', title: 'Stripe Atlas', type: 'company' },
     { slug: 'companies/benton-capital', title: 'Benton Capital', type: 'company' },
+    { slug: 'hosts/hive', title: 'Compute Node Cluster', type: 'host' },
   ];
 
   for (const p of pages) {
@@ -127,6 +128,11 @@ describe('resolveEntitySlug — prefix expansion', () => {
   it('resolves "Dave" to people/dave-example (single match)', async () => {
     const result = await resolveEntitySlug(engine as unknown as BrainEngine, 'default', 'Dave');
     expect(result).toBe('people/dave-example');
+  });
+
+  it('resolves a bare infra token to its canonical hosts/<token> page', async () => {
+    const result = await resolveEntitySlug(engine as unknown as BrainEngine, 'default', 'hive');
+    expect(result).toBe('hosts/hive');
   });
 
   it('falls through to slugify for unknown names', async () => {
