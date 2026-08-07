@@ -3201,10 +3201,13 @@ export function toAISDKTools(tools: ChatToolDef[] | undefined): Record<string, a
  * 2026-07-28 (fork): make `chat_fallback_chain` LIVE. Upstream shipped the
  * config field ("plumbed for chatWithFallback(), commit 3") but never landed
  * the walker — the chain was a dead knob. This wrapper retries `chatOnce`
- * against each chain entry on transport/provider failure. Never falls back on:
+ * against each chain entry only after the previous provider is known not to
+ * have consumed usage. Never falls back on:
  *   - BudgetExhausted (cost ceiling is a hard stop, not a provider fault)
  *   - AbortError (caller cancelled)
  *   - guardrail blocks (safety decision, not availability)
+ *   - non-zero, partial, or unavailable provider usage (a duplicate request
+ *     could otherwise bill two providers after a timeout or lost response)
  */
 function fallbackEligible(err: unknown): boolean {
   const name = (err as Error)?.constructor?.name ?? '';
@@ -3212,6 +3215,65 @@ function fallbackEligible(err: unknown): boolean {
   if (name === 'BudgetExhausted' || name === 'AbortError') return false;
   if (name.toLowerCase().includes('guardrail') || msg.toLowerCase().includes('guardrail')) return false;
   return true;
+}
+
+type FailedAttemptUsage =
+  | { state: 'absent' }
+  | { state: 'partial' }
+  | { state: 'complete'; inputTokens: number; outputTokens: number };
+
+/**
+ * Read explicit provider usage without inventing missing values. This is
+ * deliberately stricter than `extractUsageFromError()`: that helper supplies
+ * a pessimistic ceiling for *accounting*, whereas a fallback decision must
+ * never mistake an unknown charge for zero usage.
+ */
+function explicitFailedAttemptUsage(err: unknown): FailedAttemptUsage {
+  if (!err || typeof err !== 'object') return { state: 'absent' };
+  const top = (err as { usage?: unknown }).usage;
+  const nested = (err as { response?: { usage?: unknown } }).response?.usage;
+  const candidate = (top && typeof top === 'object' ? top : nested && typeof nested === 'object' ? nested : null) as
+    | { input_tokens?: unknown; output_tokens?: unknown; inputTokens?: unknown; outputTokens?: unknown }
+    | null;
+  if (!candidate) return { state: 'absent' };
+
+  const input = candidate.input_tokens ?? candidate.inputTokens;
+  const output = candidate.output_tokens ?? candidate.outputTokens;
+  if (typeof input !== 'number' || !Number.isFinite(input) ||
+      typeof output !== 'number' || !Number.isFinite(output)) {
+    return { state: 'partial' };
+  }
+  return { state: 'complete', inputTokens: input, outputTokens: output };
+}
+
+/**
+ * A provider rejection with HTTP 429 occurs before generation begins, so it is
+ * safe to try the next configured provider. Everything else must carry an
+ * explicit `0/0` usage payload; a timeout, 5xx, broken stream, or malformed
+ * response is billing-ambiguous and therefore fails closed.
+ */
+function failedAttemptHasConfirmedZeroUsage(err: unknown): boolean {
+  const seen = new Set<object>();
+  let current: unknown = err;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const usage = explicitFailedAttemptUsage(current);
+    if (usage.state === 'complete') {
+      return usage.inputTokens === 0 && usage.outputTokens === 0;
+    }
+    if (usage.state === 'partial') return false;
+
+    const error = current as {
+      status?: unknown;
+      statusCode?: unknown;
+      response?: { status?: unknown };
+      cause?: unknown;
+    };
+    const status = error.status ?? error.statusCode ?? error.response?.status;
+    if (status === 429) return true;
+    current = error.cause;
+  }
+  return false;
 }
 
 export async function chat(opts: ChatOpts): Promise<ChatResult> {
@@ -3222,15 +3284,24 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
     const requested = opts.model ?? getChatModel();
     const chain = getChatFallbackChain().filter((m) => m !== requested);
     let lastErr: unknown = err;
+    let attempted = requested;
     for (const fb of chain) {
+      if (!failedAttemptHasConfirmedZeroUsage(lastErr)) {
+        console.warn(
+          `[gateway.chat] model "${attempted}" failed (${(lastErr as Error)?.message ?? lastErr}); ` +
+          'refusing fallback because provider usage is non-zero or unknown',
+        );
+        throw lastErr;
+      }
       console.warn(
-        `[gateway.chat] model "${requested}" failed (${(lastErr as Error)?.message ?? lastErr}); falling back to "${fb}"`,
+        `[gateway.chat] model "${attempted}" failed (${(lastErr as Error)?.message ?? lastErr}); falling back to "${fb}"`,
       );
       try {
         return await chatOnce({ ...opts, model: fb });
       } catch (e2) {
         if (!fallbackEligible(e2)) throw e2;
         lastErr = e2;
+        attempted = fb;
       }
     }
     throw lastErr;

@@ -26,6 +26,7 @@ import {
   recipeSupportsStructuredOutputs,
   parseExpansionResponse,
   chat,
+  __setChatTransportForTests,
   __setGenerateTextTransportForTests,
 } from '../../src/core/ai/gateway.ts';
 import { parseModelId, resolveRecipe, assertTouchpoint } from '../../src/core/ai/model-resolver.ts';
@@ -280,6 +281,164 @@ describe('chat touchpoint — chat() smoke + stop-reason mapping (Codex D8)', ()
     // body is just a runtime touch.
     const mod = await import('../../src/core/ai/gateway.ts');
     expect(mod).toBeDefined();
+  });
+});
+
+describe('chat fallback — billing-safe usage gate', () => {
+  const primary = 'anthropic:claude-sonnet-4-6';
+  const codex = 'openai:gpt-5.6-terra';
+  const lastResort = 'together:deepseek-v4-flash';
+
+  beforeEach(() => {
+    resetGateway();
+    __setChatTransportForTests(null);
+    configureGateway({
+      chat_model: primary,
+      chat_fallback_chain: [codex, lastResort],
+      env: {},
+    });
+  });
+
+  const success = (model: string) => ({
+    text: 'ok',
+    blocks: [],
+    stopReason: 'end' as const,
+    usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 },
+    model,
+    providerId: 'test',
+  });
+
+  const run = () => chat({ messages: [{ role: 'user', content: 'hello' }] });
+
+  test('continues after an explicit zero-usage failure', async () => {
+    const attempts: string[] = [];
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? primary;
+      attempts.push(model);
+      if (model === primary) {
+        throw Object.assign(new Error('provider rejected before generation'), {
+          usage: { input_tokens: 0, output_tokens: 0 },
+        });
+      }
+      return success(model);
+    });
+
+    await expect(run()).resolves.toMatchObject({ model: codex });
+    expect(attempts).toEqual([primary, codex]);
+  });
+
+  test('continues after a rate-limit rejection without usage metadata', async () => {
+    const attempts: string[] = [];
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? primary;
+      attempts.push(model);
+      if (model === primary) throw Object.assign(new Error('rate limited'), { status: 429 });
+      return success(model);
+    });
+
+    await expect(run()).resolves.toMatchObject({ model: codex });
+    expect(attempts).toEqual([primary, codex]);
+  });
+
+  test('reads confirmed zero usage through the production error wrapper', async () => {
+    __setChatTransportForTests(null);
+    configureGateway({
+      chat_model: primary,
+      chat_fallback_chain: [codex],
+      env: { ANTHROPIC_API_KEY: 'fake', OPENAI_API_KEY: 'fake' },
+    });
+    let attempts = 0;
+    __setGenerateTextTransportForTests(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error('provider rejected before generation'), {
+          usage: { input_tokens: 0, output_tokens: 0 },
+        });
+      }
+      return {
+        content: [{ type: 'text', text: 'ok' }],
+        finishReason: 'stop',
+        usage: { inputTokens: 1, outputTokens: 1 },
+      } as any;
+    });
+
+    await expect(run()).resolves.toMatchObject({ model: codex });
+    expect(attempts).toBe(2);
+  });
+
+  test('refuses every fallback after non-zero provider usage', async () => {
+    const attempts: string[] = [];
+    const spent = Object.assign(new Error('response lost after generation'), {
+      usage: { input_tokens: 12, output_tokens: 1 },
+    });
+    __setChatTransportForTests(async (opts) => {
+      attempts.push(opts.model ?? primary);
+      throw spent;
+    });
+
+    await expect(run()).rejects.toBe(spent);
+    expect(attempts).toEqual([primary]);
+  });
+
+  test('refuses every fallback when provider usage is unavailable', async () => {
+    const attempts: string[] = [];
+    const timeout = new Error('The operation timed out');
+    __setChatTransportForTests(async (opts) => {
+      attempts.push(opts.model ?? primary);
+      throw timeout;
+    });
+
+    await expect(run()).rejects.toBe(timeout);
+    expect(attempts).toEqual([primary]);
+  });
+
+  test('fails closed after a normalized transport timeout', async () => {
+    __setChatTransportForTests(null);
+    configureGateway({
+      chat_model: primary,
+      chat_fallback_chain: [codex],
+      env: { ANTHROPIC_API_KEY: 'fake', OPENAI_API_KEY: 'fake' },
+    });
+    let attempts = 0;
+    __setGenerateTextTransportForTests(async () => {
+      attempts += 1;
+      throw new Error('The operation timed out');
+    });
+
+    await expect(run()).rejects.toThrow('The operation timed out');
+    expect(attempts).toBe(1);
+  });
+
+  test('never reaches the last resort when Codex usage is unknown', async () => {
+    const attempts: string[] = [];
+    const timeout = new Error('The operation timed out');
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? primary;
+      attempts.push(model);
+      if (model === primary) throw Object.assign(new Error('rate limited'), { status: 429 });
+      if (model === codex) throw timeout;
+      return success(model);
+    });
+
+    await expect(run()).rejects.toBe(timeout);
+    expect(attempts).toEqual([primary, codex]);
+  });
+
+  test('reaches the last resort only after both prior attempts confirm zero usage', async () => {
+    const attempts: string[] = [];
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? primary;
+      attempts.push(model);
+      if (model !== lastResort) {
+        throw Object.assign(new Error('provider rejected before generation'), {
+          usage: { input_tokens: 0, output_tokens: 0 },
+        });
+      }
+      return success(model);
+    });
+
+    await expect(run()).resolves.toMatchObject({ model: lastResort });
+    expect(attempts).toEqual([primary, codex, lastResort]);
   });
 });
 

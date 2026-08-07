@@ -69,6 +69,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
+- **Chat fallback safety:** a failed chat attempt may advance to the next
+  provider only after explicit `input_tokens: 0` and `output_tokens: 0`, or an
+  HTTP `429` rejection before generation. Partial/missing usage, timeouts,
+  5xx responses, and broken streams are billing-ambiguous and must fail closed.
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes` (manual schema-only).
