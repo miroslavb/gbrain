@@ -76,6 +76,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes` (manual schema-only).
+  Downstream forks must rebase in an isolated worktree, migrate any superseded
+  file-plane knobs to their upstream DB-plane equivalents before removing the
+  compatibility shim, and verify the effective value after service restart.
 - **Eval retrieval changes:** capture is off by default. To benchmark a
   retrieval change against real captured queries, set
   `GBRAIN_CONTRIBUTOR_MODE=1`, then `gbrain eval export --since 7d > base.ndjson`

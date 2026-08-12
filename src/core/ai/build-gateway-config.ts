@@ -66,7 +66,7 @@ export function buildGatewayConfig(c: GBrainConfig): AIGatewayConfig {
   // FORK (a7c71359): same fold for litellm / together proxy keys — this brain's
   // chat stack runs on together:(Ollama Cloud) + litellm:(t06); without the fold,
   // daemon/MCP contexts go out unauthenticated. process.env still wins later.
-  const cAny = c as Record<string, unknown>;
+  const cAny = c as unknown as Record<string, unknown>;
   if (typeof cAny.litellm_api_key === 'string') envFromConfig.LITELLM_API_KEY = cAny.litellm_api_key;
   if (typeof cAny.together_api_key === 'string') envFromConfig.TOGETHER_API_KEY = cAny.together_api_key;
 
