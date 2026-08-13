@@ -81,7 +81,7 @@ describe('contextual synopsis model resolution', () => {
     });
   });
 
-  test('uses the canonical precedence and utility tier keeps caller fallback unreachable', async () => {
+  test('uses downstream precedence and utility tier keeps caller fallback unreachable', async () => {
     const engine = new StubConfigEngine();
     engine.set('models.contextual_synopsis', 'codex-proxy:new-key');
     engine.set('contextual_retrieval.haiku_model', 'codex-proxy:deprecated-key');
@@ -102,15 +102,15 @@ describe('contextual synopsis model resolution', () => {
 
       engine.unset('contextual_retrieval.haiku_model');
       expect(await resolveContextualSynopsisModel(engine as never)).toBe(
-        'codex-proxy:global-default',
-      );
-
-      engine.unset('models.default');
-      expect(await resolveContextualSynopsisModel(engine as never)).toBe(
         'codex-proxy:utility-tier',
       );
 
       engine.unset('models.tier.utility');
+      expect(await resolveContextualSynopsisModel(engine as never)).toBe(
+        'codex-proxy:global-default',
+      );
+
+      engine.unset('models.default');
       expect(await resolveContextualSynopsisModel(engine as never)).toBe(
         'codex-proxy:env-model',
       );

@@ -24,6 +24,7 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:tes
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
 import type { ChunkInput } from '../src/core/types.ts';
@@ -34,7 +35,17 @@ import type { ChunkInput } from '../src/core/types.ts';
 
 let engine: PGLiteEngine;
 
+const QRELS_EMBEDDING_DIMENSIONS = 1536;
+
 beforeAll(async () => {
+  // The qrels fixture below emits fixed-width basis vectors. Pin the matching
+  // schema locally instead of inheriting whichever process-global gateway a
+  // previous file left behind in this Bun shard.
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: QRELS_EMBEDDING_DIMENSIONS,
+    env: {},
+  });
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
@@ -42,6 +53,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await engine.disconnect();
+  resetGateway();
 });
 
 beforeEach(async () => {
@@ -73,7 +85,7 @@ function loadFixture(): QrelFixture {
 }
 
 /** Basis vector with 1.0 at `idx` and 0.0 elsewhere. Mirrors search-quality.test.ts. */
-function basisEmbedding(idx: number, dim = 1536): Float32Array {
+function basisEmbedding(idx: number, dim = QRELS_EMBEDDING_DIMENSIONS): Float32Array {
   const emb = new Float32Array(dim);
   emb[idx % dim] = 1.0;
   return emb;

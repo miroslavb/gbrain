@@ -147,14 +147,14 @@ describe('resolveModel — 6-tier precedence', () => {
 });
 
 describe('resolveModel — v0.31.12 tier system', () => {
-  test('models.default beats tier override', async () => {
+  test('tier override beats models.default because it is more specific', async () => {
     stub.set('models.default', 'opus');
     stub.set('models.tier.reasoning', 'haiku');
     const m = await resolveModel(stub as never, {
       tier: 'reasoning',
       fallback: 'sonnet',
     });
-    expect(m).toBe(DEFAULT_ALIASES.opus);
+    expect(m).toBe(DEFAULT_ALIASES.haiku);
   });
 
   test('models.tier.<tier> beats env + fallback', async () => {

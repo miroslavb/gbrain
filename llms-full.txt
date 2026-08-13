@@ -154,6 +154,16 @@ use generic placeholders (`alice-example`, `acme-example`, `fund-a`).
 If you are a fork, regenerate `llms.txt` + `llms-full.txt` with your own URL base before
 publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork/main bun run build:llms`.
 
+This downstream fork intentionally differs from upstream in two runtime contracts:
+
+- A zero-config brain uses the local `bge-m3` embedding label at 1024 dimensions,
+  matching the deployment's single-model index rather than upstream's hosted default.
+- `models.tier.<tier>` overrides `models.default`; the per-tier setting is more
+  specific and must remain reachable when a global default is configured.
+
+When rebasing, preserve both contracts and update inherited default/precedence tests
+instead of restoring upstream-only expectations.
+
 ---
 
 ## CLAUDE.md

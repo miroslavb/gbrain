@@ -1,12 +1,18 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterAll } from 'bun:test';
 import { versionRoot, maybeAttachVersionSuffixHint } from '../src/core/ai/base-url-probe.ts';
 import {
   probeModel,
   probeEmbeddingReachability,
   probeRerankerReachability,
 } from '../src/commands/models.ts';
-import { configureGateway } from '../src/core/ai/gateway.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import type { AIGatewayConfig } from '../src/core/ai/types.ts';
+
+// This file configures the process-global gateway in embedding probe tests.
+// Restore the bunfig preload baseline for whichever test file the shard runs
+// next; otherwise a model-only config falls back to the downstream 1024d
+// default and can make a sibling's 1536d PGLite fixture order-dependent.
+afterAll(() => resetGateway());
 
 /**
  * `gbrain models doctor` — the openai-compatible-proxy base-URL classifier.

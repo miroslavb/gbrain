@@ -27,6 +27,9 @@ function run(args: string[]): { exitCode: number; stdout: string; stderr: string
   // won't if any env var fallback is set (src/core/config.ts:30). Tests
   // that seed their own config use freshHomeWithConfig() below.
   const env = { ...process.env, HOME: tmp } as Record<string, string | undefined>;
+  // GBRAIN_HOME outranks HOME in configDir(); inheriting the outer test
+  // runner's override would make this subprocess ignore the temp fixture.
+  delete env.GBRAIN_HOME;
   delete env.DATABASE_URL;
   delete env.GBRAIN_DATABASE_URL;
   try {
