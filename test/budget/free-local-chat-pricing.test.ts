@@ -40,6 +40,12 @@ describe('free local chat providers under a cost cap', () => {
     expect(() => t.reserve(est('litellm:gpt-5.4'))).toThrow(BudgetExhausted);
   });
 
+  test('an exact operator-owned LiteLLM route may reserve at $0', () => {
+    const t = new BudgetTracker({ maxCostUsd: 0.3, label: 'test' });
+    expect(() => t.reserve(est('litellm:local-qwen2.5-7b'))).not.toThrow();
+    expect(t.totalSpent).toBe(0);
+  });
+
   test('priced models are unaffected — real cost still projected', () => {
     const t = new BudgetTracker({ maxCostUsd: 0.3, label: 'test' });
     expect(() => t.reserve(est('anthropic:claude-haiku-4-5'))).not.toThrow();

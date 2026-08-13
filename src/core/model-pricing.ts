@@ -120,8 +120,6 @@ export const CANONICAL_PRICING: Record<string, ModelPricing> = {
   'together:deepseek-v4-flash':           { input:  0.30, output:  0.60 },
   'together:deepseek-v4-pro':             { input:  1.20, output:  2.40 },
   'together:glm-5.2':                     { input:  1.00, output:  2.00 },
-  // t06 LiteLLM local qwen — genuinely free (self-hosted, no metering).
-  'litellm:local-qwen2.5-7b':             { input:  0.00, output:  0.00 },
 };
 
 /**

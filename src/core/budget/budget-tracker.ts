@@ -178,6 +178,17 @@ const FREE_LOCAL_CHAT_PROVIDERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Exact LiteLLM routes that this deployment owns and knows are self-hosted.
+ *
+ * LiteLLM cannot be treated as a free provider in general: the proxy may front
+ * a paid remote model. Keep zero-cost exceptions model-exact and outside
+ * CANONICAL_PRICING, whose contract is positive external token rates only.
+ */
+const FREE_LOCAL_CHAT_MODELS: ReadonlySet<string> = new Set([
+  'litellm:local-qwen2.5-7b',
+]);
+
+/**
  * Look up `modelId` in the chat or embedding pricing maps. Returns a
  * per-1M-token price tuple, or null when unknown.
  *
@@ -241,6 +252,9 @@ function lookupPricing(modelId: string, kind: BudgetKind): ModelPricing | null {
   // above is only the bare-keyed Claude view.
   const canon = canonicalLookup(modelId);
   if (canon) return canon;
+  if (kind === 'chat' && FREE_LOCAL_CHAT_MODELS.has(modelId)) {
+    return { input: 0, output: 0 };
+  }
   // Local-inference chat providers cost electricity, not tokens. Checked AFTER
   // the canonical table so an explicitly-priced local entry, should one ever be
   // added, still wins over the blanket zero.
