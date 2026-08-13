@@ -46,7 +46,7 @@ describe('isJunkFact — passes durable operational knowledge', () => {
     'Correct model name is xiaomi/mimo-v2-pro, not xiaomi/mimo-2-pro',
     'Bug in gateway/session.py line 812: float unix timestamp compared to datetime',
     'User prefers detached nohup jobs over run_in_background',
-    'Ilya decided to migrate hermes to the NUC host',
+    'alice-example decided to migrate the agent runtime to the NUC host',
     // Near-miss phrasings that must NOT trip the narrow patterns.
     'Nowadays the pipeline only uses port 4000 for hive inference',
     'Rate limiting is implemented via a token bucket in middleware.py',

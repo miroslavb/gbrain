@@ -16,7 +16,7 @@ import { describe, test, beforeAll, afterAll, beforeEach } from 'bun:test';
 import fc from 'fast-check';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { validateUploadPath } from '../../src/core/operations.ts';
 
@@ -47,7 +47,7 @@ describe('validateUploadPath fuzz (fs-backed)', () => {
     fc.assert(
       fc.property(fc.string({ minLength: 0, maxLength: 200 }), (relPath) => {
         try {
-          validateUploadPath(confinementDir, relPath);
+          validateUploadPath(resolve(confinementDir, relPath), confinementDir);
         } catch {
           /* throwing is the expected behavior for traversal / invalid input */
         }
@@ -75,7 +75,7 @@ describe('validateUploadPath fuzz (fs-backed)', () => {
       fc.property(traversalProbe, (probe) => {
         let threw = false;
         try {
-          validateUploadPath(confinementDir, probe);
+          validateUploadPath(resolve(confinementDir, probe), confinementDir);
         } catch {
           threw = true;
         }
@@ -114,7 +114,7 @@ describe('validateUploadPath fuzz (fs-backed)', () => {
       symlinkSync(tmpdir(), linkPath);
       let threw = false;
       try {
-        validateUploadPath(confinementDir, 'evil-link');
+        validateUploadPath(linkPath, confinementDir);
       } catch {
         threw = true;
       }
