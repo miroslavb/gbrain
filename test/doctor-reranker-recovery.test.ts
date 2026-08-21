@@ -40,7 +40,7 @@ describe('reranker doctor recovery evidence', () => {
           recovered: true,
         });
         expect(check.details?.newest_failure_timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-        expect(check.message).toContain('current probe reachable');
+        expect(check.message).toContain('Current probe is reachable');
       });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

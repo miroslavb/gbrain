@@ -1801,7 +1801,7 @@ export async function checkRerankerHealth(
         name: 'reranker_health',
         status: 'warn',
         message: `${inputFails.length} reranker input-too-large failure(s) in last 7 days. ` +
-          `${recovered ? 'The current probe reachable; this is historical/recovered evidence. ' : ''}` +
+          `${recovered ? 'Current probe is reachable; this is historical/recovered evidence. ' : ''}` +
           'Fix: align llama.cpp --ctx-size and both -b/-ub with the longest admitted candidate, or split/cap the input.',
         details: {
           newest_failure_timestamp: newest.ts,
