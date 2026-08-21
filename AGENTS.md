@@ -84,6 +84,13 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   not join independent claims with conjunctions/semicolons/lists. For
   substantive sources (≥500 chars), the parser enforces these rules and rejects
   unsupported causation/generalization/quantities rather than paraphrasing them.
+  Before any atom write, a deterministic scanner rejects IP/email/phone,
+  credential/token, private-path, secret-URL, and configured-pattern content;
+  surviving candidates pass one batched semantic gate for source support,
+  exactly-one-claim atomicity, self-containedness, hidden causation or
+  overgeneralization, and sensitivity. Invalid JSON/timeout/validator failure
+  rejects that batch fail-closed without deleting earlier atoms. Receipts expose
+  only counts/reason codes and actual model/route, never matched text.
   Keep `autopilot.auto_drain.enabled=false` until a fresh blinded quality sample
   passes the agreed support/atomicity thresholds.
 - **Take proposal producer containment:** `cycle.propose_takes.enabled=false` is

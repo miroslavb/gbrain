@@ -57,9 +57,22 @@ import { writeReceipt } from '../extract/receipt-writer.ts';
 import { upsertExtractRollup } from '../extract/rollup-writer.ts';
 import { createHash } from 'crypto';
 import { slugifySegment } from '../sync.ts';
+import {
+  AtomSemanticValidationError,
+  createGatewayAtomSemanticValidator,
+  parseAtomSemanticResponse,
+  parseConfiguredSensitivePatterns,
+  scanAtomCandidate,
+  semanticRejectionReasons,
+  type AtomSemanticBatchResult,
+  type AtomSemanticValidator,
+} from './atom-safety.ts';
 
 const DEFAULT_BUDGET_USD = 0.3;
 const DEFAULT_EXTRACT_ATOMS_MODEL = 'anthropic:claude-haiku-4-5';
+const DEFAULT_ATOM_VALIDATOR_MODEL = 'anthropic:claude-haiku-4-5';
+const DEFAULT_ATOM_VALIDATOR_TIMEOUT_MS = 30_000;
+const MAX_DRY_RUN_WORK_ITEMS = 10;
 
 // v0.42+ TODO: read atom_type enum from active pack manifest at runtime.
 const ATOM_TYPES = [
@@ -133,6 +146,10 @@ export interface ExtractAtomsOpts {
   affectedSlugs?: string[];
   /** Test seam: alternative chat function (bypasses real LLM calls). */
   _chat?: typeof gatewayChat;
+  /** Test seam: batched semantic pre-write validator. Production uses gatewayChat. */
+  _semanticValidator?: AtomSemanticValidator;
+  /** Test seam for the fail-closed wall-clock wrapper around injected validators. */
+  _semanticTimeoutMs?: number;
   /**
    * Test seam: alternative config loader. Sync OR async — extended in
    * v0.41.2.1 to allow loadConfigWithEngine() (async) to be the default.
@@ -426,6 +443,27 @@ export async function atomsExistingForHashes(
   }
 }
 
+async function runSemanticValidatorBounded(
+  validator: AtomSemanticValidator,
+  input: Parameters<AtomSemanticValidator>[0],
+  timeoutMs: number,
+): Promise<AtomSemanticBatchResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      validator(input),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new AtomSemanticValidationError('timeout')),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * v0.41 minimal extract_atoms body, rebuilt for v0.41.2.1.
  *
@@ -550,6 +588,8 @@ export async function runPhaseExtractAtoms(
     if (i < pageItems.length) work.push(pageItems[i]);
     if (i < transcriptItems.length) work.push(transcriptItems[i]);
   }
+  const boundedWork = opts.dryRun ? work.slice(0, MAX_DRY_RUN_WORK_ITEMS) : work;
+  const dryRunOmittedItems = work.length - boundedWork.length;
 
   // Phase-level no-op: nothing to extract today.
   if (work.length === 0 && transcripts.length === 0 && pages.length === 0) {
@@ -568,10 +608,18 @@ export async function runPhaseExtractAtoms(
         pages_processed: 0,
         pages_total: 0,
         duplicates_skipped: 0,
+        candidates: 0,
+        accepted: 0,
+        rejected: 0,
+        rejected_by_reason: {},
         failures: [],
         estimated_spend_usd: 0,
         budget_usd: DEFAULT_BUDGET_USD,
         dry_run: opts.dryRun ?? false,
+        dry_run_limit: opts.dryRun ? MAX_DRY_RUN_WORK_ITEMS : null,
+        dry_run_omitted_items: 0,
+        actual_models: { extraction: [], semantic_validator: [] },
+        actual_routes: { extraction: [], semantic_validator: [] },
       },
     };
   }
@@ -582,14 +630,29 @@ export async function runPhaseExtractAtoms(
   let pagesProcessed = 0;
   let transcriptsSkipped = 0;
   let pagesSkipped = 0;
-  const failures: Array<{ source: string; error: string }> = [];
+  const failures: Array<{ reason: string }> = [];
+  let candidatesCount = 0;
+  let acceptedCount = 0;
+  let rejectedCount = 0;
+  const rejectedByReason: Record<string, number> = {};
+  const extractionActualModels = new Set<string>();
+  const extractionActualRoutes = new Set<string>();
+  const validatorActualModels = new Set<string>();
+  const validatorActualRoutes = new Set<string>();
   let estimatedSpendUsd = 0;
   let budgetExhausted = false;
   let extractModel = DEFAULT_EXTRACT_ATOMS_MODEL;
+  let validatorModel = DEFAULT_ATOM_VALIDATOR_MODEL;
   let budgetCap = DEFAULT_BUDGET_USD;
+  let sensitivePatternConfig = parseConfiguredSensitivePatterns(null);
   try {
     const configuredModel = await engine.getConfig('models.dream.extract_atoms');
     if (configuredModel) extractModel = configuredModel;
+    const configuredValidatorModel = await engine.getConfig('models.dream.extract_atoms_validator');
+    if (configuredValidatorModel) validatorModel = configuredValidatorModel;
+    sensitivePatternConfig = parseConfiguredSensitivePatterns(
+      await engine.getConfig('cycle.extract_atoms.sensitive_patterns'),
+    );
     const configuredBudget = await engine.getConfig('cycle.extract_atoms.budget_usd');
     if (configuredBudget) {
       const n = Number(configuredBudget);
@@ -615,6 +678,34 @@ export async function runPhaseExtractAtoms(
     maxCostUsd: priceable ? budgetCap : undefined,
     label: 'cycle.extract_atoms',
   });
+  const semanticTimeoutMs = opts._semanticTimeoutMs ?? DEFAULT_ATOM_VALIDATOR_TIMEOUT_MS;
+  const injectedChatPassThrough: AtomSemanticValidator | undefined = opts._chat && !opts._semanticValidator
+    ? async ({ candidates }) => ({
+        verdicts: candidates.map((_, index) => ({
+          index,
+          scores: {
+            source_support: 1,
+            exactly_one_claim: 1,
+            self_contained: 1,
+            no_hidden_causation_or_overgeneralization: 1,
+            no_sensitive_content: 1,
+          },
+        })),
+        actualModel: 'test:injected-chat',
+        route: 'test',
+      })
+    : undefined;
+  const semanticValidator = opts._semanticValidator ?? injectedChatPassThrough ?? createGatewayAtomSemanticValidator({
+    chat,
+    model: validatorModel,
+    timeoutMs: semanticTimeoutMs,
+  });
+  const rejectCandidate = (reasons: readonly string[]): void => {
+    rejectedCount++;
+    for (const reason of reasons) {
+      rejectedByReason[reason] = (rejectedByReason[reason] ?? 0) + 1;
+    }
+  };
 
   // v0.41.19.0 (T3): throttled yield helper. Fires `opts.yieldDuringPhase`
   // every 30s. Cycle.ts threads `buildYieldDuringPhase(lock, outer)` so
@@ -640,7 +731,7 @@ export async function runPhaseExtractAtoms(
   }
 
   await withBudgetTracker(budgetTracker, async () => {
-  for (const item of work) {
+  for (const item of boundedWork) {
     await maybeYield();
     if (budgetExhausted || budgetTracker.totalSpent >= budgetCap) {
       if (item.kind === 'transcript') transcriptsSkipped++;
@@ -661,6 +752,8 @@ export async function runPhaseExtractAtoms(
         ],
         maxTokens: 4096,
       });
+      extractionActualModels.add(result.model);
+      extractionActualRoutes.add(result.providerId);
       // Post-await yield: closes the "long LLM call past TTL" hazard
       // codex flagged. The 30s throttle inside maybeYield bounds the
       // actual refresh rate so this is cheap when calls are fast.
@@ -669,16 +762,11 @@ export async function runPhaseExtractAtoms(
       estimatedSpendUsd = budgetTracker.totalSpent;
 
       const atoms = parseAtomsResponse(result.text, item.content);
+      candidatesCount += atoms.length;
       if (atoms.length === 0) {
         // #2144: tombstone zero-yield pages so they stop being rediscovered.
-        // Idempotency is keyed on atom rows — a page that yields no atoms
-        // leaves no row, so pre-fix it re-entered the discovery window every
-        // run (wedging --drain with a false no_progress and re-spending
-        // nightly budget on the same pages). Stamp the content hash we
-        // scanned; discovery skips the page only while its content is
-        // unchanged (edits re-eligibilize, mirroring atom-row staleness).
-        // Only stamped after a SUCCESSFUL chat call — LLM failures take the
-        // catch path below and stay retryable.
+        // Only a successful extraction that produced zero parser candidates is
+        // tombstoned. Gate rejections stay retryable.
         if (!opts.dryRun && item.kind === 'page') {
           try {
             await engine.executeRaw(
@@ -694,17 +782,62 @@ export async function runPhaseExtractAtoms(
         continue;
       }
 
-      if (!opts.dryRun) {
+      const deterministicSurvivors: ExtractedAtom[] = [];
+      if (sensitivePatternConfig.invalid) {
+        for (const _atom of atoms) rejectCandidate(['sensitive_pattern_config_invalid']);
+      } else {
         for (const atom of atoms) {
+          const reasons = scanAtomCandidate(atom, sensitivePatternConfig.patterns);
+          if (reasons.length > 0) rejectCandidate(reasons);
+          else deterministicSurvivors.push(atom);
+        }
+      }
+
+      const acceptedAtoms: ExtractedAtom[] = [];
+      if (deterministicSurvivors.length > 0) {
+        try {
+          const semanticResult = await runSemanticValidatorBounded(
+            semanticValidator,
+            { sourceText: item.content, candidates: deterministicSurvivors },
+            semanticTimeoutMs,
+          );
+          const verdicts = parseAtomSemanticResponse(
+            JSON.stringify({ verdicts: semanticResult.verdicts }),
+            deterministicSurvivors.length,
+          );
+          if (semanticResult.actualModel) validatorActualModels.add(semanticResult.actualModel);
+          if (semanticResult.route) validatorActualRoutes.add(semanticResult.route);
+          for (let i = 0; i < deterministicSurvivors.length; i++) {
+            const reasons = semanticRejectionReasons(verdicts[i].scores);
+            if (reasons.length > 0) rejectCandidate(reasons);
+            else {
+              acceptedAtoms.push(deterministicSurvivors[i]);
+              acceptedCount++;
+            }
+          }
+        } catch (err) {
+          if (err instanceof BudgetExhausted) throw err;
+          const code = err instanceof AtomSemanticValidationError
+            ? err.code
+            : 'validator_failure';
+          const reason = code === 'invalid_json'
+            ? 'semantic_validator_invalid_json'
+            : code === 'timeout'
+              ? 'semantic_validator_timeout'
+              : 'semantic_validator_failure';
+          for (const _atom of deterministicSurvivors) rejectCandidate([reason]);
+          failures.push({ reason });
+        }
+      }
+
+      if (!opts.dryRun) {
+        for (const atom of acceptedAtoms) {
           const srcRef = item.kind === 'transcript' ? item.filePath : item.slug;
           const slug = atomSlug(atom.title, srcRef);
           const originFrontmatter =
             item.kind === 'transcript'
               ? { source_path: item.filePath }
               : { source_slug: item.slug };
-          // v0.41.2.1 D9 #1 — thread sourceId through every putPage so
-          // atoms land in the source we discovered them from. Pre-fix
-          // the third arg was missing and atoms always wrote to 'default'.
           await engine.putPage(
             slug,
             {
@@ -731,12 +864,10 @@ export async function runPhaseExtractAtoms(
           totalAtomsExtracted++;
         }
       } else {
-        totalAtomsExtracted += atoms.length; // count for dry-run reporting
+        totalAtomsExtracted += acceptedAtoms.length;
       }
       if (item.kind === 'transcript') transcriptsProcessed++;
       else pagesProcessed++;
-      // v0.41.19.0 (T4): one tick per processed item, with a count note.
-      // Reporter rate-limits to ~1 line/sec; safe to tick every iter.
       opts.progress?.tick(1, `${totalAtomsExtracted} atoms / ${duplicatesSkipped} skipped`);
     } catch (err) {
       if (err instanceof BudgetExhausted) {
@@ -745,10 +876,7 @@ export async function runPhaseExtractAtoms(
         else pagesSkipped++;
         continue;
       }
-      failures.push({
-        source: originLabel,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      failures.push({ reason: 'extraction_or_write_failure' });
     }
   }
   });
@@ -759,6 +887,8 @@ export async function runPhaseExtractAtoms(
   // audit-trail / search-visibility surfaces don't block the phase result.
   if (!opts.dryRun && totalAtomsExtracted > 0) {
     const runId = `atoms-${Date.now().toString(36)}-${sourceId.slice(0, 4)}`;
+    const receiptModel = [...validatorActualModels][0] ?? [...extractionActualModels][0];
+    const receiptRoute = [...validatorActualRoutes][0] ?? [...extractionActualRoutes][0];
     try {
       await writeReceipt(engine, {
         kind: 'atoms',
@@ -768,6 +898,11 @@ export async function runPhaseExtractAtoms(
         extracted_at: new Date().toISOString(),
         total_rows: totalAtomsExtracted,
         cost_usd: estimatedSpendUsd,
+        ...(receiptModel ? { model_id: receiptModel } : {}),
+        ...(receiptRoute ? { model_route: receiptRoute } : {}),
+        candidates: candidatesCount,
+        accepted: acceptedCount,
+        rejected_by_reason: { ...rejectedByReason },
         summary:
           `Extracted ${totalAtomsExtracted} atoms from ` +
           `${transcriptsProcessed} transcripts + ${pagesProcessed} pages.`,
@@ -823,6 +958,20 @@ export async function runPhaseExtractAtoms(
       budget_exhausted: budgetExhausted,
       source_id: sourceId,
       dry_run: opts.dryRun ?? false,
+      dry_run_limit: opts.dryRun ? MAX_DRY_RUN_WORK_ITEMS : null,
+      dry_run_omitted_items: dryRunOmittedItems,
+      candidates: candidatesCount,
+      accepted: acceptedCount,
+      rejected: rejectedCount,
+      rejected_by_reason: { ...rejectedByReason },
+      actual_models: {
+        extraction: [...extractionActualModels].sort(),
+        semantic_validator: [...validatorActualModels].sort(),
+      },
+      actual_routes: {
+        extraction: [...extractionActualRoutes].sort(),
+        semantic_validator: [...validatorActualRoutes].sort(),
+      },
     },
   };
 }

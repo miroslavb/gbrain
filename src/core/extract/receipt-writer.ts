@@ -72,6 +72,14 @@ export interface ExtractReceiptInput {
   cost_usd: number;
   /** LLM model id (optional; only for LLM-backed extractors). */
   model_id?: string;
+  /** Provider/recipe route that actually answered. */
+  model_route?: string;
+  /** Candidate count before pre-write gates. */
+  candidates?: number;
+  /** Candidates accepted by every pre-write gate. */
+  accepted?: number;
+  /** Stable reason-code counts only; never candidate text or matched values. */
+  rejected_by_reason?: Record<string, number>;
   /** Eval gate verdict (optional; only when a gate fired). */
   eval_pass?: boolean;
   /** Eval gate score (optional; companion to eval_pass). */
@@ -148,6 +156,14 @@ function buildReceiptBody(input: ExtractReceiptInput): string {
   if (input.model_id) {
     lines.push(`Model: \`${input.model_id}\``);
   }
+  if (input.model_route) lines.push(`Route: \`${input.model_route}\``);
+  if (typeof input.candidates === 'number') lines.push(`Candidates: **${input.candidates}**`);
+  if (typeof input.accepted === 'number') lines.push(`Accepted: **${input.accepted}**`);
+  if (input.rejected_by_reason) {
+    for (const reason of Object.keys(input.rejected_by_reason).sort()) {
+      lines.push(`Rejected (${reason}): **${input.rejected_by_reason[reason]}**`);
+    }
+  }
   if (typeof input.eval_pass === 'boolean') {
     const verdict = input.eval_pass ? 'PASS' : 'FAIL';
     const score = typeof input.eval_score === 'number'
@@ -181,6 +197,10 @@ function buildReceiptFrontmatter(input: ExtractReceiptInput): Record<string, unk
     cost_usd: input.cost_usd,
   };
   if (input.model_id) fm.model_id = input.model_id;
+  if (input.model_route) fm.model_route = input.model_route;
+  if (typeof input.candidates === 'number') fm.candidates = input.candidates;
+  if (typeof input.accepted === 'number') fm.accepted = input.accepted;
+  if (input.rejected_by_reason) fm.rejected_by_reason = input.rejected_by_reason;
   if (typeof input.eval_pass === 'boolean') fm.eval_pass = input.eval_pass;
   if (typeof input.eval_score === 'number') fm.eval_score = input.eval_score;
   return fm;
