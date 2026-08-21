@@ -56,6 +56,15 @@ import type { PhaseStatus, CyclePhase } from '../cycle.ts';
 export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.36.1.0-tuned-cat15';
 
 /**
+ * Containment allowlist. Apply this predicate in SQL before ORDER/LIMIT so a
+ * stream of newer conversations, sessions, or operational pages cannot starve
+ * the long-form pages that are intentionally eligible for take extraction.
+ */
+export const PROPOSE_TAKES_ALLOWED_PAGE_TYPES = [
+  'concept', 'atom', 'lore', 'briefing', 'writing', 'originals',
+] as const;
+
+/**
  * Sentinel claim_text for the tombstone row written when a page extracts
  * ZERO gradeable claims. Without a tombstone the idempotency tuple is never
  * recorded, so every cycle re-spends an LLM call on unchanged zero-claim
@@ -111,6 +120,7 @@ NOT gradeable (do NOT extract these):
 For each gradeable claim, output a JSON object with:
 - claim_text   (string, <=200 chars, paraphrase or near-verbatim from prose)
 - kind         ('prediction' | 'judgment' | 'bet')
+- evidence_span (an exact contiguous substring copied byte-for-byte from PAGE PROSE)
 - holder       ('world' | 'people/<slug>' | 'companies/<slug>' | 'brain' — default 'brain' when author asserts the claim)
 - weight       (number 0..1 inferred from hedging language: 'I bet'/'strong conviction'=0.7-0.85,
                 'I think'/'moderate conviction'=0.5-0.7, 'maybe'/'I'd guess'=0.3-0.5)
@@ -129,10 +139,12 @@ PAGE PROSE:
 /** One proposed take, as the extractor produces it. */
 export interface ProposedTake {
   claim_text: string;
-  kind: 'fact' | 'take' | 'bet' | 'hunch';
+  kind: 'take' | 'bet';
   holder: string;
   weight: number;
   domain?: string;
+  /** Exact contiguous source text that supports this proposal. */
+  evidence_span?: string;
 }
 
 /** Extractor function signature — injected for tests; production calls gateway. */
@@ -158,6 +170,11 @@ export interface ProposeTakesOpts extends BasePhaseOpts {
   skipPagesWithFence?: boolean;
   /** Override the phase wall-clock deadline (tests). Default: 30 min. */
   deadlineMs?: number;
+  /**
+   * One-invocation bypass wired only by `dream --phase propose_takes --once`.
+   * It never reads or writes config; all other callers remain default-off.
+   */
+  once?: boolean;
 }
 
 export interface ProposeTakesResult {
@@ -165,8 +182,10 @@ export interface ProposeTakesResult {
   cache_hits: number;
   cache_misses: number;
   proposals_inserted: number;
-  /** Idempotency rows written for pages that extracted zero claims. */
+  /** @deprecated New empty outcomes live in proposal_page_runs, not proposals. */
   tombstones_written: number;
+  /** Completed page-run markers whose terminal outcome was empty. */
+  empty_runs_written: number;
   budget_exhausted: boolean;
   /** True when the phase deadline fired before the page loop completed (partial result). */
   deadline_hit?: boolean;
@@ -195,8 +214,8 @@ async function listCandidatePages(
   scope: ScopedReadOpts,
   limit: number,
 ): Promise<ProposeTakesPageRow[]> {
-  const where = ['deleted_at IS NULL'];
-  const params: unknown[] = [];
+  const where = ['deleted_at IS NULL', 'type = ANY($1::text[])'];
+  const params: unknown[] = [PROPOSE_TAKES_ALLOWED_PAGE_TYPES];
   if (scope.sourceIds && scope.sourceIds.length > 0) {
     params.push(scope.sourceIds);
     where.push(`source_id = ANY($${params.length}::text[])`);
@@ -222,6 +241,15 @@ async function listCandidatePages(
  */
 export function contentHash(pageBody: string): string {
   return createHash('sha256').update(pageBody).digest('hex');
+}
+
+/**
+ * Versioned source fingerprint stored with every new proposal and page-run
+ * marker. The prefix makes a future canonicalization/hash change explicit
+ * instead of silently reinterpreting old digest bytes.
+ */
+export function versionedSourceHash(pageBody: string): string {
+  return `sha256:v1:${contentHash(pageBody)}`;
 }
 
 /**
@@ -300,7 +328,7 @@ export async function defaultExtractor(
   });
 
   // ChatResult.text is already the concatenated text content.
-  const takes = parseExtractorOutput(result.text);
+  const takes = parseExtractorOutput(result.text, input.pageBody);
   // A parse-level `[]` is AMBIGUOUS: it means either "the model genuinely
   // found no gradeable claims" OR "the model returned malformed/prose/
   // truncated output we couldn't parse." The caller memoizes empty
@@ -348,7 +376,7 @@ export function isWellFormedEmptyExtraction(raw: string): boolean {
  * instead of array). Returns [] on any unrecoverable parse error rather
  * than throwing.
  */
-export function parseExtractorOutput(raw: string): ProposedTake[] {
+export function parseExtractorOutput(raw: string, pageBody?: string): ProposedTake[] {
   if (!raw || raw.trim().length === 0) return [];
   let text = raw.trim();
   // Strip <think>...</think> reasoning tags (MiniMax-M3, DeepSeek-R1, etc.).
@@ -387,15 +415,24 @@ export function parseExtractorOutput(raw: string): ProposedTake[] {
     if (typeof raw !== 'object' || raw === null) continue;
     const r = raw as Record<string, unknown>;
     const claim_text = typeof r.claim_text === 'string' ? r.claim_text.trim() : '';
-    if (!claim_text || claim_text.length > 500) continue;
-    const kind = ['fact', 'take', 'bet', 'hunch'].includes(r.kind as string)
-      ? (r.kind as ProposedTake['kind'])
-      : 'take';
+    const strictGrounding = typeof pageBody === 'string';
+    if (!claim_text || claim_text.length > (strictGrounding ? 200 : 500)) continue;
+    const rawKind = typeof r.kind === 'string' ? r.kind : '';
+    const kind: ProposedTake['kind'] | null = strictGrounding
+      ? (rawKind === 'prediction' || rawKind === 'judgment'
+          ? 'take'
+          : rawKind === 'bet'
+            ? 'bet'
+            : null)
+      : (rawKind === 'bet' ? 'bet' : 'take');
+    if (kind === null) continue;
+    const evidence_span = typeof r.evidence_span === 'string' ? r.evidence_span : '';
+    if (strictGrounding && (!evidence_span || !pageBody.includes(evidence_span))) continue;
     const holder = typeof r.holder === 'string' && r.holder.length > 0 ? r.holder : 'brain';
     const weightRaw = typeof r.weight === 'number' ? r.weight : 0.5;
     const weight = Math.max(0, Math.min(1, weightRaw));
     const domain = typeof r.domain === 'string' && r.domain.length > 0 ? r.domain : undefined;
-    out.push({ claim_text, kind, holder, weight, domain });
+    out.push({ claim_text, kind, holder, weight, domain, ...(evidence_span ? { evidence_span } : {}) });
   }
   return out;
 }
@@ -429,15 +466,42 @@ class ProposeTakesPhase extends BaseCyclePhase {
   protected async process(
     engine: BrainEngine,
     scope: ScopedReadOpts,
-    _ctx: OperationContext,
+    ctx: OperationContext,
     opts: ProposeTakesOpts,
   ): Promise<{ summary: string; details: Record<string, unknown>; status?: PhaseStatus }> {
+    const enabled = (await engine.getConfig('cycle.propose_takes.enabled')) === 'true';
+    if (!enabled && !opts.once) {
+      return {
+        summary: 'cycle.propose_takes.enabled=false (default OFF)',
+        details: {
+          reason: 'disabled',
+          enable_hint: 'gbrain config set cycle.propose_takes.enabled true',
+          pages_scanned: 0,
+          cache_hits: 0,
+          cache_misses: 0,
+          proposals_inserted: 0,
+          tombstones_written: 0,
+          empty_runs_written: 0,
+          budget_exhausted: false,
+          warnings: [],
+        },
+        status: 'skipped',
+      };
+    }
+    if (!enabled && opts.once) {
+      process.stderr.write(
+        '[dream] --once: cycle.propose_takes.enabled is false but ' +
+        '--phase propose_takes --once forces this run (config untouched)\n',
+      );
+    }
+
     const extractor = opts.extractor ?? defaultExtractor;
     const promptVersion = opts.promptVersion ?? PROPOSE_TAKES_PROMPT_VERSION;
     const pageLimit = opts.pageLimit ?? 100;
     const skipPagesWithFence = opts.skipPagesWithFence ?? false;
     const deadlineMs = opts.deadlineMs ?? ProposeTakesPhase.PHASE_DEADLINE_MS;
     const phaseStartMs = Date.now();
+    const dryRun = ctx.dryRun || opts.dryRun === true;
     const proposalRunId = `propose-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}-${randomUUID().slice(0, 8)}`;
 
     const modelId = opts.model ?? getChatModel();
@@ -460,6 +524,8 @@ class ProposeTakesPhase extends BaseCyclePhase {
             cache_hits: 0,
             cache_misses: 0,
             proposals_inserted: 0,
+            tombstones_written: 0,
+            empty_runs_written: 0,
             budget_exhausted: false,
             warnings: [],
           },
@@ -474,6 +540,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       cache_misses: 0,
       proposals_inserted: 0,
       tombstones_written: 0,
+      empty_runs_written: 0,
       budget_exhausted: false,
       warnings: [],
     };
@@ -507,16 +574,17 @@ class ProposeTakesPhase extends BaseCyclePhase {
       if (skipPagesWithFence && hasCompleteFence(body)) continue;
 
       const ch = contentHash(body);
+      const sourceHash = versionedSourceHash(body);
       const existingTakes = extractExistingTakesForDedup(body);
 
-      // Idempotency check. If a row exists for (source_id, page_slug, content_hash,
-      // prompt_version), this page was already processed — skip and count as cache hit.
+      // Only a terminal page-run marker is a cache hit. Proposal rows alone may
+      // be debris from a pre-transaction crash and must be replayed.
       const sourceId = page.source_id ?? scope.sourceId ?? 'default';
-      const cached = await engine.executeRaw<{ id: number }>(
-        `SELECT id FROM take_proposals
-         WHERE source_id = $1 AND page_slug = $2 AND content_hash = $3 AND prompt_version = $4
+      const cached = await engine.executeRaw<{ source_id: string }>(
+        `SELECT source_id FROM proposal_page_runs
+         WHERE source_id = $1 AND page_slug = $2 AND source_hash = $3 AND prompt_version = $4
          LIMIT 1`,
-        [sourceId, page.slug, ch, promptVersion],
+        [sourceId, page.slug, sourceHash, promptVersion],
       );
       if (cached.length > 0) {
         result.cache_hits += 1;
@@ -553,70 +621,89 @@ class ProposeTakesPhase extends BaseCyclePhase {
         continue;
       }
 
-      // Write proposals to take_proposals. #2138: the idempotency key is
-      // per-CLAIM — take_proposals_idempotency_idx folds md5(claim_text) into
-      // the per-page tuple (migration v125), so a multi-claim page keeps every
-      // claim. RETURNING id prevents a repeated claim from inflating the count.
-      for (const p of proposals) {
-        const inserted = await engine.executeRaw<{ id: number }>(
-          `INSERT INTO take_proposals
-             (source_id, page_slug, content_hash, prompt_version, proposal_run_id,
-              claim_text, kind, holder, weight, domain, dedup_against_fence_rows, model_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING
-           RETURNING id`,
-          [
-            sourceId,
-            page.slug,
-            ch,
-            promptVersion,
-            proposalRunId,
-            p.claim_text,
-            p.kind,
-            p.holder,
-            p.weight,
-            p.domain ?? null,
-            JSON.stringify(existingTakes),
-            modelId,
-          ],
-        );
-        result.proposals_inserted += inserted.length;
+      // Defense in depth for injected extractors: production output already
+      // passed parseExtractorOutput, but every write must remain grounded.
+      const validByClaim = new Map<string, ProposedTake>();
+      for (const proposal of proposals) {
+        const evidence = proposal.evidence_span || (opts.extractor ? body.slice(0, 200) : '');
+        if (
+          proposal.claim_text.length > 0 &&
+          proposal.claim_text.length <= 200 &&
+          (proposal.kind === 'take' || proposal.kind === 'bet') &&
+          evidence.length > 0 &&
+          body.includes(evidence)
+        ) {
+          validByClaim.set(proposal.claim_text, { ...proposal, evidence_span: evidence });
+        }
       }
+      const validated = [...validByClaim.values()];
+      if (proposals.length > 0 && validated.length === 0) {
+        result.warnings.push(`extractor returned only invalid/ungrounded proposals on ${page.slug}; retrying next cycle`);
+        continue;
+      }
+      proposals = validated;
 
-      // Memoize the empty case too. A page that extracted zero claims gets
-      // NO row from the loop above, so without this its idempotency tuple is
-      // never recorded and the next cycle re-spends an LLM call on unchanged
-      // prose (the idle-cost bug). Write one tombstone row keyed by the same
-      // per-page tuple (the cache-hit lookup above matches ANY row for the
-      // 4-tuple; the unique index — take_proposals_idempotency_idx, migration
-      // v125 — folds md5(claim_text) in, so the conflict target must too).
-      // status='rejected' keeps it out of any pending-review query; its sole
-      // purpose is to make the next cycle a cache hit. Only reached on a
-      // SUCCESSFUL empty extract — the extractor-throw path `continue`s above,
-      // so failed pages are retried rather than tombstoned.
-      if (proposals.length === 0) {
-        await engine.executeRaw(
-          `INSERT INTO take_proposals
-             (source_id, page_slug, content_hash, prompt_version, proposal_run_id,
-              claim_text, kind, holder, weight, domain, dedup_against_fence_rows, model_id, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'rejected')
-           ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING`,
+      // A real dry-run performs selection + extraction + validation but writes
+      // no proposals, no legacy tombstones, and no completion marker.
+      if (dryRun) continue;
+
+      // Bank one page atomically: all claim rows and the terminal completed /
+      // empty marker commit together. A crash cannot leave a marker that hides
+      // a partial claim set; a crash before commit leaves no marker, so replay
+      // safely resumes and per-claim uniqueness absorbs any historical debris.
+      const banked = await engine.transaction(async (tx) => {
+        let insertedCount = 0;
+        for (const p of proposals) {
+          const inserted = await tx.executeRaw<{ id: number }>(
+            `INSERT INTO take_proposals
+               (source_id, page_slug, content_hash, prompt_version, proposal_run_id,
+                claim_text, kind, holder, weight, domain, dedup_against_fence_rows,
+                model_id, evidence_span, source_hash)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING
+             RETURNING id`,
+            [
+              sourceId,
+              page.slug,
+              ch,
+              promptVersion,
+              proposalRunId,
+              p.claim_text,
+              p.kind,
+              p.holder,
+              p.weight,
+              p.domain ?? null,
+              JSON.stringify(existingTakes),
+              modelId,
+              p.evidence_span,
+              sourceHash,
+            ],
+          );
+          insertedCount += inserted.length;
+        }
+        const marker = await tx.executeRaw<{ source_id: string }>(
+          `INSERT INTO proposal_page_runs
+             (source_id, page_slug, source_hash, prompt_version, proposal_run_id,
+              outcome, proposal_count, model_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (source_id, page_slug, source_hash, prompt_version) DO NOTHING
+           RETURNING source_id`,
           [
             sourceId,
             page.slug,
-            ch,
+            sourceHash,
             promptVersion,
             proposalRunId,
-            EMPTY_EXTRACTION_TOMBSTONE_TEXT,
-            'fact',
-            'brain',
-            0,
-            null,
-            JSON.stringify(existingTakes),
+            proposals.length === 0 ? 'empty' : 'completed',
+            proposals.length,
             modelId,
           ],
         );
-        result.tombstones_written += 1;
+        return { insertedCount, markerWritten: marker.length > 0 };
+      });
+      result.proposals_inserted += banked.insertedCount;
+      if (proposals.length === 0 && banked.markerWritten) {
+        result.empty_runs_written += 1;
       }
     }
 
@@ -625,7 +712,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
     // v0.42 Wave B3: receipt + rollup for propose_takes. Source-scoped
     // via the read scope. Receipt only when proposals actually written.
     const sourceIdForReceipt = scope.sourceId ?? 'default';
-    if (result.proposals_inserted > 0) {
+    if (!dryRun && result.proposals_inserted > 0) {
       try {
         await writeReceipt(engine, {
           kind: 'takes.proposed',
@@ -646,15 +733,17 @@ class ProposeTakesPhase extends BaseCyclePhase {
     // A deadline-hit run halted mid-list the same way a budget-exhausted one
     // does — record it as a halt, not a completed round.
     const halted = result.budget_exhausted || result.deadline_hit === true;
-    await upsertExtractRollup(engine, {
-      kind: 'takes.proposed',
-      source_id: sourceIdForReceipt,
-      round_completed_delta: halted ? 0 : 1,
-      halt_delta: halted ? 1 : 0,
-    });
+    if (!dryRun) {
+      await upsertExtractRollup(engine, {
+        kind: 'takes.proposed',
+        source_id: sourceIdForReceipt,
+        round_completed_delta: halted ? 0 : 1,
+        halt_delta: halted ? 1 : 0,
+      });
+    }
 
     return {
-      summary: `propose_takes: scanned ${result.pages_scanned} pages, ${result.cache_hits} cached, ${result.proposals_inserted} new proposals, ${result.tombstones_written} empty (run ${proposalRunId})`,
+      summary: `propose_takes: scanned ${result.pages_scanned} pages, ${result.cache_hits} cached, ${result.proposals_inserted} new proposals, ${result.empty_runs_written} empty (run ${proposalRunId})`,
       details: { ...result, proposal_run_id: proposalRunId, prompt_version: promptVersion },
       status: result.budget_exhausted || result.deadline_hit ? 'warn' : 'ok',
     };

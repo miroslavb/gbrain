@@ -775,7 +775,10 @@ CREATE TABLE IF NOT EXISTS take_proposals (
   acted_by                    TEXT,
   promoted_row_num            INTEGER,
   predicted_brier             REAL,
-  predicted_brier_bucket_n    INTEGER
+  predicted_brier_bucket_n    INTEGER,
+  -- Nullable so legacy proposals/tombstones remain valid audit history.
+  evidence_span               TEXT,
+  source_hash                 TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS take_proposals_idempotency_idx
   ON take_proposals (source_id, page_slug, content_hash, prompt_version, md5(claim_text));
@@ -784,6 +787,24 @@ CREATE INDEX IF NOT EXISTS take_proposals_pending_idx
   WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS take_proposals_run_id_idx
   ON take_proposals (proposal_run_id);
+
+-- Terminal per-page producer outcomes. New empty results live here rather
+-- than masquerading as rejected take_proposals rows. Only a marker in this
+-- table is a replay cache hit.
+CREATE TABLE IF NOT EXISTS proposal_page_runs (
+  source_id       TEXT        NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  page_slug       TEXT        NOT NULL,
+  source_hash     TEXT        NOT NULL,
+  prompt_version  TEXT        NOT NULL,
+  proposal_run_id TEXT        NOT NULL,
+  outcome         TEXT        NOT NULL CHECK (outcome IN ('completed','empty')),
+  proposal_count  INTEGER     NOT NULL CHECK (proposal_count >= 0),
+  model_id        TEXT        NOT NULL,
+  completed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_id, page_slug, source_hash, prompt_version)
+);
+CREATE INDEX IF NOT EXISTS proposal_page_runs_run_id_idx
+  ON proposal_page_runs (proposal_run_id);
 
 CREATE TABLE IF NOT EXISTS take_grade_cache (
   take_id            BIGINT       NOT NULL,

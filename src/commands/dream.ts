@@ -85,7 +85,7 @@ interface DreamArgs {
    * mid-run can't leave any global state stuck. Requires an explicit
    * `--phase <name>`; bare `--once` is a usage error (there'd be no single
    * phase to target). Applies only to phases with a config `.enabled` gate
-   * (patterns, synthesize, conversation_facts_backfill, enrich_thin,
+   * (patterns, synthesize, propose_takes, conversation_facts_backfill, enrich_thin,
    * skillopt, drift) — a no-op for phases that always run when named directly.
    */
   once: boolean;
@@ -366,8 +366,9 @@ Options:
                       config gate is false. Never reads or writes config —
                       unlike toggling the flag on/off around the run, a
                       crash mid-invocation can't leave it stuck. Applies to
-                      patterns, synthesize, conversation_facts_backfill,
-                      enrich_thin, skillopt, drift; no-op on phases with no such
+                      patterns, synthesize, propose_takes,
+                      conversation_facts_backfill, enrich_thin, skillopt,
+                      drift; no-op on phases with no such
                       gate. Requires an EXPLICIT --phase <name> — a phase
                       implied by --input or --drain does not count (bare
                       --once, or --once with --input/--drain and no
@@ -416,6 +417,7 @@ Examples:
   gbrain dream --dry-run --json
   gbrain dream --phase lint
   gbrain dream --phase patterns --once   # run once, ignore dream.patterns.enabled=false
+  gbrain dream --phase propose_takes --once # explicit one-shot producer run
   gbrain dream --phase synthesize --input ~/transcripts/2026-04-25.txt
   gbrain dream --phase synthesize --from 2026-04-01 --to 2026-04-25
   0 2 * * * gbrain dream --json         # nightly via cron

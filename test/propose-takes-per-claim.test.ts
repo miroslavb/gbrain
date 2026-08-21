@@ -22,6 +22,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetPgliteState(engine);
+  await engine.setConfig('cycle.propose_takes.enabled', 'true');
 });
 
 function context(): OperationContext {
@@ -54,7 +55,7 @@ const proposals: ProposeTakesExtractor = async () => [
 async function putThesis(): Promise<void> {
   await engine.putPage('wiki/essays/thesis', {
     title: 'thesis',
-    type: 'analysis' as never,
+    type: 'originals' as never,
     compiled_truth: 'Two strong claims live in this essay.',
     frontmatter: {},
     timeline: '',

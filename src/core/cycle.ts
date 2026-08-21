@@ -529,8 +529,8 @@ export interface CycleOpts {
    *
    * Never reads or writes config — the phase still evaluates its config
    * gate every call; this only overrides the boolean OUTCOME for that one
-   * call. Applies to: patterns, synthesize, conversation_facts_backfill,
-   * enrich_thin, skillopt (the phases that gate on a `.enabled` config
+   * call. Applies to: patterns, synthesize, propose_takes,
+   * conversation_facts_backfill, enrich_thin, skillopt (the phases that gate on a `.enabled` config
    * key read inside the phase's own module). Does NOT apply to
    * extract_atoms / synthesize_concepts — those are pack-gated via
    * `packDeclaresPhase`, a different mechanism with its own existing
@@ -2214,7 +2214,11 @@ export async function runCycle(
           checkAborted(opts.signal);
           progress.start('cycle.propose_takes');
           const { runPhaseProposeTakes } = await import('./cycle/propose-takes.ts');
-          const { result, duration_ms } = await timePhase(() => runPhaseProposeTakes(calibrationCtx, { repoPath: brainDir ?? undefined }) as Promise<PhaseResult>);
+          const { result, duration_ms } = await timePhase(() => runPhaseProposeTakes(calibrationCtx, {
+            repoPath: brainDir ?? undefined,
+            dryRun,
+            once: opts.onceForPhase === 'propose_takes',
+          }) as Promise<PhaseResult>);
           result.duration_ms = duration_ms;
           phaseResults.push(result);
           progress.finish();

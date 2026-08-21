@@ -5652,6 +5652,40 @@ export const MIGRATIONS: Migration[] = [
         ON session_context_state (updated_at);
     `,
   },
+  {
+    version: 127,
+    name: 'take_proposal_page_runs',
+    // Contain and resume the propose_takes producer. Existing proposal rows,
+    // including rejected empty tombstones, remain untouched for audit/history.
+    // New proposals gain nullable grounding columns so legacy rows need no
+    // fabricated evidence backfill. proposal_page_runs is the only replay
+    // cache: claims + terminal completed/empty outcome are committed in one
+    // per-page transaction. Postgres RLS is enabled by the v35
+    // auto_rls_on_create_table event trigger; fresh schemas also list the table
+    // explicitly in their RLS block. PGLite runs the same DDL without RLS.
+    idempotent: true,
+    sql: `
+      ALTER TABLE take_proposals
+        ADD COLUMN IF NOT EXISTS evidence_span TEXT;
+      ALTER TABLE take_proposals
+        ADD COLUMN IF NOT EXISTS source_hash TEXT;
+
+      CREATE TABLE IF NOT EXISTS proposal_page_runs (
+        source_id       TEXT        NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+        page_slug       TEXT        NOT NULL,
+        source_hash     TEXT        NOT NULL,
+        prompt_version  TEXT        NOT NULL,
+        proposal_run_id TEXT        NOT NULL,
+        outcome         TEXT        NOT NULL CHECK (outcome IN ('completed','empty')),
+        proposal_count  INTEGER     NOT NULL CHECK (proposal_count >= 0),
+        model_id        TEXT        NOT NULL,
+        completed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (source_id, page_slug, source_hash, prompt_version)
+      );
+      CREATE INDEX IF NOT EXISTS proposal_page_runs_run_id_idx
+        ON proposal_page_runs (proposal_run_id);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

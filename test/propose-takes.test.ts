@@ -24,7 +24,8 @@ import {
   extractExistingTakesForDedup,
   isWellFormedEmptyExtraction,
   PROPOSE_TAKES_PROMPT_VERSION,
-  EMPTY_EXTRACTION_TOMBSTONE_TEXT,
+  PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
+  versionedSourceHash,
   type ProposeTakesExtractor,
   type ProposedTake,
 } from '../src/core/cycle/propose-takes.ts';
@@ -50,6 +51,12 @@ function buildMockEngine(opts: {
 
   const engine = {
     kind: 'pglite',
+    async getConfig(key: string) {
+      return key === 'cycle.propose_takes.enabled' ? 'true' : null;
+    },
+    async transaction<T>(fn: (tx: BrainEngine) => Promise<T>) {
+      return fn(engine as unknown as BrainEngine);
+    },
     async listPages() {
       return opts.pages;
     },
@@ -63,11 +70,11 @@ function buildMockEngine(opts: {
           compiled_truth: p.compiled_truth,
         })) as T[];
       }
-      // SELECT idempotency check
-      if (sql.includes('SELECT id FROM take_proposals')) {
+      // Terminal page-run idempotency check.
+      if (sql.includes('SELECT source_id FROM proposal_page_runs')) {
         const [sourceId, slug, ch, pv] = params ?? [];
         const key = `${sourceId}|${slug}|${ch}|${pv}`;
-        if (existing.has(key)) return [{ id: 1 } as unknown as T];
+        if (existing.has(key)) return [{ source_id: sourceId } as unknown as T];
         return [];
       }
       // INSERT into take_proposals — persist the idempotency key so a
@@ -76,9 +83,12 @@ function buildMockEngine(opts: {
       // row for the per-page 4-tuple), and return one row per successful
       // insert to satisfy RETURNING id.
       if (sql.includes('INSERT INTO take_proposals')) {
+        return [{ id: captured.length } as unknown as T];
+      }
+      if (sql.includes('INSERT INTO proposal_page_runs')) {
         const [sourceId, slug, ch, pv] = params ?? [];
         existing.add(`${sourceId}|${slug}|${ch}|${pv}`);
-        return [{ id: captured.length } as unknown as T];
+        return [{ source_id: sourceId } as unknown as T];
       }
       // Other writes — return nothing.
       return [];
@@ -136,7 +146,7 @@ describe('parseExtractorOutput', () => {
     const raw = '{"claim_text":"Y","kind":"hunch","holder":"brain","weight":0.4}';
     const out = parseExtractorOutput(raw);
     expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe('hunch');
+    expect(out[0]!.kind).toBe('take');
   });
 
   test('skips leading prose before the JSON', () => {
@@ -370,11 +380,11 @@ describe('runPhaseProposeTakes — phase integration', () => {
     expect(inserts.map(i => i.params[5])).toEqual(['Claim one', 'Claim two']);
   });
 
-  test('cache hit: page already in take_proposals is skipped', async () => {
+  test('cache hit: terminal page-run marker skips extraction', async () => {
     const body = 'A page that was already processed.';
     const pages = [buildPage({ slug: 'wiki/old-page', body })];
-    const ch = contentHash(body);
-    const existing = new Set([`default|wiki/old-page|${ch}|${PROPOSE_TAKES_PROMPT_VERSION}`]);
+    const sourceHash = versionedSourceHash(body);
+    const existing = new Set([`default|wiki/old-page|${sourceHash}|${PROPOSE_TAKES_PROMPT_VERSION}`]);
     const { engine, captured } = buildMockEngine({ pages, existingProposals: existing });
     let extractorCalled = false;
     const extractor: ProposeTakesExtractor = async () => {
@@ -629,8 +639,9 @@ New prose appended here.`;
     expect(pageSelect).toBeDefined();
     expect(pageSelect!.sql).toContain('SELECT slug, source_id, compiled_truth');
     expect(pageSelect!.sql).not.toContain('*');
-    // Scalar sourceId scope from ctx binds as a plain equality param.
-    expect(pageSelect!.params[0]).toBe('default');
+    // The allowlist is $1; scalar sourceId follows as $2.
+    expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
+    expect(pageSelect!.params[1]).toBe('default');
   });
 
   test('narrow projection: federated sourceIds beat scalar sourceId', async () => {
@@ -645,7 +656,8 @@ New prose appended here.`;
     const pageSelect = captured.find(c => c.sql.includes('FROM pages'));
     expect(pageSelect).toBeDefined();
     expect(pageSelect!.sql).toContain('source_id = ANY(');
-    expect(pageSelect!.params[0]).toEqual(['team-a', 'team-b']);
+    expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
+    expect(pageSelect!.params[1]).toEqual(['team-a', 'team-b']);
   });
 });
 
@@ -655,7 +667,7 @@ New prose appended here.`;
 // prose. Regression guard for the "empty result never memoized" bug.
 
 describe('runPhaseProposeTakes — empty extraction memoization', () => {
-  test('zero-claim page writes a tombstone row (proposals_inserted stays 0)', async () => {
+  test('zero-claim page writes only an empty terminal page-run', async () => {
     const pages = [buildPage({ slug: 'test/embed-probe', body: '# probe\njust a test, nothing to grade.' })];
     const { engine, captured } = buildMockEngine({ pages });
     const extractor: ProposeTakesExtractor = async () => [];
@@ -664,13 +676,14 @@ describe('runPhaseProposeTakes — empty extraction memoization', () => {
     const details = result.details as Record<string, unknown>;
     expect(details.cache_misses).toBe(1);
     expect(details.proposals_inserted).toBe(0);
-    expect(details.tombstones_written).toBe(1);
+    expect(details.tombstones_written).toBe(0);
+    expect(details.empty_runs_written).toBe(1);
 
     const inserts = captured.filter(c => c.sql.includes('INSERT INTO take_proposals'));
-    expect(inserts).toHaveLength(1);
-    // Tombstone carries the sentinel claim_text and an out-of-queue status.
-    expect(inserts[0]!.params[5]).toBe(EMPTY_EXTRACTION_TOMBSTONE_TEXT); // claim_text
-    expect(inserts[0]!.sql).toContain("'rejected'");
+    expect(inserts).toHaveLength(0);
+    const runs = captured.filter(c => c.sql.includes('INSERT INTO proposal_page_runs'));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.params[5]).toBe('empty');
   });
 
   test('unchanged zero-claim page is a cache hit next cycle (no repeat LLM call)', async () => {
@@ -682,11 +695,12 @@ describe('runPhaseProposeTakes — empty extraction memoization', () => {
       return [];
     };
 
-    // Cycle 1: cache miss → LLM call → tombstone written.
+    // Cycle 1: cache miss → LLM call → empty terminal run written.
     const r1 = await runPhaseProposeTakes(buildCtx(engine), { extractor });
     expect(extractorCalls).toBe(1);
     expect((r1.details as Record<string, unknown>).cache_misses).toBe(1);
-    expect((r1.details as Record<string, unknown>).tombstones_written).toBe(1);
+    expect((r1.details as Record<string, unknown>).tombstones_written).toBe(0);
+    expect((r1.details as Record<string, unknown>).empty_runs_written).toBe(1);
 
     // Cycle 2: same unchanged page → cache hit → extractor NOT called again.
     const r2 = await runPhaseProposeTakes(buildCtx(engine), { extractor });
