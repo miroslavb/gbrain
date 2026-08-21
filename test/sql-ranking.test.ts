@@ -232,6 +232,11 @@ describe('resolveBoostMap', () => {
 });
 
 describe('resolveHardExcludes', () => {
+  test('private Telegram document inbox is hidden by default', () => {
+    expect(DEFAULT_HARD_EXCLUDES).toContain('docs/inbox/');
+    expect(resolveHardExcludes(undefined, undefined, undefined)).toContain('docs/inbox/');
+  });
+
   test('returns defaults when nothing is overridden', () => {
     const r = resolveHardExcludes(undefined, undefined, undefined);
     for (const p of DEFAULT_HARD_EXCLUDES) expect(r).toContain(p);
