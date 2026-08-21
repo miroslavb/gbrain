@@ -199,11 +199,14 @@ type ProbeStatus = 'ok' | 'model_not_found' | 'auth' | 'rate_limit' | 'network' 
 
 interface ProbeResult {
   model: string;
-  touchpoint: 'chat' | 'expansion' | 'embedding_config' | 'embedding_reachability' | 'reranker_config';
+  touchpoint: 'chat' | 'expansion' | 'chain' | 'embedding_config' | 'embedding_reachability' | 'reranker_config';
   status: ProbeStatus;
   message: string;
   elapsed_ms: number;
   fix?: string;
+  route?: string[];
+  selected_model?: string;
+  degraded?: boolean;
 }
 
 function classifyError(err: unknown): { status: ProbeStatus; message: string } {
@@ -580,6 +583,57 @@ export async function probeModel(modelStr: string, touchpoint: 'chat' | 'expansi
   }
 }
 
+/**
+ * Probe the configured generative fallback chain as a separate health axis.
+ * Provider-specific rows remain untouched: this row answers only whether a
+ * real task can complete through the chain and records the serving model.
+ */
+export async function probeChainViability(
+  deps: ProbeDeps = {},
+  timeoutMs = 30_000,
+): Promise<ProbeResult> {
+  const gw = await import('../core/ai/gateway.ts');
+  const requested = gw.getChatModel();
+  const route = [
+    requested,
+    ...gw.getChatFallbackChain().filter(model => model !== requested),
+  ];
+  const chat = deps.chat ?? gw.chat;
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(new Error(`chain probe timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  try {
+    const result = await chat({
+      model: requested,
+      messages: [{ role: 'user', content: '.' }],
+      maxTokens: 1,
+      abortSignal: controller.signal,
+    });
+    const selected = result.model || requested;
+    const degraded = selected !== requested;
+    return {
+      model: requested,
+      touchpoint: 'chain',
+      status: 'ok',
+      message: degraded
+        ? `chain reachable via fallback ${selected}`
+        : 'chain primary reachable',
+      elapsed_ms: Date.now() - start,
+      route,
+      selected_model: selected,
+      degraded,
+    };
+  } catch (err) {
+    const failed = await failedProbe(err, requested, 'chain', 'chat', start, deps);
+    return { ...failed, route, degraded: true };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function shouldSkipProvider(modelStr: string, skip: string[]): boolean {
   if (skip.length === 0) return false;
   const colon = modelStr.indexOf(':');
@@ -608,7 +662,7 @@ export async function runModels(engine: BrainEngine, args: string[]): Promise<vo
     process.stdout.write(
 `Usage:
   gbrain models                   Show routing table (read-only)
-  gbrain models doctor [flags]    Probe each configured model (~1 token each)
+  gbrain models doctor [flags]    Probe each configured model and the configured generative fallback chain
   gbrain models --json            Machine-readable output
 
 Flags (doctor only):
@@ -666,6 +720,15 @@ Tiers: utility (haiku-class) | reasoning (sonnet) | deep (opus) | subagent (Anth
       continue;
     }
     results.push(await probeModel(modelStr, touchpoint, { cache: hintCache }));
+  }
+
+  // Chain viability is a separate operational axis. Do not run it when
+  // --skip is present: gateway fallback cannot selectively remove a provider
+  // from the configured chain without mutating runtime config.
+  if (skip.length === 0) {
+    results.push(await probeChainViability({ cache: hintCache }));
+  } else if (!json) {
+    process.stderr.write('[skip] chain viability (--skip cannot be applied to a configured fallback chain)\n');
   }
 
   // v0.40.x: embedding reachability — only when the config probe passed

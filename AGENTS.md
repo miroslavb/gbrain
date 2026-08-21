@@ -76,6 +76,13 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
+- **Models doctor chain axis:** `gbrain models doctor` must keep individual
+  provider rows separate from the configured generative-chain viability row.
+  Individual probes use their own short budget and may report an exhausted or
+  slow primary; the `chain` row gets a longer budget, records `route`,
+  `selected_model`, and `degraded`, and proves whether a real task can still
+  complete through subscriptions. Do not turn chain success into a false
+  primary-provider success or suppress provider-specific diagnostics.
 - **Generative fallback safety:** every provider-neutral generative route must use
   the shared model walker (`gateway.chat`, query expansion, OCR, and future LLM
   entry points). The explicit task model is attempted first; configured
