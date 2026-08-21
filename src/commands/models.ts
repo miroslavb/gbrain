@@ -568,12 +568,16 @@ export async function probeModel(modelStr: string, touchpoint: 'chat' | 'expansi
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(new Error('probe timed out after 5s')), 5000);
     try {
-      await chat({
+      const result = await chat({
         model: modelStr,
         messages: [{ role: 'user', content: '.' }],
         maxTokens: 1,
         abortSignal: controller.signal,
+        fallbackPolicy: 'none',
       });
+      if (result.model !== modelStr) {
+        throw new Error(`individual probe returned ${result.model} but requested ${modelStr}`);
+      }
       return { model: modelStr, touchpoint, status: 'ok', message: 'reachable', elapsed_ms: Date.now() - start };
     } finally {
       clearTimeout(timeoutId);

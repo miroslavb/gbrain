@@ -2862,6 +2862,8 @@ export interface ChatOpts {
   tools?: ChatToolDef[];
   maxTokens?: number;
   abortSignal?: AbortSignal;
+  /** Doctor/diagnostic seam: 'none' probes exactly the requested model. */
+  fallbackPolicy?: 'configured' | 'none';
   /**
    * Anthropic-specific: cache the system prompt + last tool def. Silently
    * ignored on providers without `supports_prompt_cache`.
@@ -3360,6 +3362,9 @@ async function runWithModelFallback<T>(
 
 export async function chat(opts: ChatOpts): Promise<ChatResult> {
   const requested = opts.model ?? getChatModel();
+  if (opts.fallbackPolicy === 'none') {
+    return chatOnce({ ...opts, model: requested });
+  }
   return runWithModelFallback(
     requested,
     (model) => chatOnce({ ...opts, model }),

@@ -399,6 +399,22 @@ describe('chat fallback — billing-safe usage gate', () => {
 
   const run = () => chat({ messages: [{ role: 'user', content: 'hello' }] });
 
+  test('fallbackPolicy none never advances past the requested model', async () => {
+    const attempts: string[] = [];
+    const rateLimit = Object.assign(new Error('rate limited'), { status: 429 });
+    __setChatTransportForTests(async (opts) => {
+      attempts.push(opts.model ?? primary);
+      throw rateLimit;
+    });
+
+    await expect(chat({
+      model: primary,
+      fallbackPolicy: 'none',
+      messages: [{ role: 'user', content: 'hello' }],
+    })).rejects.toBe(rateLimit);
+    expect(attempts).toEqual([primary]);
+  });
+
   test('continues after an explicit zero-usage failure', async () => {
     const attempts: string[] = [];
     __setChatTransportForTests(async (opts) => {

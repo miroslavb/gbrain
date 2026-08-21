@@ -4,7 +4,7 @@ import {
   resetGateway,
   type ChatResult,
 } from '../src/core/ai/gateway.ts';
-import { probeChainViability } from '../src/commands/models.ts';
+import { probeChainViability, probeModel } from '../src/commands/models.ts';
 
 const codex = 'openai:gpt-5.6-terra';
 const claude = 'anthropic:claude-sonnet-5';
@@ -91,5 +91,28 @@ describe('models doctor — chain viability', () => {
       route: [claude, codex, ollama],
     });
     expect(result.selected_model).toBeUndefined();
+  });
+
+  test('individual provider probe explicitly disables configured fallback', async () => {
+    const calls: Array<{ model?: string; fallbackPolicy?: string }> = [];
+    const result = await probeModel(claude, 'chat', {
+      chat: async (opts) => {
+        calls.push({ model: opts.model, fallbackPolicy: opts.fallbackPolicy });
+        throw new Error('429 primary exhausted');
+      },
+    });
+
+    expect(calls).toEqual([{ model: claude, fallbackPolicy: 'none' }]);
+    expect(result).toMatchObject({ model: claude, touchpoint: 'chat', status: 'rate_limit' });
+  });
+
+  test('individual provider probe refuses a response from a different model', async () => {
+    const result = await probeModel(claude, 'chat', {
+      chat: async () => success(codex),
+    });
+
+    expect(result).toMatchObject({ model: claude, touchpoint: 'chat', status: 'unknown' });
+    expect(result.message).toContain(`returned ${codex}`);
+    expect(result.message).toContain(`requested ${claude}`);
   });
 });

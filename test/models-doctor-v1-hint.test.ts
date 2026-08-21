@@ -325,7 +325,15 @@ describe('probe-site wiring (discrimination — fails if a hint call is reverted
   });
   test('probeModel: a reachable chat probe attaches no hint', async () => {
     const r = await probeModel(LITELLM_CHAT, 'chat', {
-      chat: (async () => ({})) as unknown as ChatFn, cfg: cfg('http://localhost:4000'), fetchImpl: stubFetch({}),
+      chat: (async () => ({
+        text: 'ok',
+        blocks: [],
+        stopReason: 'end',
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 },
+        model: LITELLM_CHAT,
+        providerId: 'litellm',
+      })) as unknown as ChatFn,
+      cfg: cfg('http://localhost:4000'), fetchImpl: stubFetch({}),
     });
     expect(r.status).toBe('ok');
     expect(r.fix).toBeUndefined();
