@@ -8,8 +8,8 @@ import type { Recipe } from '../types.ts';
  * Solves the #334 case where Max subscribers want Minions subagent dispatch
  * to run against their existing subscription instead of paying per-token API
  * charges. The recipe sits alongside the existing `anthropic` recipe so users
- * pick per call: `anthropic:claude-sonnet-4-6` (API key + per-token billing)
- * vs `claude-cli:claude-sonnet-4-6` (OAuth subscription, no API key).
+ * pick per call: `anthropic:claude-sonnet-5` (API key + per-token billing)
+ * vs `claude-cli:claude-sonnet-5` (OAuth subscription, no API key).
  *
  * Chat-only. Claude has no first-party embedding model; users wanting an
  * Anthropic chat path with embeddings still combine this with openai/google/
@@ -36,6 +36,7 @@ export const claudeCli: Recipe = {
     chat: {
       models: [
         'claude-opus-4-7',
+        'claude-sonnet-5',
         'claude-sonnet-4-6',
         'claude-haiku-4-5-20251001',
       ],
@@ -56,12 +57,12 @@ export const claudeCli: Recipe = {
     },
   },
   // Friendly aliases mirror the `anthropic` recipe so config strings stay
-  // portable: switching `anthropic:claude-sonnet-4-6` to `claude-cli:claude-sonnet-4-6`
+  // portable: switching `anthropic:claude-sonnet-5` to `claude-cli:claude-sonnet-5`
   // is a one-token edit. Reverse aliases rewrite legacy IDs back to canonical.
   aliases: {
     'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
     'claude-sonnet-4-6-20250929': 'claude-sonnet-4-6',
-    'sonnet': 'claude-sonnet-4-6',
+    'sonnet': 'claude-sonnet-5',
     'haiku': 'claude-haiku-4-5-20251001',
     'opus': 'claude-opus-4-7',
   },
