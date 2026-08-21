@@ -64,6 +64,13 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Common tasks
 
+- **Chronicle LLM gate:** automatic Chronicle extraction skips `conversation`
+  pages whose explicit `message_count` is below 100; meetings/calendar events
+  are unaffected, and conversations without the field keep legacy eligibility.
+  The threshold is evidence-backed by the 2026-08-21 live audit (all observed
+  sub-100 session jobs returned `no_events`; the sole useful conversation had
+  809 messages). Keep `test/chronicle-extract.test.ts` green and do not loosen
+  this gate without a fresh yield measurement.
 - **Configure:** [`docs/ENGINES.md`](./docs/ENGINES.md),
   [`docs/guides/live-sync.md`](./docs/guides/live-sync.md),
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
