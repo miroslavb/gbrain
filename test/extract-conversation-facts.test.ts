@@ -374,6 +374,31 @@ describe('runExtractConversationFactsCore', () => {
           providerId: 'stub',
         };
       }
+      if (String(opts.system).includes('mandatory quality validator for conversation-derived')) {
+        const payload = JSON.parse(String(opts.messages[0]?.content ?? '{}')) as {
+          candidates?: Array<{ id: string }>;
+        };
+        return {
+          text: JSON.stringify({
+            decisions: (payload.candidates ?? []).map((candidate) => ({
+              id: candidate.id,
+              action: 'accept',
+              fully_supported: true,
+              exactly_one_proposition: true,
+              self_contained: true,
+              correct_entity_attribution: true,
+              no_hidden_causation: true,
+              no_overgeneralization: true,
+              no_sensitive_content: true,
+            })),
+          }),
+          blocks: [],
+          stopReason: 'end',
+          usage: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 0, cache_creation_tokens: 0 },
+          model: opts.model!,
+          providerId: 'stub-quality',
+        };
+      }
       if (chatFailure) throw chatFailure;
       const hook = chatHook;
       chatHook = null;
@@ -507,6 +532,60 @@ describe('runExtractConversationFactsCore', () => {
         date: '2026-06-01',
         raw_transcript: 'meetings/raw-speaker-example.raw/transcript.txt',
       },
+    });
+  });
+
+  test('pre-insert quality stop rejects sensitive facts without terminal/checkpoint writes', async () => {
+    const sensitiveFact = 'Alice can be reached at alice@example.test.';
+    let semanticCalls = 0;
+    const result = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default',
+      slug: 'conversations/imessage/alice-example',
+      sleepMs: 0,
+      extractor: async () => [{
+        fact: sensitiveFact,
+        kind: 'fact',
+        entity_slug: 'people/alice-example',
+        source: PER_SEGMENT_SOURCE_PREFIX,
+        confidence: 1,
+        notability: 'medium',
+        embedding: null,
+      }],
+      _qualitySemanticValidator: async () => {
+        semanticCalls++;
+        throw new Error('semantic validator must not see deterministic rejects');
+      },
+    });
+
+    expect(semanticCalls).toBe(0);
+    expect(result).toMatchObject({
+      facts_inserted: 0,
+      quality_candidates: 1,
+      quality_accepted: 0,
+      quality_rejected: 1,
+      quality_stop_triggered: true,
+      pages_failed: 1,
+    });
+    expect(result.quality_reason_counts).toEqual({ email: 1 });
+    const factRows = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM facts
+        WHERE source_markdown_slug = 'conversations/imessage/alice-example'
+          AND source LIKE 'cli:extract-conversation-facts%'`,
+    );
+    expect(factRows[0].n).toBe(0);
+    const checkpointRows = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM op_checkpoints WHERE op = 'extract-conversation-facts'`,
+    );
+    expect(checkpointRows[0].n).toBe(0);
+    const receipts = await engine.executeRaw<{ compiled_truth: string; frontmatter: Record<string, unknown> }>(
+      `SELECT compiled_truth, frontmatter FROM pages WHERE type = 'extract_receipt'`,
+    );
+    expect(receipts).toHaveLength(1);
+    expect(JSON.stringify(receipts[0])).not.toContain(sensitiveFact);
+    expect(receipts[0].frontmatter.quality).toMatchObject({
+      candidate_count: 1,
+      rejected_count: 1,
+      stop_triggered: true,
     });
   });
 

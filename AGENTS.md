@@ -101,6 +101,15 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   and an exact contiguous evidence span. One page transaction banks all claim
   rows plus one terminal `proposal_page_runs` marker; empty outcomes live only
   in that marker, never as fake proposal tombstones. Dry-run writes neither.
+- **Conversation-facts pre-insert gate:** every `extract-conversation-facts`
+  candidate passes deterministic sensitive scanning, one batched semantic check
+  for support/atomicity/self-containedness/entity attribution/causation/generalization,
+  then exact/typed/near-duplicate and supersession classification before INSERT.
+  Split repair is allowed only for directly supported propositions with bounded
+  fanout. Invalid JSON, timeout, route failure, sensitive content, or threshold
+  breach stops the batch without terminal/checkpoint completion; aggregate-only
+  receipts expose counts/reason codes and actual route/model, never raw text.
+  Keep the automatic facts cycle disabled and scope bounded runs to conversation.
 - **Trusted migration writes:** `put_page migration_mode` / CLI
   `gbrain put ... --migration-mode` is restricted to `ctx.remote === false`.
   It preserves the page/import/write-through path but suppresses only the

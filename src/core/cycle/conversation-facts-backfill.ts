@@ -237,6 +237,9 @@ export async function runPhaseConversationFactsBackfill(
             workers: cfg.workers,
           }, opts.signal);
           perSourceResults[src.id] = result;
+          if (result.quality_stop_triggered) {
+            break;
+          }
           if (result.budget_exhausted) {
             // Brain-wide cap hit. Remaining sources skipped.
             skippedByBrainWideCap = Math.max(
@@ -272,6 +275,17 @@ export async function runPhaseConversationFactsBackfill(
             segments_processed: 0,
             facts_extracted: 0,
             facts_inserted: 0,
+            quality_candidates: 0,
+            quality_accepted: 0,
+            quality_rejected: 0,
+            quality_splits: 0,
+            quality_duplicates: 0,
+            quality_supersessions: 0,
+            quality_reason_counts: {},
+            quality_stop_triggered: false,
+            quality_stop_reasons: [],
+            quality_actual_models: [],
+            quality_actual_routes: [],
             error: (err as Error).message,
           };
         }

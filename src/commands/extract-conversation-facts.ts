@@ -296,6 +296,8 @@ export interface ExtractConversationFactsCoreOpts {
    * dedup → provenance all execute THIS production pipeline with zero LLM calls.
    */
   extractor?: (input: ExtractInput) => Promise<ExtractedFact[]>;
+  /** Test seam for the mandatory pre-insert semantic quality validator. */
+  _qualitySemanticValidator?: ConversationFactSemanticValidator;
 }
 
 export interface ExtractConversationFactsResult {
@@ -335,6 +337,17 @@ export interface ExtractConversationFactsResult {
   segments_processed: number;
   facts_extracted: number;
   facts_inserted: number;
+  quality_candidates: number;
+  quality_accepted: number;
+  quality_rejected: number;
+  quality_splits: number;
+  quality_duplicates: number;
+  quality_supersessions: number;
+  quality_reason_counts: Record<string, number>;
+  quality_stop_triggered: boolean;
+  quality_stop_reasons: string[];
+  quality_actual_models: string[];
+  quality_actual_routes: string[];
   budget_exhausted?: boolean;
   spent_usd?: number;
 }
@@ -361,6 +374,15 @@ import {
 import { readConversationBodyForParsing } from '../core/conversation-parser/body.ts';
 import { runLlmFallback } from '../core/conversation-parser/llm-fallback.ts';
 import { resolveModel } from '../core/model-config.ts';
+import {
+  gatewayConversationFactSemanticValidator,
+  loadConversationFactExisting,
+  loadConversationFactQualityConfig,
+  runConversationFactQualityGate,
+  type ConversationFactQualityConfig,
+  type ConversationFactQualityReceipt,
+  type ConversationFactSemanticValidator,
+} from '../core/facts/conversation-quality-gate.ts';
 
 /**
  * v0.41.13.0 — back-compat shape for direct callers + the existing
@@ -686,6 +708,8 @@ interface ExtractCoreState {
    * `extractFactsFromTurnWithOutcome` path runs.
    */
   extractor?: (input: ExtractInput) => Promise<ExtractedFact[]>;
+  qualityConfig: ConversationFactQualityConfig;
+  qualitySemanticValidator: ConversationFactSemanticValidator;
   /**
    * v0.41.15.0 (D11): shared per-(sourceId, slug) checkpoint map mutated
    * in place from processPage callers. Map.set is atomic in JS's single-
@@ -700,6 +724,41 @@ interface ExtractCoreState {
    * parser path.
    */
   llmFallbackModel: string | null;
+}
+
+class ConversationFactQualityStopError extends Error {
+  constructor(public readonly reasons: string[]) {
+    super(`conversation fact quality stop: ${reasons.join(',')}`);
+    this.name = 'ConversationFactQualityStopError';
+  }
+}
+
+function mergeQualityReceipt(
+  result: ExtractConversationFactsResult,
+  receipt: ConversationFactQualityReceipt,
+): void {
+  result.quality_candidates += receipt.candidate_count;
+  result.quality_accepted += receipt.accepted_count;
+  result.quality_rejected += receipt.rejected_count;
+  result.quality_splits += receipt.split_count;
+  result.quality_duplicates += receipt.duplicate_count;
+  result.quality_supersessions += receipt.supersession_count;
+  for (const [reason, count] of Object.entries(receipt.reason_counts)) {
+    result.quality_reason_counts[reason] =
+      (result.quality_reason_counts[reason] ?? 0) + Number(count ?? 0);
+  }
+  if (receipt.actual_model && !result.quality_actual_models.includes(receipt.actual_model)) {
+    result.quality_actual_models.push(receipt.actual_model);
+  }
+  for (const route of receipt.actual_route ?? []) {
+    if (!result.quality_actual_routes.includes(route)) result.quality_actual_routes.push(route);
+  }
+  if (receipt.stop_triggered) {
+    result.quality_stop_triggered = true;
+    for (const reason of receipt.stop_reasons) {
+      if (!result.quality_stop_reasons.includes(reason)) result.quality_stop_reasons.push(reason);
+    }
+  }
 }
 
 function cpMapKey(sourceId: string, slug: string): string {
@@ -1032,6 +1091,30 @@ async function processPage(
     segmentsThisPage++;
     state.result.facts_extracted += extracted.length;
 
+    if (extracted.length > 0) {
+      const existingFacts = await loadConversationFactExisting(
+        state.engine,
+        state.sourceId,
+        page.slug,
+        extracted
+          .map((fact) => fact.entity_slug)
+          .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0),
+      );
+      const quality = await runConversationFactQualityGate({
+        sourceText: text,
+        candidates: extracted,
+        existingFacts,
+        config: state.qualityConfig,
+        semanticValidator: state.qualitySemanticValidator,
+        signal: state.signal,
+      });
+      mergeQualityReceipt(state.result, quality.receipt);
+      if (quality.receipt.stop_triggered) {
+        throw new ConversationFactQualityStopError(quality.receipt.stop_reasons);
+      }
+      extracted = quality.accepted.map((entry) => entry.fact);
+    }
+
     if (!state.dryRun && extracted.length > 0) {
       // Eng-v2 C1 / E11: page-global row_num. Each fact in this batch gets
       // a unique row_num within (source_id, source_markdown_slug); the
@@ -1194,6 +1277,17 @@ export async function runExtractConversationFactsCore(
     segments_processed: 0,
     facts_extracted: 0,
     facts_inserted: 0,
+    quality_candidates: 0,
+    quality_accepted: 0,
+    quality_rejected: 0,
+    quality_splits: 0,
+    quality_duplicates: 0,
+    quality_supersessions: 0,
+    quality_reason_counts: {},
+    quality_stop_triggered: false,
+    quality_stop_reasons: [],
+    quality_actual_models: [],
+    quality_actual_routes: [],
   };
 
   // F2: honor brain-wide kill-switch unless overridden.
@@ -1245,6 +1339,31 @@ export async function runExtractConversationFactsCore(
         fallback: 'anthropic:claude-haiku-4-5-20251001',
       })
     : null;
+  const qualityConfig = await loadConversationFactQualityConfig(engine);
+  const deterministicExtractorValidator: ConversationFactSemanticValidator | undefined =
+    opts.extractor && !opts._qualitySemanticValidator
+      ? async (request) => ({
+          payload: {
+            decisions: request.candidates.map((candidate) => ({
+              id: candidate.id,
+              action: 'accept',
+              fully_supported: true,
+              exactly_one_proposition: true,
+              self_contained: true,
+              correct_entity_attribution: true,
+              no_hidden_causation: true,
+              no_overgeneralization: true,
+              no_sensitive_content: true,
+            })),
+          },
+          actualModel: 'test:injected-extractor',
+          actualRoute: ['test'],
+        })
+      : undefined;
+  const qualitySemanticValidator =
+    opts._qualitySemanticValidator ??
+    deterministicExtractorValidator ??
+    gatewayConversationFactSemanticValidator;
 
   const state: ExtractCoreState = {
     result,
@@ -1256,6 +1375,8 @@ export async function runExtractConversationFactsCore(
     types,
     signal,
     extractor: opts.extractor,
+    qualityConfig,
+    qualitySemanticValidator,
     cpMap: new Map(),
     llmFallbackModel,
   };
@@ -1402,13 +1523,20 @@ export async function runExtractConversationFactsCore(
             workers,
             signal,
             onItem: (page) => processPageWithLock(page),
-            onError: (error) => (isAbortError(error) ? 'abort' : 'continue'),
+            onError: (error) =>
+              isAbortError(error) || error instanceof ConversationFactQualityStopError
+                ? 'abort'
+                : 'continue',
             failureLabel: (page) => page.slug,
           });
           const cancellation = poolResult.failures.find((failure) =>
             isAbortError(failure.error),
           );
           if (cancellation) throw cancellation.error;
+          const qualityStop = poolResult.failures.find((failure) =>
+            failure.error instanceof ConversationFactQualityStopError,
+          );
+          if (qualityStop) throw qualityStop.error;
           if (signal?.aborted) {
             if (signal.reason instanceof Error) throw signal.reason;
             throw Object.assign(new Error('caller cancelled'), {
@@ -1476,6 +1604,12 @@ export async function runExtractConversationFactsCore(
       // surface. NOT a thrown failure.
       return result;
     }
+    if (err instanceof ConversationFactQualityStopError) {
+      result.quality_stop_triggered = true;
+      result.pages_failed++;
+      if (!dryRun) await writeRunReceiptAndRollup(engine, sourceId, result, /* halted */ true);
+      return result;
+    }
     throw err;
   }
 
@@ -1533,8 +1667,8 @@ async function writeRunReceiptAndRollup(
   // receipt slug. shortRunId() truncates to 8 chars.
   const runId = `ecf-${Date.now().toString(36)}-${sourceId.slice(0, 4)}`;
 
-  // Receipt write: only when the run actually inserted facts.
-  if (result.facts_inserted > 0) {
+  // Receipt write: facts and quality-only outcomes are both auditable.
+  if (result.facts_inserted > 0 || result.quality_candidates > 0) {
     try {
       await writeReceipt(engine, {
         kind: 'facts.conversation',
@@ -1544,6 +1678,23 @@ async function writeRunReceiptAndRollup(
         extracted_at: now,
         total_rows: result.facts_inserted,
         cost_usd: result.spent_usd ?? 0,
+        quality: {
+          candidate_count: result.quality_candidates,
+          accepted_count: result.quality_accepted,
+          rejected_count: result.quality_rejected,
+          split_count: result.quality_splits,
+          duplicate_count: result.quality_duplicates,
+          supersession_count: result.quality_supersessions,
+          reason_counts: { ...result.quality_reason_counts },
+          ...(result.quality_actual_models[0]
+            ? { actual_model: result.quality_actual_models[0] }
+            : {}),
+          ...(result.quality_actual_routes.length > 0
+            ? { actual_route: [...result.quality_actual_routes] }
+            : {}),
+          stop_triggered: result.quality_stop_triggered,
+          stop_reasons: [...result.quality_stop_reasons],
+        },
         summary:
           `Extracted ${result.facts_inserted} facts from ` +
           `${result.pages_processed}/${result.pages_considered} eligible pages` +
@@ -1829,6 +1980,17 @@ export async function runExtractConversationFacts(
     segments_processed: 0,
     facts_extracted: 0,
     facts_inserted: 0,
+    quality_candidates: 0,
+    quality_accepted: 0,
+    quality_rejected: 0,
+    quality_splits: 0,
+    quality_duplicates: 0,
+    quality_supersessions: 0,
+    quality_reason_counts: {},
+    quality_stop_triggered: false,
+    quality_stop_reasons: [],
+    quality_actual_models: [],
+    quality_actual_routes: [],
   };
   let totalSpent = 0;
   let anyBudgetExhausted = false;
@@ -1874,10 +2036,33 @@ export async function runExtractConversationFacts(
       aggregate.segments_processed += perSource.segments_processed;
       aggregate.facts_extracted += perSource.facts_extracted;
       aggregate.facts_inserted += perSource.facts_inserted;
+      aggregate.quality_candidates += perSource.quality_candidates;
+      aggregate.quality_accepted += perSource.quality_accepted;
+      aggregate.quality_rejected += perSource.quality_rejected;
+      aggregate.quality_splits += perSource.quality_splits;
+      aggregate.quality_duplicates += perSource.quality_duplicates;
+      aggregate.quality_supersessions += perSource.quality_supersessions;
+      for (const [reason, count] of Object.entries(perSource.quality_reason_counts)) {
+        aggregate.quality_reason_counts[reason] =
+          (aggregate.quality_reason_counts[reason] ?? 0) + count;
+      }
+      for (const model of perSource.quality_actual_models) {
+        if (!aggregate.quality_actual_models.includes(model)) aggregate.quality_actual_models.push(model);
+      }
+      for (const route of perSource.quality_actual_routes) {
+        if (!aggregate.quality_actual_routes.includes(route)) aggregate.quality_actual_routes.push(route);
+      }
+      if (perSource.quality_stop_triggered) {
+        aggregate.quality_stop_triggered = true;
+        for (const reason of perSource.quality_stop_reasons) {
+          if (!aggregate.quality_stop_reasons.includes(reason)) aggregate.quality_stop_reasons.push(reason);
+        }
+      }
       if (perSource.budget_exhausted) anyBudgetExhausted = true;
       if (perSource.spent_usd) totalSpent += perSource.spent_usd;
 
       progress.tick(1, `${sourceId}: ${perSource.facts_inserted} facts inserted`);
+      if (perSource.quality_stop_triggered) break;
     }
   } finally {
     progress.finish();
@@ -1920,6 +2105,16 @@ export async function runExtractConversationFacts(
   }
   if (aggregate.orphan_facts_cleaned > 0) {
     console.log(`  Cleaned ${aggregate.orphan_facts_cleaned} orphan fact(s) from prior partial runs (D11 replay safety).`);
+  }
+  if (aggregate.quality_candidates > 0) {
+    console.log(
+      `  Quality gate: ${aggregate.quality_accepted}/${aggregate.quality_candidates} accepted, ` +
+      `${aggregate.quality_rejected} rejected, ${aggregate.quality_duplicates} duplicate(s), ` +
+      `${aggregate.quality_supersessions} supersession(s).`,
+    );
+  }
+  if (aggregate.quality_stop_triggered) {
+    console.error(`  Quality stop triggered: ${aggregate.quality_stop_reasons.join(',')}. Full drain remains halted.`);
   }
   if (anyBudgetExhausted) {
     console.log(`  Budget cap reached. Re-run with a higher --max-cost-usd to continue.`);

@@ -50,6 +50,21 @@ export type ExtractReceiptRound =
   | 'full'
   | 'single';
 
+/** Aggregate-only quality metadata. Raw candidates/source text are forbidden. */
+export interface ExtractQualityReceipt {
+  candidate_count: number;
+  accepted_count: number;
+  rejected_count: number;
+  split_count: number;
+  duplicate_count: number;
+  supersession_count: number;
+  reason_counts: Record<string, number> | Partial<Record<string, number>>;
+  actual_model?: string;
+  actual_route?: string[];
+  stop_triggered: boolean;
+  stop_reasons: string[];
+}
+
 /**
  * Input to writeReceipt. Optional fields are recorded in frontmatter
  * only when the caller provides them, so receipts stay clean for
@@ -86,6 +101,8 @@ export interface ExtractReceiptInput {
   eval_score?: number;
   /** Human-readable summary line (1-2 sentences). */
   summary?: string;
+  /** Aggregate quality-gate receipt. Never accepts raw source/candidate text. */
+  quality?: ExtractQualityReceipt;
 }
 
 const RUN_ID_SHORT_LEN = 8;
@@ -171,7 +188,68 @@ function buildReceiptBody(input: ExtractReceiptInput): string {
       : '';
     lines.push(`Eval gate: **${verdict}**${score}`);
   }
+  const quality = sanitizeQualityReceipt(input.quality);
+  if (quality) {
+    lines.push('');
+    lines.push('## Quality gate');
+    lines.push(`Candidates: **${quality.candidate_count}**`);
+    lines.push(`Accepted: **${quality.accepted_count}**`);
+    lines.push(`Rejected: **${quality.rejected_count}**`);
+    lines.push(`Split: **${quality.split_count}**`);
+    lines.push(`Duplicates: **${quality.duplicate_count}**`);
+    lines.push(`Supersessions: **${quality.supersession_count}**`);
+    const reasonSummary = Object.entries(quality.reason_counts)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([reason, count]) => `${reason}=${count}`)
+      .join(', ');
+    if (reasonSummary) lines.push(`Reasons: ${reasonSummary}`);
+    if (quality.actual_model) lines.push(`Quality model: \`${quality.actual_model}\``);
+    if (quality.actual_route?.length) {
+      lines.push(`Quality route: ${quality.actual_route.map((hop) => `\`${hop}\``).join(' → ')}`);
+    }
+    lines.push(`Stop gate: **${quality.stop_triggered ? 'TRIGGERED' : 'clear'}**`);
+  }
   return lines.join('\n') + '\n';
+}
+
+function sanitizeQualityReceipt(
+  input: ExtractQualityReceipt | undefined,
+): ExtractQualityReceipt | undefined {
+  if (!input) return undefined;
+  const count = (value: unknown): number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? Math.floor(value)
+      : 0;
+  const safeToken = (value: unknown): string | undefined =>
+    typeof value === 'string' && /^[A-Za-z0-9_.:/@+\-]{1,200}$/.test(value)
+      ? value
+      : undefined;
+  const reason_counts: Record<string, number> = {};
+  if (input.reason_counts && typeof input.reason_counts === 'object') {
+    for (const [reason, value] of Object.entries(input.reason_counts)) {
+      if (!/^[a-z][a-z0-9_]{0,63}$/.test(reason)) continue;
+      reason_counts[reason] = count(value);
+    }
+  }
+  const actual_model = safeToken(input.actual_model);
+  const actual_route = Array.isArray(input.actual_route)
+    ? input.actual_route.map(safeToken).filter((value): value is string => !!value)
+    : undefined;
+  return {
+    candidate_count: count(input.candidate_count),
+    accepted_count: count(input.accepted_count),
+    rejected_count: count(input.rejected_count),
+    split_count: count(input.split_count),
+    duplicate_count: count(input.duplicate_count),
+    supersession_count: count(input.supersession_count),
+    reason_counts,
+    ...(actual_model ? { actual_model } : {}),
+    ...(actual_route && actual_route.length > 0 ? { actual_route } : {}),
+    stop_triggered: input.stop_triggered === true,
+    stop_reasons: Array.isArray(input.stop_reasons)
+      ? input.stop_reasons.map(safeToken).filter((value): value is string => !!value)
+      : [],
+  };
 }
 
 /**
@@ -203,6 +281,8 @@ function buildReceiptFrontmatter(input: ExtractReceiptInput): Record<string, unk
   if (input.rejected_by_reason) fm.rejected_by_reason = input.rejected_by_reason;
   if (typeof input.eval_pass === 'boolean') fm.eval_pass = input.eval_pass;
   if (typeof input.eval_score === 'number') fm.eval_score = input.eval_score;
+  const quality = sanitizeQualityReceipt(input.quality);
+  if (quality) fm.quality = quality;
   return fm;
 }
 
