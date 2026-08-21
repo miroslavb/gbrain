@@ -338,6 +338,21 @@ export interface MaybeBackgroundOpts {
   paramBuilder: (args: string[]) => Record<string, unknown>;
   /** Source id for the idempotency key namespace. Default 'cli'. */
   source?: string;
+  /** Command-specific wall-clock bound. Explicit global --timeout wins. */
+  timeoutMs?: number;
+}
+
+export function buildBackgroundJobOptions(idempotency_key: string, timeoutMs?: number) {
+  const options: {
+    queue: string;
+    idempotency_key: string;
+    max_attempts: number;
+    timeout_ms?: number;
+  } = { queue: 'default', idempotency_key, max_attempts: 2 };
+  if (typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    options.timeout_ms = Math.floor(timeoutMs);
+  }
+  return options;
 }
 
 /**
@@ -375,11 +390,12 @@ export async function maybeBackground(opts: MaybeBackgroundOpts): Promise<boolea
   try {
     const { MinionQueue } = await import('./minions/queue.ts');
     const queue = new MinionQueue(opts.engine);
-    const job = await queue.add(opts.jobName, params, {
-      queue: 'default',
-      idempotency_key,
-      max_attempts: 2,
-    });
+    const timeoutMs = getCliOptions().timeoutMs ?? opts.timeoutMs;
+    const job = await queue.add(
+      opts.jobName,
+      params,
+      buildBackgroundJobOptions(idempotency_key, timeoutMs ?? undefined),
+    );
     process.stdout.write(`job_id=${job.id}\n`);
 
     if (follow) {

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { parseGlobalFlags, cliOptsToProgressOptions, DEFAULT_CLI_OPTIONS, setCliOptions, getCliOptions, _resetCliOptionsForTest } from '../src/core/cli-options.ts';
+import { parseGlobalFlags, cliOptsToProgressOptions, DEFAULT_CLI_OPTIONS, setCliOptions, getCliOptions, _resetCliOptionsForTest, buildBackgroundJobOptions } from '../src/core/cli-options.ts';
 
 describe('parseGlobalFlags', () => {
   test('empty argv → defaults, empty rest', () => {
@@ -99,6 +99,21 @@ describe('getCliOptions / setCliOptions singleton', () => {
     setCliOptions({ quiet: false, progressJson: true, progressInterval: 250, timeoutMs: null, explain: false, brain: null });
     expect(getCliOptions().progressJson).toBe(true);
     expect(getCliOptions().progressInterval).toBe(250);
+  });
+});
+
+describe('background job options', () => {
+  test('keeps legacy NULL timeout unless a command supplies one', () => {
+    expect(buildBackgroundJobOptions('key')).toEqual({
+      queue: 'default', idempotency_key: 'key', max_attempts: 2,
+    });
+  });
+
+  test('propagates a bounded command-specific timeout', () => {
+    expect(buildBackgroundJobOptions('key', 7_200_000)).toEqual({
+      queue: 'default', idempotency_key: 'key', max_attempts: 2,
+      timeout_ms: 7_200_000,
+    });
   });
 });
 

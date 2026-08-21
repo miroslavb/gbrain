@@ -41,6 +41,7 @@ import {
   ALLOWED_TYPES,
   pageTypesForAllowed,
   ALLOWED_TYPE_ALIASES,
+  estimateExtractFactsBackgroundTimeoutMs,
 } from '../src/commands/extract-conversation-facts.ts';
 import { _resetLlmCacheForTests } from '../src/core/conversation-parser/llm-base.ts';
 import { BudgetExhausted } from '../src/core/budget/budget-tracker.ts';
@@ -83,6 +84,19 @@ describe('pageTypesForAllowed', () => {
 
   test('empty input yields empty output', () => {
     expect(pageTypesForAllowed([])).toEqual([]);
+  });
+});
+
+describe('background timeout sizing', () => {
+  test('small batches get a ten-minute floor', () => {
+    expect(estimateExtractFactsBackgroundTimeoutMs(['--limit', '1'])).toBe(600_000);
+    expect(estimateExtractFactsBackgroundTimeoutMs(['--limit', '3'])).toBe(600_000);
+  });
+
+  test('measured per-page budget scales and caps at two hours', () => {
+    expect(estimateExtractFactsBackgroundTimeoutMs(['--limit', '10'])).toBe(1_020_000);
+    expect(estimateExtractFactsBackgroundTimeoutMs(['--limit', '100'])).toBe(7_200_000);
+    expect(estimateExtractFactsBackgroundTimeoutMs([])).toBe(7_200_000);
   });
 });
 

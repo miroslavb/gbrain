@@ -1721,6 +1721,8 @@ Options:
                          safety (delete-orphans-first on each page claim).
   --override-disabled    Bypass facts.extraction_enabled=false brain-wide kill-switch.
   --background           Submit as a Minion job; print job_id; exit (use 'gbrain jobs follow').
+                         Wall-clock timeout is sized from --limit (10 min floor,
+                         90 s/page + 2 min, 2 h cap); global --timeout overrides.
   --yes                  Auto-confirm cost preview in non-TTY contexts.
   --help, -h             Show this help.
 
@@ -1756,6 +1758,25 @@ function buildJobParams(args: string[]): Record<string, unknown> {
   };
 }
 
+const BACKGROUND_TIMEOUT_FLOOR_MS = 10 * 60 * 1000;
+const BACKGROUND_TIMEOUT_CAP_MS = 2 * 60 * 60 * 1000;
+const BACKGROUND_ESTIMATED_MS_PER_PAGE = 90 * 1000;
+const BACKGROUND_STARTUP_HEADROOM_MS = 2 * 60 * 1000;
+
+/**
+ * Size a bounded Minion wall-clock timeout from measured subscription-backed
+ * extraction latency. The terminal per-page sentinel makes timeout/retry safe;
+ * this bound only prevents the generic 180s NULL-timeout fallback from killing
+ * healthy batches. Explicit global `--timeout` still wins in maybeBackground.
+ */
+export function estimateExtractFactsBackgroundTimeoutMs(args: string[]): number {
+  const filtered = args.filter((arg) => arg !== '--background' && arg !== '--follow');
+  const parsed = parseArgs(filtered);
+  const pages = parsed.slug ? 1 : (parsed.limit ?? 100);
+  const estimate = pages * BACKGROUND_ESTIMATED_MS_PER_PAGE + BACKGROUND_STARTUP_HEADROOM_MS;
+  return Math.min(BACKGROUND_TIMEOUT_CAP_MS, Math.max(BACKGROUND_TIMEOUT_FLOOR_MS, estimate));
+}
+
 export async function runExtractConversationFacts(
   engine: BrainEngine,
   args: string[],
@@ -1772,6 +1793,7 @@ export async function runExtractConversationFacts(
     args,
     jobName: 'extract-conversation-facts',
     paramBuilder: buildJobParams,
+    timeoutMs: estimateExtractFactsBackgroundTimeoutMs(args),
   });
   if (backgrounded) return;
 
