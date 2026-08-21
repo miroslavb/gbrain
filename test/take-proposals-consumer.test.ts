@@ -46,6 +46,8 @@ describe('read-only take proposal consumer', () => {
     );
 
     expect(rows).toHaveLength(2);
+    expect(() => JSON.stringify(rows)).not.toThrow();
+    expect(typeof rows[0].id).toBe('string');
     expect(rows.find((row) => row.page_slug === 'concepts/grounded')?.grounding_status).toBe('grounded');
     expect(rows.find((row) => row.page_slug === 'concepts/legacy')?.grounding_status).toBe('legacy_unverified');
     expect(after).toEqual(before);

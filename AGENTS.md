@@ -105,7 +105,8 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   in that marker, never as fake proposal tombstones. Dry-run writes neither.
 - **Take proposal consumer:** `gbrain takes proposals` is read-only and uses a
   narrow projection over `take_proposals`; it never changes status or writes
-  takes. It defaults to pending/current-source, supports status/run/limit/JSON
+  takes. BIGSERIAL proposal IDs are projected as text so JSON output is safe.
+  It defaults to pending/current-source, supports status/run/limit/JSON
   filters, labels rows with both evidence span and versioned source hash as
   `grounded`, and labels every legacy row missing either field
   `legacy_unverified`. Accept/reject/promotion mutations remain a separate,

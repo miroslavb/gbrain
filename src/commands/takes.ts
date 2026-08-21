@@ -132,7 +132,7 @@ function writeBody(path: string, body: string): void {
 export type TakeProposalStatus = 'pending' | 'accepted' | 'rejected' | 'superseded';
 
 export interface TakeProposalView {
-  id: number;
+  id: string;
   source_id: string;
   page_slug: string;
   status: TakeProposalStatus;
@@ -164,7 +164,7 @@ export async function listTakeProposals(
   }
   params.push(limit);
   const rows = await engine.executeRaw<Omit<TakeProposalView, 'grounding_status'>>(
-    `SELECT id, source_id, page_slug, status, claim_text, kind, holder, weight,
+    `SELECT id::text AS id, source_id, page_slug, status, claim_text, kind, holder, weight,
             domain, model_id, evidence_span, source_hash, proposal_run_id, proposed_at
        FROM take_proposals
       WHERE ${where.join(' AND ')}
