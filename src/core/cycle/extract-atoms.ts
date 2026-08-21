@@ -186,6 +186,15 @@ interface ExtractedAtom {
 
 /** kebab-case validator for concept labels ("captive-portal", "channel-pricing"). */
 const CONCEPT_LABEL_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const MAX_GROUNDED_BODY_CHARS = 280;
+
+function isSingleAtomicSentence(value: string, maxChars: number): boolean {
+  const text = value.trim();
+  if (!text || text.length > maxChars) return false;
+  if (/[\n\r;]/.test(text) || /^[-*]\s/m.test(text)) return false;
+  const boundaries = text.match(/[.!?](?=\s|$)/g) ?? [];
+  return boundaries.length <= 1;
+}
 
 const EXTRACT_PROMPT = `You extract atomic content nuggets from a transcript.
 
@@ -193,13 +202,15 @@ An atom is a single-source, self-contained idea containing exactly one independe
   - Stand alone with enough names/context to understand it (no "as discussed above")
   - Make one clear, specific point; split independent claims into separate atoms
   - Be supported by source_quote, an exact contiguous substring of the source (required, ≤200 chars)
-  - Keep body and lesson within what the source supports
+  - body MUST be exactly one sentence (≤280 chars) paraphrasing only that quote
+  - lesson MUST be omitted; it would create a second claim surface
+  - Never join independent claims with "and", "but", "while", a semicolon, or a list; split them into separate atoms
   - Do not infer causation, generalize beyond the source, or invent quantities
 
 If the source does not support at least one such atom, Return [] exactly.
 Output a JSON array of atoms (1-3 per transcript, never more than 3).
-Each atom: {title (≤80 chars), atom_type, body (2-4 sentences),
-source_quote (verbatim contiguous substring ≤200 chars), lesson (one sentence), concepts
+Each atom: {title (≤80 chars; one claim only), atom_type, body (exactly one sentence, ≤280 chars),
+source_quote (verbatim contiguous single-sentence substring ≤200 chars), concepts
 (1-3 topic labels), virality_score (0-100), emotional_register (one of:
 shocking, inspiring, funny, sobering, practical, controversial)}.
 
@@ -848,19 +859,21 @@ export function parseAtomsResponse(raw: string, sourceText?: string): ExtractedA
     const obj = item as Record<string, unknown>;
     const title = typeof obj.title === 'string' ? obj.title.slice(0, 80) : null;
     const atomType = typeof obj.atom_type === 'string' ? obj.atom_type.trim().toLowerCase() : null;
-    const body = typeof obj.body === 'string' ? obj.body : null;
+    const body = typeof obj.body === 'string' ? obj.body.trim() : null;
     const sourceQuote = typeof obj.source_quote === 'string' ? obj.source_quote.trim() : null;
     if (!title || !atomType || !body) continue;
     if (!ATOM_TYPES.includes(atomType as typeof ATOM_TYPES[number])) continue;
     if (requireGrounding) {
       if (!sourceQuote || sourceQuote.length > 200 || !sourceText!.includes(sourceQuote)) continue;
+      if (!isSingleAtomicSentence(body, MAX_GROUNDED_BODY_CHARS)) continue;
+      if (!isSingleAtomicSentence(sourceQuote, 200)) continue;
     }
     atoms.push({
       title,
       atom_type: atomType as typeof ATOM_TYPES[number],
       body,
       source_quote: sourceQuote ? sourceQuote.slice(0, 200) : undefined,
-      lesson: typeof obj.lesson === 'string' ? obj.lesson : undefined,
+      lesson: requireGrounding ? undefined : (typeof obj.lesson === 'string' ? obj.lesson : undefined),
       concepts: (() => {
         if (!Array.isArray(obj.concepts)) return undefined;
         const labels = obj.concepts

@@ -101,6 +101,27 @@ describe('v0.41 T5: parseAtomsResponse', () => {
     expect(parseAtomsResponse(raw, `before ${quote} after ${'context '.repeat(80)}`)).toEqual([]);
   });
 
+  test('source-grounded mode enforces a single-sentence atomic body and quote', () => {
+    const source = `One evidence sentence. Second evidence sentence. ${'context '.repeat(80)}`;
+    const base = { title: 'T', atom_type: 'insight', source_quote: 'One evidence sentence.' };
+    const twoSentences = JSON.stringify([{ ...base, body: 'First claim. Second claim.' }]);
+    const semicolon = JSON.stringify([{ ...base, body: 'First claim; second claim.' }]);
+    const overlong = JSON.stringify([{ ...base, body: 'x'.repeat(281) }]);
+    const multiQuote = JSON.stringify([{
+      ...base,
+      body: 'One claim.',
+      source_quote: 'One evidence sentence. Second evidence sentence.',
+    }]);
+    const grounded = JSON.stringify([{ ...base, body: 'One claim.', lesson: 'A second derived lesson.' }]);
+    expect(parseAtomsResponse(twoSentences, source)).toEqual([]);
+    expect(parseAtomsResponse(semicolon, source)).toEqual([]);
+    expect(parseAtomsResponse(overlong, source)).toEqual([]);
+    expect(parseAtomsResponse(multiQuote, source)).toEqual([]);
+    const accepted = parseAtomsResponse(grounded, source);
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].lesson).toBeUndefined();
+  });
+
   test('accepts all 11 declared atom_type values', () => {
     const types = ['insight', 'anecdote', 'quote', 'framework', 'statistic',
                    'story_angle', 'strategy_angle', 'strategy', 'endorsement',
@@ -155,6 +176,9 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
     expect(system).toContain('contiguous substring');
     expect(system).toContain('Return []');
     expect(system).toContain('Do not infer causation');
+    expect(system).toContain('body MUST be exactly one sentence');
+    expect(system).toContain('lesson MUST be omitted');
+    expect(system).toContain('Never join independent claims');
   });
 
   test('extracts atoms from transcript via stub chat', async () => {
