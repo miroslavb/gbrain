@@ -3267,26 +3267,57 @@ function explicitFailedAttemptUsage(err: unknown): FailedAttemptUsage {
  */
 function failedAttemptHasConfirmedZeroUsage(err: unknown): boolean {
   const seen = new Set<object>();
-  let current: unknown = err;
-  while (current && typeof current === 'object' && !seen.has(current)) {
+  const queue: unknown[] = [err];
+  let safeEvidence = false;
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
     seen.add(current);
+
     const usage = explicitFailedAttemptUsage(current);
-    if (usage.state === 'complete') {
-      return usage.inputTokens === 0 && usage.outputTokens === 0;
-    }
     if (usage.state === 'partial') return false;
+    if (usage.state === 'complete') {
+      if (usage.inputTokens !== 0 || usage.outputTokens !== 0) return false;
+      safeEvidence = true;
+    }
 
     const error = current as {
       status?: unknown;
       statusCode?: unknown;
       response?: { status?: unknown };
       cause?: unknown;
+      lastError?: unknown;
+      errors?: unknown;
     };
     const status = error.status ?? error.statusCode ?? error.response?.status;
-    if (status === 429 || status === 401 || status === 403) return true;
-    current = error.cause;
+    if (status !== undefined && status !== null) {
+      if (status === 429 || status === 401 || status === 403) {
+        safeEvidence = true;
+      } else {
+        // A concrete non-safe provider status (including 5xx) is evidence that
+        // at least one retry attempt is billing-ambiguous. One safe sibling is
+        // not enough to make the aggregate RetryError safe.
+        return false;
+      }
+    }
+
+    const children: unknown[] = [];
+    if (error.cause && typeof error.cause === 'object') children.push(error.cause);
+    if (error.lastError && typeof error.lastError === 'object') children.push(error.lastError);
+    if (Array.isArray(error.errors)) {
+      children.push(...error.errors.filter(child => child && typeof child === 'object'));
+    }
+
+    if (children.length === 0 && usage.state === 'absent' && status === undefined) {
+      // Leaf with no status and no explicit usage: timeout, broken stream,
+      // malformed response, or another unknown provider outcome.
+      return false;
+    }
+    queue.push(...children);
   }
-  return false;
+
+  return safeEvidence;
 }
 
 async function runWithModelFallback<T>(

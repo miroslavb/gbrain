@@ -429,6 +429,48 @@ describe('chat fallback — billing-safe usage gate', () => {
     expect(attempts).toEqual([primary, codex]);
   });
 
+  test('continues when AI SDK RetryError wraps only pre-generation 429 attempts', async () => {
+    const attempts: string[] = [];
+    const apiErrors = [1, 2, 3].map(() =>
+      Object.assign(new Error('rate limited'), { statusCode: 429 }));
+    const retryError = Object.assign(new Error('Failed after 3 attempts'), {
+      errors: apiErrors,
+      lastError: apiErrors[2],
+    });
+    const normalized = Object.assign(new Error('[chat] Failed after 3 attempts'), {
+      cause: retryError,
+    });
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? primary;
+      attempts.push(model);
+      if (model === primary) throw normalized;
+      return success(model);
+    });
+
+    await expect(run()).resolves.toMatchObject({ model: codex });
+    expect(attempts).toEqual([primary, codex]);
+  });
+
+  test('fails closed when RetryError mixes safe 429 with ambiguous 500', async () => {
+    const attempts: string[] = [];
+    const rateLimit = Object.assign(new Error('rate limited'), { statusCode: 429 });
+    const serverError = Object.assign(new Error('server error'), { statusCode: 500 });
+    const retryError = Object.assign(new Error('Failed after 2 attempts'), {
+      errors: [rateLimit, serverError],
+      lastError: serverError,
+    });
+    const normalized = Object.assign(new Error('[chat] Failed after 2 attempts'), {
+      cause: retryError,
+    });
+    __setChatTransportForTests(async (opts) => {
+      attempts.push(opts.model ?? primary);
+      throw normalized;
+    });
+
+    await expect(run()).rejects.toBe(normalized);
+    expect(attempts).toEqual([primary]);
+  });
+
   test('continues after a pre-generation auth rejection without usage metadata', async () => {
     const attempts: string[] = [];
     __setChatTransportForTests(async (opts) => {
