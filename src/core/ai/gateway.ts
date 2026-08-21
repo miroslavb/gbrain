@@ -3251,6 +3251,14 @@ function explicitFailedAttemptUsage(err: unknown): FailedAttemptUsage {
  * safe to try the next configured provider. Everything else must carry an
  * explicit `0/0` usage payload; a timeout, 5xx, broken stream, or malformed
  * response is billing-ambiguous and therefore fails closed.
+ *
+ * 2026-08-19: 401/403 join 429. An auth rejection is refused at the edge before
+ * any generation, so usage is provably zero — the same reasoning that already
+ * admits 429. Leaving them out deadlocked the brain: `together:glm-5.2` returned
+ * 401 (account-side), the chain refused to fall back to a healthy Claude lane
+ * that was serving 3102 requests/day, and facts.conversation produced ZERO facts
+ * for four days while logging ~100 halts/day. Ambiguous failures (timeout, 5xx,
+ * broken stream) still fail closed — this widens only the provably-zero set.
  */
 function failedAttemptHasConfirmedZeroUsage(err: unknown): boolean {
   const seen = new Set<object>();
@@ -3270,7 +3278,7 @@ function failedAttemptHasConfirmedZeroUsage(err: unknown): boolean {
       cause?: unknown;
     };
     const status = error.status ?? error.statusCode ?? error.response?.status;
-    if (status === 429) return true;
+    if (status === 429 || status === 401 || status === 403) return true;
     current = error.cause;
   }
   return false;
@@ -3922,7 +3930,7 @@ export async function toolLoop(opts: ToolLoopOpts): Promise<ToolLoopResult> {
  * loud-fail (auth — should have been caught by doctor). Mirror of the
  * RemoteMcpError pattern in src/core/mcp-client.ts. */
 export class RerankError extends Error {
-  reason: 'auth' | 'rate_limit' | 'network' | 'timeout' | 'payload_too_large' | 'unknown';
+  reason: 'auth' | 'rate_limit' | 'network' | 'timeout' | 'payload_too_large' | 'input_too_large' | 'unknown';
   status?: number;
   constructor(message: string, reason: RerankError['reason'], status?: number) {
     super(message);
@@ -4115,8 +4123,12 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
       } catch {
         // Body read failed — preserve status-only message.
       }
+      const llamaInputTooLarge = resp.status >= 500 &&
+        /input \(\d+ tokens\) is too large to process[\s\S]*physical batch size/i.test(msg);
       const reason: RerankError['reason'] =
-        resp.status === 401 || resp.status === 403
+        llamaInputTooLarge
+          ? 'input_too_large'
+          : resp.status === 401 || resp.status === 403
           ? 'auth'
           : resp.status === 429
           ? 'rate_limit'

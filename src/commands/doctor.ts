@@ -1784,6 +1784,16 @@ export async function checkRerankerHealth(engine: BrainEngine): Promise<Check> {
       };
     }
 
+    const inputFails = failures.filter((f) => f.reason === 'input_too_large');
+    if (inputFails.length > 0) {
+      return {
+        name: 'reranker_health',
+        status: 'warn',
+        message: `${inputFails.length} reranker input-too-large failure(s) in last 7 days. ` +
+          'Fix: align llama.cpp --ctx-size and both -b/-ub with the longest admitted candidate, or split/cap the input.',
+      };
+    }
+
     const transientFails = failures.filter(
       (f) => f.reason === 'network' || f.reason === 'timeout' || f.reason === 'rate_limit',
     );

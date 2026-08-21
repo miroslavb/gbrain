@@ -11,6 +11,17 @@ describe('features command', () => {
     const mod = await import('../src/commands/features.ts');
     expect(typeof mod.featuresTeaserForDoctor).toBe('function');
   });
+
+  it('treats any active file-backed source as configured sync', async () => {
+    const { hasConfiguredSync } = await import('../src/commands/features.ts');
+    const engine = {
+      getConfig: async () => null,
+      listAllSources: async () => [{ id: 'custom', local_path: '/srv/custom-brain' }],
+    } as any;
+    expect(await hasConfiguredSync(engine)).toBe(true);
+    engine.listAllSources = async () => [];
+    expect(await hasConfiguredSync(engine)).toBe(false);
+  });
 });
 
 // Test the embedded recipe metadata

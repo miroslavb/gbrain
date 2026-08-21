@@ -218,6 +218,19 @@ describe('gateway.rerank() — error classification', () => {
     }
   });
 
+  test('500 llama.cpp physical-batch rejection → input_too_large', async () => {
+    __setRerankTransportForTests(async () => new Response(
+      'input (2308 tokens) is too large to process. increase the physical batch size (current batch size: 2048)',
+      { status: 500 },
+    ));
+    try {
+      await rerank({ query: 'q', documents: ['d'] });
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect((err as RerankError).reason).toBe('input_too_large');
+    }
+  });
+
   test('400 (non-classified) → unknown', async () => {
     __setRerankTransportForTests(async () => new Response('Bad request', { status: 400 }));
     try {

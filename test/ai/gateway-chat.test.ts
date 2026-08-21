@@ -340,6 +340,19 @@ describe('chat fallback — billing-safe usage gate', () => {
     expect(attempts).toEqual([primary, codex]);
   });
 
+  test('continues after a pre-generation auth rejection without usage metadata', async () => {
+    const attempts: string[] = [];
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? primary;
+      attempts.push(model);
+      if (model === primary) throw Object.assign(new Error('unauthorized'), { status: 401 });
+      return success(model);
+    });
+
+    await expect(run()).resolves.toMatchObject({ model: codex });
+    expect(attempts).toEqual([primary, codex]);
+  });
+
   test('reads confirmed zero usage through the production error wrapper', async () => {
     __setChatTransportForTests(null);
     configureGateway({

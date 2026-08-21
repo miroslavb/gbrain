@@ -146,6 +146,7 @@ describe('applyReranker — fail-open on every RerankError reason', () => {
     'network' as const,
     'timeout' as const,
     'payload_too_large' as const,
+    'input_too_large' as const,
     'unknown' as const,
   ])('fail-open on RerankError reason=%s', async (reason) => {
     const results = [

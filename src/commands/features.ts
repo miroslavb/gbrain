@@ -82,6 +82,19 @@ function shouldPitch(rec: FeatureRecommendation, offers: FeatureOffersFile, curr
 
 // --- Scanners ---
 
+export async function hasConfiguredSync(engine: BrainEngine): Promise<boolean> {
+  try {
+    const syncRepo = await engine.getConfig('sync.repo_path');
+    if (syncRepo?.trim()) return true;
+  } catch { /* inspect source registry next */ }
+  try {
+    const sources = await engine.listAllSources({ localPathOnly: true });
+    return sources.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function scanFeatures(engine: BrainEngine): Promise<FeatureScanResult> {
   const stats = await engine.getStats();
   const health = await engine.getHealth();
@@ -160,18 +173,15 @@ async function scanFeatures(engine: BrainEngine): Promise<FeatureScanResult> {
     }
 
     // No sync configured
-    try {
-      const syncRepo = await engine.getConfig('sync.repo_path');
-      if (!syncRepo) {
-        recommendations.push({
-          id: 'no-sync', priority: 2,
-          title: 'Configure Sync',
-          pitch: `Brain not syncing from git. Changes in your repo don't reach your brain.`,
-          command: 'gbrain sync --repo <path>',
-          auto_fixable: false,
-        });
-      }
-    } catch { /* skip */ }
+    if (!(await hasConfiguredSync(engine))) {
+      recommendations.push({
+        id: 'no-sync', priority: 2,
+        title: 'Configure Sync',
+        pitch: `Brain not syncing from git. Changes in your repo don't reach your brain.`,
+        command: 'gbrain sync --repo <path>',
+        auto_fixable: false,
+      });
+    }
   }
 
   return {

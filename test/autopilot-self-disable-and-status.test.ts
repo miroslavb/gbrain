@@ -16,6 +16,7 @@ import {
   autopilotStatusExitCode,
   autopilotLaunchdLabel,
   autopilotEngineIdentity,
+  resolveAutopilotStatusInterval,
   AUTOPILOT_SYSTEMD_UNIT,
 } from '../src/commands/autopilot.ts';
 
@@ -89,6 +90,7 @@ describe('crontabIndicatesAutopilotInstall', () => {
   test('wrapper line and direct daemon line count as installs', () => {
     expect(crontabIndicatesAutopilotInstall("*/5 * * * * '/h/.gbrain/autopilot-run.sh' >> log 2>&1")).toBe(true);
     expect(crontabIndicatesAutopilotInstall('*/5 * * * * gbrain autopilot --repo /data/brain')).toBe(true);
+    expect(crontabIndicatesAutopilotInstall('*/10 * * * * /root/.gbrain/autopilot-watchdog.sh')).toBe(true);
   });
 
   test('a status-monitor cron line is NOT an install', () => {
@@ -102,6 +104,15 @@ describe('crontabIndicatesAutopilotInstall', () => {
     expect(crontabIndicatesAutopilotInstall('# gbrain autopilot --repo /data/brain (disabled)')).toBe(false);
     expect(crontabIndicatesAutopilotInstall('0 3 * * * /usr/local/bin/backup.sh')).toBe(false);
     expect(crontabIndicatesAutopilotInstall('')).toBe(false);
+  });
+});
+
+describe('custom autopilot status interval', () => {
+  test('custom manifest interval applies unless CLI explicitly overrides it', () => {
+    expect(resolveAutopilotStatusInterval(undefined, 3600)).toBe(3600);
+    expect(resolveAutopilotStatusInterval('600', 3600)).toBe(600);
+    expect(resolveAutopilotStatusInterval(undefined, Number.NaN)).toBe(300);
+    expect(resolveAutopilotStatusInterval('garbage', 3600)).toBe(300);
   });
 });
 

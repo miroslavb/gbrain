@@ -1906,6 +1906,28 @@ function installCrontab(wrapperPath: string, home: string) {
  * take down the very alarm meant to diagnose it. Everything it reads is
  * filesystem (lock mtime, markers, plist/unit/crontab, log tail).
  */
+export function resolveAutopilotStatusInterval(
+  explicitRaw?: string,
+  customManifestInterval?: number,
+): number {
+  if (explicitRaw !== undefined) {
+    const parsed = parseInt(explicitRaw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 300;
+  }
+  return Number.isFinite(customManifestInterval) && (customManifestInterval ?? 0) > 0
+    ? customManifestInterval!
+    : 300;
+}
+
+function readCustomAutopilotInterval(): number | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(join(gbrainHomePath(), 'autopilot-custom.json'), 'utf-8'));
+    return Number(raw?.interval_seconds);
+  } catch {
+    return undefined;
+  }
+}
+
 export function runAutopilotStatus(args: string[]): void {
   // An INSTALLED daemon always runs the default interval — the generated
   // wrapper execs `autopilot --repo <path>` with no --interval. The flag is
@@ -1913,8 +1935,11 @@ export function runAutopilotStatus(args: string[]): void {
   // become NaN: staleAfter = NaN makes every age comparison false, which
   // reads a 71-day-dead daemon as 'fresh' with exit 0 — a typo'd flag would
   // silently disable the very alarm this exit code exists to be.
-  const rawInterval = parseInt(parseArg(args, '--interval') || '300', 10);
-  showStatus(args.includes('--json'), Number.isFinite(rawInterval) && rawInterval > 0 ? rawInterval : 300);
+  const explicitInterval = parseArg(args, '--interval') || undefined;
+  showStatus(
+    args.includes('--json'),
+    resolveAutopilotStatusInterval(explicitInterval, readCustomAutopilotInterval()),
+  );
 }
 
 export function uninstallDaemon() {
@@ -2163,6 +2188,7 @@ export function crontabIndicatesAutopilotInstall(crontab: string): boolean {
   return crontab.split('\n').some((line) => {
     if (line.trimStart().startsWith('#')) return false;
     if (line.includes('autopilot-run.sh')) return true;
+    if (line.includes('autopilot-watchdog.sh')) return true;
     return line.includes('gbrain autopilot') && !line.includes('--status');
   });
 }
