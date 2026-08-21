@@ -34,6 +34,11 @@ interface FeatureScanResult {
   version: string;
   scan_ts: string;
   brain_score: number;
+  sync_configured_by: 'sync.repo_path' | 'source_registry' | 'none';
+  file_backed_source_count: number;
+  pathless_source_count: number;
+  representative_file_backed_source_ids?: string[];
+  representative_pathless_source_ids?: string[];
   recommendations: FeatureRecommendation[];
 }
 
@@ -82,22 +87,58 @@ function shouldPitch(rec: FeatureRecommendation, offers: FeatureOffersFile, curr
 
 // --- Scanners ---
 
-export async function hasConfiguredSync(engine: BrainEngine): Promise<boolean> {
+export type SyncEvidence = Pick<
+  FeatureScanResult,
+  | 'sync_configured_by'
+  | 'file_backed_source_count'
+  | 'pathless_source_count'
+  | 'representative_file_backed_source_ids'
+  | 'representative_pathless_source_ids'
+>;
+
+function representativeSafeSourceIds(ids: string[]): string[] | undefined {
+  const safe = ids
+    .filter((id) => /^[a-z0-9][a-z0-9._/-]{0,63}$/i.test(id))
+    .filter((id) => !/(token|secret|password|credential|api.?key)/i.test(id))
+    .slice(0, 3);
+  return safe.length > 0 ? safe : undefined;
+}
+
+export async function inspectSyncEvidence(engine: BrainEngine): Promise<SyncEvidence> {
+  let configuredByRepo = false;
   try {
     const syncRepo = await engine.getConfig('sync.repo_path');
-    if (syncRepo?.trim()) return true;
-  } catch { /* inspect source registry next */ }
+    configuredByRepo = Boolean(syncRepo?.trim());
+  } catch { /* inspect source registry below */ }
+
+  let sources: Awaited<ReturnType<BrainEngine['listAllSources']>> = [];
   try {
-    const sources = await engine.listAllSources({ localPathOnly: true });
-    return sources.length > 0;
-  } catch {
-    return false;
-  }
+    sources = await engine.listAllSources();
+  } catch { /* old or unavailable source registry */ }
+
+  const fileBacked = sources.filter((source) => Boolean(source.local_path?.trim()));
+  const pathless = sources.filter((source) => !source.local_path?.trim());
+  const representativeFileBacked = representativeSafeSourceIds(fileBacked.map((source) => source.id));
+  const representativePathless = representativeSafeSourceIds(pathless.map((source) => source.id));
+  return {
+    sync_configured_by: configuredByRepo
+      ? 'sync.repo_path'
+      : (fileBacked.length > 0 ? 'source_registry' : 'none'),
+    file_backed_source_count: fileBacked.length,
+    pathless_source_count: pathless.length,
+    ...(representativeFileBacked ? { representative_file_backed_source_ids: representativeFileBacked } : {}),
+    ...(representativePathless ? { representative_pathless_source_ids: representativePathless } : {}),
+  };
+}
+
+export async function hasConfiguredSync(engine: BrainEngine): Promise<boolean> {
+  return (await inspectSyncEvidence(engine)).sync_configured_by !== 'none';
 }
 
 async function scanFeatures(engine: BrainEngine): Promise<FeatureScanResult> {
   const stats = await engine.getStats();
   const health = await engine.getHealth();
+  const syncEvidence = await inspectSyncEvidence(engine);
   const recommendations: FeatureRecommendation[] = [];
 
   // P1: Missing embeddings
@@ -173,7 +214,7 @@ async function scanFeatures(engine: BrainEngine): Promise<FeatureScanResult> {
     }
 
     // No sync configured
-    if (!(await hasConfiguredSync(engine))) {
+    if (syncEvidence.sync_configured_by === 'none') {
       recommendations.push({
         id: 'no-sync', priority: 2,
         title: 'Configure Sync',
@@ -188,6 +229,7 @@ async function scanFeatures(engine: BrainEngine): Promise<FeatureScanResult> {
     version: VERSION,
     scan_ts: new Date().toISOString(),
     brain_score: (health as any).brain_score ?? 0,
+    ...syncEvidence,
     recommendations,
   };
 }

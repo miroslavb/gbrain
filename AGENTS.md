@@ -92,6 +92,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   generative facts and Chronicle backstops, returning
   `backstops_skipped: migration`; remote/MCP callers must receive
   `permission_denied` before any write. Normal put behavior is unchanged.
+- **Observability evidence contract:** `features --json` must expose positive sync
+  evidence (detection source and file/pathless counts), autopilot status must expose
+  interval/install/heartbeat/log attribution, and reranker health must distinguish
+  timestamped historical failures from a current reachability probe. Benchmark
+  receipts fail when any expected reranked result lacks `rerank_score`, when audit
+  JSONL is malformed, or when reason/timestamp deltas show a new failure.
 - **Models doctor chain axis:** `gbrain models doctor` must keep individual
   provider rows separate from the configured generative-chain viability row.
   Individual probes use `fallbackPolicy: none`, verify the returned model equals

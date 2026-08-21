@@ -451,15 +451,36 @@ async function attemptAutopilotSelfUpgrade(
 
 export async function runAutopilot(engine: BrainEngine, args: string[]) {
   if (args.includes('--help') || args.includes('-h')) {
-    console.log(
-      'Usage: gbrain autopilot [--repo <path>] [--interval N] [--json] [--no-worker]\n' +
-      '       gbrain autopilot --install [--repo <path>]\n' +
-      '       gbrain autopilot --uninstall\n' +
-      '       gbrain autopilot --status [--json]\n\n' +
-      'Self-maintaining brain daemon. Runs the full maintenance cycle\n' +
-      '(lint + backlinks + sync + extract + embed + orphans) on an interval.\n\n' +
-      'For a one-shot cron-triggered cycle, see `gbrain dream`.',
-    );
+    console.log(`Usage:
+  gbrain autopilot [--repo PATH] [--interval SECONDS] [--json] [--inline|--no-worker]
+  gbrain autopilot --install [--repo PATH] [--target TARGET]
+  gbrain autopilot --status [--json] [--interval SECONDS]
+  gbrain autopilot --uninstall
+
+Self-maintaining brain daemon. Runs lint, backlinks, sync, extract, embed,
+and orphan maintenance on an interval. Use \`gbrain dream\` for one cycle.
+
+Modes:
+  --install              Install the host-appropriate supervisor integration.
+  --status               Report install, heartbeat, interval, and log evidence.
+  --uninstall            Remove every detected autopilot integration.
+
+Runtime flags:
+  --repo PATH            Repository to maintain (or sync.repo_path config).
+  --interval SECONDS     Base interval; positive integer, default 300.
+  --inline               Run maintenance in this process instead of Minions.
+  --no-worker            Dispatch only; an external worker drains Minion jobs.
+  --json                 Machine-readable cycle/status output.
+
+Install flags:
+  --target TARGET        macos | linux-systemd | linux-cron | ephemeral-container
+  --inject-bootstrap     Add ephemeral start script to detected OpenClaw bootstrap.
+  --no-inject            Never edit an OpenClaw bootstrap.
+
+Status exit codes:
+  0  fresh, or not installed
+  1  installed but stale, paused, or never run
+  2  self-disabled because its repository disappeared`);
     return;
   }
 
@@ -1906,17 +1927,30 @@ function installCrontab(wrapperPath: string, home: string) {
  * take down the very alarm meant to diagnose it. Everything it reads is
  * filesystem (lock mtime, markers, plist/unit/crontab, log tail).
  */
+export type AutopilotIntervalSource = 'cli' | 'custom_manifest' | 'default';
+
+export function resolveAutopilotStatusIntervalEvidence(
+  explicitRaw?: string,
+  customManifestInterval?: number,
+): { interval_seconds: number; interval_source: AutopilotIntervalSource } {
+  if (explicitRaw !== undefined) {
+    const parsed = parseInt(explicitRaw, 10);
+    return {
+      interval_seconds: Number.isFinite(parsed) && parsed > 0 ? parsed : 300,
+      interval_source: 'cli',
+    };
+  }
+  if (Number.isFinite(customManifestInterval) && (customManifestInterval ?? 0) > 0) {
+    return { interval_seconds: customManifestInterval!, interval_source: 'custom_manifest' };
+  }
+  return { interval_seconds: 300, interval_source: 'default' };
+}
+
 export function resolveAutopilotStatusInterval(
   explicitRaw?: string,
   customManifestInterval?: number,
 ): number {
-  if (explicitRaw !== undefined) {
-    const parsed = parseInt(explicitRaw, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 300;
-  }
-  return Number.isFinite(customManifestInterval) && (customManifestInterval ?? 0) > 0
-    ? customManifestInterval!
-    : 300;
+  return resolveAutopilotStatusIntervalEvidence(explicitRaw, customManifestInterval).interval_seconds;
 }
 
 function readCustomAutopilotInterval(): number | undefined {
@@ -1936,10 +1970,11 @@ export function runAutopilotStatus(args: string[]): void {
   // reads a 71-day-dead daemon as 'fresh' with exit 0 — a typo'd flag would
   // silently disable the very alarm this exit code exists to be.
   const explicitInterval = parseArg(args, '--interval') || undefined;
-  showStatus(
-    args.includes('--json'),
-    resolveAutopilotStatusInterval(explicitInterval, readCustomAutopilotInterval()),
+  const interval = resolveAutopilotStatusIntervalEvidence(
+    explicitInterval,
+    readCustomAutopilotInterval(),
   );
+  showStatus(args.includes('--json'), interval);
 }
 
 export function uninstallDaemon() {
@@ -2078,12 +2113,17 @@ export type AutopilotState = 'not_installed' | 'disabled' | 'paused' | 'never_ru
 export interface AutopilotStatusReport {
   installed: boolean;
   install_target: InstallTarget | null;
+  install_evidence: string[];
   state: AutopilotState;
   disabled_reason: string | null;
   paused_reason: string | null;
+  interval_seconds: number;
+  interval_source: AutopilotIntervalSource;
+  heartbeat_timestamp: string | null;
   heartbeat_age_seconds: number | null;
   stale_after_seconds: number;
   last_log: string;
+  last_log_timestamp: string | null;
 }
 
 /**
@@ -2112,11 +2152,15 @@ export function autopilotStatusExitCode(state: AutopilotState): number {
 export function classifyAutopilotStatus(input: {
   installed: boolean;
   installTarget: InstallTarget | null;
+  installEvidence?: string[];
   disabledReason: string | null;
   pausedReason?: string | null;
+  intervalSource?: AutopilotIntervalSource;
+  heartbeatTimestamp?: string | null;
   heartbeatAgeSeconds: number | null;
   intervalSeconds: number;
   lastLog: string;
+  lastLogTimestamp?: string | null;
 }): AutopilotStatusReport {
   // Tolerance = 6 intervals. The adaptive scheduler sleeps TWO intervals
   // between ticks on the healthiest brains (score >= 90), and the heartbeat
@@ -2146,12 +2190,19 @@ export function classifyAutopilotStatus(input: {
   return {
     installed: input.installed,
     install_target: input.installTarget,
+    install_evidence: input.installEvidence ?? [],
     state,
     disabled_reason: input.disabledReason,
     paused_reason: pausedReason,
+    interval_seconds: Number.isFinite(input.intervalSeconds) && input.intervalSeconds > 0
+      ? input.intervalSeconds
+      : 300,
+    interval_source: input.intervalSource ?? 'default',
+    heartbeat_timestamp: input.heartbeatTimestamp ?? null,
     heartbeat_age_seconds: input.heartbeatAgeSeconds,
     stale_after_seconds: staleAfter,
     last_log: input.lastLog,
+    last_log_timestamp: input.lastLogTimestamp ?? null,
   };
 }
 
@@ -2193,17 +2244,32 @@ export function crontabIndicatesAutopilotInstall(crontab: string): boolean {
   });
 }
 
-function showStatus(json: boolean, intervalSeconds: number) {
+function installEvidenceFor(target: InstallTarget | null): string[] {
+  switch (target) {
+    case 'macos': return ['launchd_plist'];
+    case 'linux-systemd': return ['systemd_user_unit'];
+    case 'linux-cron': return ['crontab_entry'];
+    case 'ephemeral-container': return ['ephemeral_start_script'];
+    default: return [];
+  }
+}
+
+function showStatus(
+  json: boolean,
+  interval: { interval_seconds: number; interval_source: AutopilotIntervalSource },
+) {
   // gbrainHomePath, not raw HOME: the daemon writes its lock through
   // gbrainHomePath() (#1226), so a GBRAIN_HOME install had status reading one
   // directory while the daemon wrote another — a permanent false "stale".
   const home = gbrainHomePath();
   let lastLine = '';
+  let lastLogTimestamp: string | null = null;
   for (const logPath of [join(home, 'autopilot.log'), join(process.env.HOME || '', '.gbrain', 'autopilot.log')]) {
     try {
       const content = readFileSync(logPath, 'utf-8');
       const lines = content.trim().split('\n');
       lastLine = lines[lines.length - 1] || '';
+      lastLogTimestamp = statSync(logPath).mtime.toISOString();
       break;
     } catch { /* try the next home; supervisor log redirects bake raw $HOME */ }
   }
@@ -2219,8 +2285,10 @@ function showStatus(json: boolean, intervalSeconds: number) {
   } catch { /* not paused */ }
 
   let heartbeatAgeSeconds: number | null = null;
+  let heartbeatTimestamp: string | null = null;
   try {
-    const { mtimeMs } = statSync(autopilotLockPath());
+    const { mtimeMs, mtime } = statSync(autopilotLockPath());
+    heartbeatTimestamp = mtime.toISOString();
     heartbeatAgeSeconds = Math.max(0, Math.floor((Date.now() - mtimeMs) / 1000));
   } catch { /* never ran, or already cleaned up */ }
 
@@ -2228,11 +2296,15 @@ function showStatus(json: boolean, intervalSeconds: number) {
   const report = classifyAutopilotStatus({
     installed: installTarget !== null,
     installTarget,
+    installEvidence: installEvidenceFor(installTarget),
     disabledReason,
     pausedReason,
+    heartbeatTimestamp,
     heartbeatAgeSeconds,
-    intervalSeconds,
+    intervalSeconds: interval.interval_seconds,
+    intervalSource: interval.interval_source,
     lastLog: lastLine,
+    lastLogTimestamp,
   });
 
   if (json) {

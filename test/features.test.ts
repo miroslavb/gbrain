@@ -22,6 +22,30 @@ describe('features command', () => {
     engine.listAllSources = async () => [];
     expect(await hasConfiguredSync(engine)).toBe(false);
   });
+
+  it('reports positive sync evidence without exposing local paths', async () => {
+    const { inspectSyncEvidence } = await import('../src/commands/features.ts');
+    const engine = {
+      getConfig: async (key: string) => key === 'sync.repo_path' ? '/secret/repos/brain' : null,
+      listAllSources: async () => [
+        { id: 'work-notes', local_path: '/srv/private/work' },
+        { id: 'remote-only', local_path: null },
+        { id: 'token=do-not-render', local_path: '/srv/private/unsafe' },
+      ],
+    } as any;
+
+    const evidence = await inspectSyncEvidence(engine);
+    expect(evidence).toEqual({
+      sync_configured_by: 'sync.repo_path',
+      file_backed_source_count: 2,
+      pathless_source_count: 1,
+      representative_file_backed_source_ids: ['work-notes'],
+      representative_pathless_source_ids: ['remote-only'],
+    });
+    expect(JSON.stringify(evidence)).not.toContain('/secret/');
+    expect(JSON.stringify(evidence)).not.toContain('/srv/private/');
+    expect(JSON.stringify(evidence)).not.toContain('do-not-render');
+  });
 });
 
 // Test the embedded recipe metadata

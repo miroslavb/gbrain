@@ -1749,7 +1749,10 @@ export async function checkVoiceGateHealth(engine: BrainEngine): Promise<Check> 
  *
  * Engine-agnostic (file-based + one config-key read).
  */
-export async function checkRerankerHealth(engine: BrainEngine): Promise<Check> {
+export async function checkRerankerHealth(
+  engine: BrainEngine,
+  deps: { probeReachability?: () => Promise<{ model?: string; status: string; message: string; elapsed_ms?: number } | null> } = {},
+): Promise<Check> {
   try {
     const { readRecentRerankFailures } = await import('../core/rerank-audit.ts');
     const cfg = await engine.getConfig('search.reranker.enabled');
@@ -1786,11 +1789,29 @@ export async function checkRerankerHealth(engine: BrainEngine): Promise<Check> {
 
     const inputFails = failures.filter((f) => f.reason === 'input_too_large');
     if (inputFails.length > 0) {
+      const newest = [...inputFails].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))[0]!;
+      const probe = deps.probeReachability
+        ? await deps.probeReachability()
+        : await (async () => {
+            const { probeRerankerReachability } = await import('./models.ts');
+            return probeRerankerReachability(engine);
+          })();
+      const recovered = probe?.status === 'ok';
       return {
         name: 'reranker_health',
         status: 'warn',
         message: `${inputFails.length} reranker input-too-large failure(s) in last 7 days. ` +
+          `${recovered ? 'The current probe reachable; this is historical/recovered evidence. ' : ''}` +
           'Fix: align llama.cpp --ctx-size and both -b/-ub with the longest admitted candidate, or split/cap the input.',
+        details: {
+          newest_failure_timestamp: newest.ts,
+          newest_failure_model: newest.model,
+          newest_failure_token_count: newest.token_count ?? null,
+          current_reachability: probe?.message ?? 'not_probed',
+          current_probe_status: probe?.status ?? null,
+          current_probe_elapsed_ms: probe?.elapsed_ms ?? null,
+          recovered,
+        },
       };
     }
 

@@ -48,6 +48,8 @@ export interface RerankFailureEvent {
   query_hash: string;
   /** Number of documents that were being reranked when failure fired. */
   doc_count: number;
+  /** Exact provider-reported input token count when available. */
+  token_count?: number;
   /**
    * Truncated upstream error message (first 200 chars). Useful for
    * diagnosing flaky providers without leaking PII; query text is hashed

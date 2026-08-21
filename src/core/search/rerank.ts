@@ -44,6 +44,14 @@ function hashQuery(query: string): string {
   return createHash('sha256').update(query, 'utf8').digest('hex').slice(0, 8);
 }
 
+/** Extract an exact provider-reported token count without guessing. */
+export function parseRerankFailureTokenCount(message: string): number | undefined {
+  const match = message.match(/\b(?:input\s*\()?([0-9][0-9,]*)\s+tokens?\b/i);
+  if (!match?.[1]) return undefined;
+  const count = Number.parseInt(match[1].replaceAll(',', ''), 10);
+  return Number.isFinite(count) ? count : undefined;
+}
+
 /**
  * Reorder the top `topNIn` results by reranker relevance score. The
  * un-reranked tail (any rows past topNIn) preserves its original RRF

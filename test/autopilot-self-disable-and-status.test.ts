@@ -114,6 +114,22 @@ describe('custom autopilot status interval', () => {
     expect(resolveAutopilotStatusInterval(undefined, Number.NaN)).toBe(300);
     expect(resolveAutopilotStatusInterval('garbage', 3600)).toBe(300);
   });
+
+  test('status interval attribution distinguishes CLI, manifest, and default', async () => {
+    const { resolveAutopilotStatusIntervalEvidence } = await import('../src/commands/autopilot.ts');
+    expect(resolveAutopilotStatusIntervalEvidence('600', 3600)).toEqual({
+      interval_seconds: 600,
+      interval_source: 'cli',
+    });
+    expect(resolveAutopilotStatusIntervalEvidence(undefined, 3600)).toEqual({
+      interval_seconds: 3600,
+      interval_source: 'custom_manifest',
+    });
+    expect(resolveAutopilotStatusIntervalEvidence(undefined, undefined)).toEqual({
+      interval_seconds: 300,
+      interval_source: 'default',
+    });
+  });
 });
 
 describe('classifyAutopilotStatus', () => {
@@ -135,10 +151,24 @@ describe('classifyAutopilotStatus', () => {
     expect(autopilotStatusExitCode(r.state)).toBe(1);
   });
 
-  test('fresh heartbeat → fresh, exit 0', () => {
-    const r = classifyAutopilotStatus(base);
+  test('fresh heartbeat → fresh, exit 0 with observability evidence', () => {
+    const r = classifyAutopilotStatus({
+      ...base,
+      intervalSource: 'custom_manifest',
+      installEvidence: ['launchd_plist'],
+      heartbeatTimestamp: '2026-08-21T12:00:00.000Z',
+      lastLogTimestamp: '2026-08-21T11:59:58.000Z',
+    });
     expect(r.state).toBe('fresh');
     expect(autopilotStatusExitCode(r.state)).toBe(0);
+    expect(r).toMatchObject({
+      interval_seconds: 300,
+      interval_source: 'custom_manifest',
+      install_evidence: ['launchd_plist'],
+      heartbeat_timestamp: '2026-08-21T12:00:00.000Z',
+      heartbeat_age_seconds: 10,
+      last_log_timestamp: '2026-08-21T11:59:58.000Z',
+    });
   });
 
   test('nothing installed → exit 0 (nothing claimed, nothing broken)', () => {
