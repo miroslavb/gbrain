@@ -77,15 +77,51 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Common tasks
 
+- **Chronicle LLM gate:** automatic Chronicle extraction skips `conversation`
+  pages whose explicit `message_count` is below 100; meetings/calendar events
+  are unaffected, and conversations without the field keep legacy eligibility.
+  The threshold is evidence-backed by the 2026-08-21 live audit (all observed
+  sub-100 session jobs returned `no_events`; the sole useful conversation had
+  809 messages). Keep `test/chronicle-extract.test.ts` green and do not loosen
+  this gate without a fresh yield measurement.
 - **Configure:** [`docs/ENGINES.md`](./docs/ENGINES.md),
   [`docs/guides/live-sync.md`](./docs/guides/live-sync.md),
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
-- **Chat fallback safety:** a failed chat attempt may advance to the next
-  provider only after explicit `input_tokens: 0` and `output_tokens: 0`, or an
-  HTTP `429` rejection before generation. Partial/missing usage, timeouts,
-  5xx responses, and broken streams are billing-ambiguous and must fail closed.
+- **Atom grounding gate:** `extract_atoms` must request exactly one independently
+  checkable claim per atom, require a ≤200-character exact contiguous
+  single-sentence `source_quote`, store that exact quote as the body, omit
+  `lesson`, and permit `[]` when the source supports no atom. Grounded evidence
+  must name its specific subject, may not begin with a deictic pronoun, and may
+  not join independent claims with conjunctions/semicolons/lists. For
+  substantive sources (≥500 chars), the parser enforces these rules and rejects
+  unsupported causation/generalization/quantities rather than paraphrasing them.
+  Keep `autopilot.auto_drain.enabled=false` until a fresh blinded quality sample
+  passes the agreed support/atomicity thresholds.
+- **Trusted migration writes:** `put_page migration_mode` / CLI
+  `gbrain put ... --migration-mode` is restricted to `ctx.remote === false`.
+  It preserves the page/import/write-through path but suppresses only the
+  generative facts and Chronicle backstops, returning
+  `backstops_skipped: migration`; remote/MCP callers must receive
+  `permission_denied` before any write. Normal put behavior is unchanged.
+- **Models doctor chain axis:** `gbrain models doctor` must keep individual
+  provider rows separate from the configured generative-chain viability row.
+  Individual probes use `fallbackPolicy: none`, verify the returned model equals
+  the requested model, and may report an exhausted or slow primary; the `chain`
+  row gets a longer budget, records `route`, `selected_model`, and `degraded`,
+  and proves whether a real task can still complete through subscriptions. Do
+  not turn chain success into a false primary-provider success or suppress
+  provider-specific diagnostics.
+- **Generative fallback safety:** every provider-neutral generative route must use
+  the shared model walker (`gateway.chat`, query expansion, OCR, and future LLM
+  entry points). The explicit task model is attempted first; configured
+  `chat_fallback_chain` entries follow in order with the requested model
+  deduplicated. A failed attempt may advance only after explicit
+  `input_tokens: 0` and `output_tokens: 0`, or an HTTP `401`, `403`, or `429`
+  rejection before generation. Partial/missing usage, timeouts, 5xx responses,
+  and broken streams are billing-ambiguous and must fail closed. Add both
+  fallback-order and fail-closed regression tests for every new LLM entry point.
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes` (manual schema-only).
