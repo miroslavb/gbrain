@@ -497,7 +497,16 @@ class ProposeTakesPhase extends BaseCyclePhase {
 
     const extractor = opts.extractor ?? defaultExtractor;
     const promptVersion = opts.promptVersion ?? PROPOSE_TAKES_PROMPT_VERSION;
-    const pageLimit = opts.pageLimit ?? 100;
+    const configuredPageLimit = Number(await engine.getConfig('cycle.propose_takes.page_limit'));
+    const pageLimit = Math.max(1, Math.min(
+      1000,
+      Math.floor(
+        opts.pageLimit ??
+        (Number.isFinite(configuredPageLimit) && configuredPageLimit > 0
+          ? configuredPageLimit
+          : 100),
+      ),
+    ));
     const skipPagesWithFence = opts.skipPagesWithFence ?? false;
     const deadlineMs = opts.deadlineMs ?? ProposeTakesPhase.PHASE_DEADLINE_MS;
     const phaseStartMs = Date.now();

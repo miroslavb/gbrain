@@ -126,6 +126,27 @@ describe('propose_takes producer containment', () => {
     expect(await count('proposal_page_runs')).toBe(0);
   });
 
+  test('DB page_limit bounds one-shot and scheduled producer runs', async () => {
+    await putPage('concepts/first-limit', 'First allowed page has a gradeable claim.', PROPOSE_TAKES_ALLOWED_PAGE_TYPES[0]);
+    await putPage('concepts/second-limit', 'Second allowed page has a gradeable claim.', PROPOSE_TAKES_ALLOWED_PAGE_TYPES[0]);
+    await engine.setConfig('cycle.propose_takes.enabled', 'true');
+    await engine.setConfig('cycle.propose_takes.page_limit', '1');
+    let calls = 0;
+    const extractor: ProposeTakesExtractor = async ({ pageBody }) => {
+      calls++;
+      return [{
+        claim_text: `Bounded claim ${calls}`,
+        kind: 'take',
+        holder: 'brain',
+        weight: 0.6,
+        evidence_span: pageBody,
+      }];
+    };
+
+    await runPhaseProposeTakes(context(), { extractor });
+    expect(calls).toBe(1);
+  });
+
   test('SQL allowlist is applied before LIMIT so disallowed recent pages cannot starve eligible pages', async () => {
     const allowedBody = 'Allowed longform predicts a widget market consolidation.';
     await putPage('concepts/allowed', allowedBody, PROPOSE_TAKES_ALLOWED_PAGE_TYPES[0]);

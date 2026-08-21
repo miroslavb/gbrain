@@ -109,7 +109,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Take proposal producer containment:** `cycle.propose_takes.enabled=false` is
   the default and must gate every caller; only explicit local
   `dream --phase propose_takes --once` bypasses it for one run without changing
-  config. Candidate SQL applies the page-type allowlist before `LIMIT`; live
+  config. Candidate SQL applies the page-type allowlist before `LIMIT`; the
+  bounded `cycle.propose_takes.page_limit` DB setting defaults to 100 and clamps
+  to 1..1000 (explicit test/internal opts win). Live
   parsing accepts only prediction/judgment→take and bet→bet, claims ≤200 chars,
   and an exact contiguous evidence span. One page transaction banks all claim
   rows plus one terminal `proposal_page_runs` marker; empty outcomes live only
