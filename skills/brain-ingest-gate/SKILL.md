@@ -48,7 +48,10 @@ brain_first: true
 ## The Rule
 
 **No content enters the brain without passing this gate. A raw `cp` or `mv`
-into the brain repo is a bug.**
+into the brain repo is a bug. Every admitted write must also carry an explicit
+canonical slug. A missing slug is a blocked decision, not permission to fall
+back to `inbox/<hash>`; only an explicit user request for untriaged inbox
+capture may use that default.**
 
 One insight, one place. If it already exists, link to it — don't clone it.
 Before any new page is written (file migration, bulk import, manual

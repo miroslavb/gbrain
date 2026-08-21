@@ -19,6 +19,17 @@ fragment, or any text into their brain, run `gbrain capture`. Don't reach
 for `gbrain put` or commit-then-sync — `capture` is the front door and it
 handles both local and thin-client installs the same way.
 
+## Agent-call slug gate (mandatory)
+
+The hash-derived `inbox/...` default is a convenience for a human typing an intentionally untriaged one-off capture. **Agents must not use it as their normal write path.** Before an agent invokes capture/put_page:
+
+1. search/query the named entity, URL, title, or core claim and read the plausible top hit;
+2. choose the canonical taxonomy path and an explicit, stable slug;
+3. pass `--slug <canonical-slug>` (or the MCP `slug` field);
+4. if a canonical slug cannot yet be chosen, stop and route through `brain-ingest-gate`/the specialized ingest skill instead of creating an inbox duplicate.
+
+The only exception is when the user explicitly asks for an **untriaged inbox capture**. In that case the receipt must report the generated inbox slug so later triage can reconcile it.
+
 ## Contract
 
 - **Input:** the content to save (inline arg, `--file PATH`, or `--stdin`).

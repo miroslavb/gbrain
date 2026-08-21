@@ -36,6 +36,7 @@ writes_to:
 
 This skill guarantees:
 - Every ingested item has a brain page with genuine analysis (not just a summary)
+- Every write uses an explicit canonical slug selected after searching the exact URL, title, author/entity aliases, and core claim; a missing slug blocks the write instead of creating an inbox page
 - The author gets a people page (MANDATORY for anyone whose thinking is worth ingesting)
 - Cross-links created bidirectionally (source ↔ author, source ↔ mentioned entities)
 - Raw source preserved for provenance via `gbrain files upload-raw`
@@ -65,7 +66,7 @@ Format: `- **YYYY-MM-DD** | Referenced in [page title](path) — brief context`
    - If page exists → update timeline with this new publication
    - Cross-link both directions
 
-4. **Save to brain.** File by PRIMARY SUBJECT (read `skills/_brain-filing-rules.md`):
+4. **Save to brain with an explicit slug.** File by PRIMARY SUBJECT (read `skills/_brain-filing-rules.md`). The `put_page` call must include the canonical slug chosen after the duplicate/URL lookup; never omit it:
    - About a person → `people/`
    - About a company → `companies/`
    - A reusable framework → `concepts/`

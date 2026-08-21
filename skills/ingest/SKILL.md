@@ -30,6 +30,8 @@ Ingest meetings, articles, media, documents, and conversations into the brain.
 
 ## Contract
 
+- Every page write has an explicit canonical slug selected after registry/search/query/get_page dedup. Missing slug blocks the write; agents may not silently create an `inbox/<hash>` page unless the user explicitly requested untriaged capture.
+
 - Every fact written to a brain page carries an inline `[Source: ...]` citation with date and provenance.
 - Every entity mention creates a back-link from the entity's page to the page mentioning them (Iron Law).
 - Raw sources are preserved for provenance via `gbrain files upload-raw` with automatic size routing.
@@ -220,7 +222,9 @@ if the post is primarily about a person/company.
 
 Every ingested item must have its raw source preserved for provenance.
 
-**Use `gbrain files upload-raw` for automatic size routing:**
+**Privacy split:** unattended messaging attachments do not enter the shared/default brain. They use the host's `document-acl-ingest` local store and capability-scoped `document_memory` tool (owner-global; otherwise uploader/current-chat). Use the GBrain file path below only for an owner-reviewed item that is intentionally being promoted into the brain. Never create a second shared `docs/inbox` page for an item already present in the private document index.
+
+**Use `gbrain files upload-raw` for automatic size routing of consciously promoted items:**
 ```bash
 gbrain files upload-raw <file> --page <page-slug> --type <type>
 ```

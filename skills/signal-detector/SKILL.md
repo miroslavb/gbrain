@@ -37,6 +37,7 @@ intellectual capital. Entities are bookkeeping. Both compound over time.
 
 This skill guarantees:
 - Fires on every message (no exceptions unless purely operational)
+- Every `put_page` call includes an explicit taxonomy-valid canonical slug chosen after search/query/get_page; missing slug means no write, never an automatic inbox duplicate
 - Runs in parallel (spawned, never blocks main response)
 - Captures ideas with the user's EXACT phrasing (no paraphrasing)
 - Detects entity mentions and creates/enriches brain pages

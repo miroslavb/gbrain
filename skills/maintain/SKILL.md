@@ -321,6 +321,16 @@ Check the integrity of stored files and redirect pointers:
 Timeline items older than 30 days with unresolved action items.
 - Flag for review
 
+## Reranker fail-open audit
+
+A successful search command is not proof that the configured reranker ran. The search layer deliberately fails open to RRF order. For any retrieval benchmark or quality incident:
+
+1. Snapshot the rerank-audit row count before the run (`~/.gbrain/audit/rerank-failures-*.jsonl`).
+2. Require non-null `rerank_score` on every non-empty result set.
+3. Fail the run if the audit count increases — do not average degraded and healthy queries together.
+4. Inspect both `reason` and `error_summary`. Local llama-server HTTP 500 capacity errors such as `input (...) is too large ... physical batch size` are classified as `input_too_large` by the current gateway; older audit rows may still say `network`, so recognize the message shape during historical review.
+5. For llama.cpp, effective physical capacity can remain bounded by `-ub`; raising only `-b` may not help. Raise both within the memory budget or cap/split the candidate text, then replay the exact failing queries and require zero new audit rows. [Source: live GBrain reranker incident and canary verification, 2026-08-20]
+
 ## Benchmark Testing
 
 Periodically verify search quality hasn't regressed. Run a battery of test
