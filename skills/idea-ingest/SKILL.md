@@ -80,6 +80,11 @@ Format: `- **YYYY-MM-DD** | Referenced in [page title](path) — brief context`
 
 6. **Sync.** `gbrain sync` to update the index.
 
+7. **Read back and verify.** `get_page` the canonical slug, confirm URL/raw-source
+   provenance and citations survived, then verify author/entity outgoing links,
+   reverse backlinks, and dated timeline entries. Do not report `ingested` from a
+   write receipt alone.
+
 ## Output Format
 
 ```markdown

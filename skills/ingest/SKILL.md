@@ -37,6 +37,9 @@ Ingest meetings, articles, media, documents, and conversations into the brain.
 - Raw sources are preserved for provenance via `gbrain files upload-raw` with automatic size routing.
 - State sections are rewritten with current best understanding, never appended to.
 - Entity detection fires on every inbound message; notable entities get pages or updates.
+- Every admitted page is read back by canonical slug after write/sync; verify
+  provenance/citations, required outgoing links, reverse entity backlinks, and
+  dated timeline entries before reporting success.
 
 > **Convention:** See `skills/conventions/quality.md` for Iron Law back-linking.
 

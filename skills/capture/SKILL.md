@@ -41,6 +41,10 @@ The only exception is when the user explicitly asks for an **untriaged inbox cap
   daemon's 24h content-hash dedup catches re-captures.
 - **Trust:** all captures via this skill are local-CLI trust (`remote: false`).
   Untrusted webhook ingestion goes through `POST /ingest`, not this verb.
+- **Post-write gate:** for every agent-created capture, read the explicit canonical
+  slug back with `get_page`, verify the stored type/title/provenance, and verify
+  required outgoing links plus entity backlinks/timeline entries before reporting
+  success. A write receipt alone is not completion.
 
 ## When to invoke
 

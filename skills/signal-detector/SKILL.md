@@ -44,6 +44,9 @@ This skill guarantees:
 - Logs a one-line summary of what was captured
 - Back-links all entity mentions (Iron Law)
 - Citations on every fact written
+- Every created/updated canonical slug is read back; required outgoing links,
+  entity backlinks, and dated timeline entries are verified before the signal is
+  marked captured
 
 > **Convention:** See `skills/conventions/quality.md` for Iron Law back-linking.
 

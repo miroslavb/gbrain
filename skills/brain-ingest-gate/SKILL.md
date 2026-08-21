@@ -214,9 +214,10 @@ New content to write
 After the batch, verify the gate's output holds:
 
 ```bash
-gbrain check-backlinks check            # mentioned entities link back (fix with: check-backlinks fix)
-gbrain backlinks <new-slug>             # each new page has inbound links
-gbrain search "<core claim>" --limit 3  # the insight has exactly ONE home
+gbrain get <new-slug>                    # canonical read-back: body/type/provenance landed
+gbrain check-backlinks check             # mentioned entities link back (fix with: check-backlinks fix)
+gbrain backlinks <new-slug>              # each new page has inbound links
+gbrain search "<core claim>" --limit 3   # the insight has exactly ONE home
 ```
 
 If `check-backlinks check` reports gaps on pages the gate just admitted, the
