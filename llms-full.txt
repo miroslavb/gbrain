@@ -75,6 +75,11 @@ set by `src/cli.ts`) from **untrusted agent-facing callers** (`remote = true`, s
 confinement when `remote = true` and default to strict behavior when unset. If you are
 writing or reviewing an operation, consult `src/core/operations.ts` for the contract.
 
+`list_pages` is summary-only by default. `include_frontmatter=true` exists solely for
+trusted local CLI repair/audit tooling and is rejected for every remote/MCP caller
+before enumeration; use it only when batch metadata is necessary and never expose
+that projection across the remote trust boundary.
+
 ## Common tasks
 
 - **Chronicle LLM gate:** automatic Chronicle extraction skips `conversation`

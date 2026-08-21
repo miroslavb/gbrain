@@ -1847,6 +1847,10 @@ const list_pages: Operation = {
       description: 'Sort order. Default updated_desc (matches pre-v0.29). Options: updated_desc, updated_asc, created_desc, slug.',
     },
     include_deleted: { type: 'boolean', description: 'v0.26.5: include soft-deleted pages (default: false). Used by restore workflows and operator diagnostics.' },
+    include_frontmatter: {
+      type: 'boolean',
+      description: 'Trusted local callers only: include full page frontmatter for bounded repair/audit tooling. Remote callers are denied.',
+    },
   },
   handler: async (ctx, p) => {
     // Whitelist the sort enum at the handler before passing to the engine.
@@ -1873,6 +1877,13 @@ const list_pages: Operation = {
     // in depth, matching the ctx.remote contract).
     const requestedLimit = p.limit as number | undefined;
     const isLocal = ctx.remote === false;
+    const includeFrontmatter = p.include_frontmatter === true;
+    if (includeFrontmatter && !isLocal) {
+      throw new OperationError(
+        'permission_denied',
+        'list_pages include_frontmatter is available only to trusted local callers',
+      );
+    }
     const limit = isLocal
       ? clampSearchLimit(requestedLimit, 50, Number.MAX_SAFE_INTEGER)
       : clampSearchLimit(requestedLimit, 50, 100);
@@ -1928,6 +1939,7 @@ const list_pages: Operation = {
       type: pg.type,
       title: pg.title,
       updated_at: pg.updated_at,
+      ...(includeFrontmatter ? { frontmatter: pg.frontmatter } : {}),
       ...(pg.deleted_at ? { deleted_at: pg.deleted_at } : {}),
     }));
   },

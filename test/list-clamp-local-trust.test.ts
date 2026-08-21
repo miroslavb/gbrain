@@ -13,7 +13,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
-import { operationsByName } from '../src/core/operations.ts';
+import { operationsByName, OperationError } from '../src/core/operations.ts';
 import type { OperationContext } from '../src/core/operations.ts';
 
 const SEED_COUNT = 120; // must exceed the remote cap (100) and the default (50)
@@ -31,6 +31,7 @@ beforeAll(async () => {
       type: 'note',
       title: `Page ${i}`,
       compiled_truth: 'body',
+      frontmatter: { session_id: `session-${i}` },
     });
   }
 });
@@ -128,5 +129,31 @@ describe('list_pages — offset threads through (regression: was silently ignore
     const base = (await op().handler(ctx, { limit: 10, sort: 'slug' })) as any[];
     expect(neg.map(r => r.slug)).toEqual(base.map(r => r.slug));
     expect(nan.map(r => r.slug)).toEqual(base.map(r => r.slug));
+  });
+});
+
+describe('list_pages — local-only frontmatter projection', () => {
+  test('trusted local caller gets frontmatter only when explicitly requested', async () => {
+    const { ctx } = mkCtx({ remote: false });
+    const summary = (await op().handler(ctx, { limit: 1, sort: 'slug' })) as any[];
+    const detailed = (await op().handler(ctx, {
+      limit: 1,
+      sort: 'slug',
+      include_frontmatter: true,
+    })) as any[];
+
+    expect(summary[0].frontmatter).toBeUndefined();
+    expect(detailed[0].frontmatter).toEqual({ session_id: 'session-0' });
+  });
+
+  test('remote caller is denied frontmatter before any expanded enumeration', async () => {
+    const { ctx } = mkCtx({ remote: true });
+    try {
+      await op().handler(ctx, { include_frontmatter: true });
+      throw new Error('expected permission_denied');
+    } catch (error) {
+      expect(error).toBeInstanceOf(OperationError);
+      expect((error as OperationError).code).toBe('permission_denied');
+    }
   });
 });
