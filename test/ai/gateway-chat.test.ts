@@ -432,6 +432,47 @@ describe('chat fallback — billing-safe usage gate', () => {
     expect(attempts).toEqual([primary, codex]);
   });
 
+  test('continues after exact Claude CLI 429 zero-usage wrapper', async () => {
+    const attempts: string[] = [];
+    const payload = {
+      is_error: true,
+      terminal_reason: 'api_error',
+      api_error_status: 429,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    };
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? primary;
+      attempts.push(model);
+      if (model === primary) {
+        throw new Error(`[chat(${model})] claude-cli exited 1: ${JSON.stringify(payload)}`);
+      }
+      return success(model);
+    });
+
+    await expect(run()).resolves.toMatchObject({ model: codex });
+    expect(attempts).toEqual([primary, codex]);
+  });
+
+  test('refuses Claude CLI wrapper fallback without exact zero-cost evidence', async () => {
+    const attempts: string[] = [];
+    const payload = {
+      is_error: true,
+      terminal_reason: 'api_error',
+      api_error_status: 429,
+      total_cost_usd: 1,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    };
+    const wrapped = new Error(`[chat(${primary})] claude-cli exited 1: ${JSON.stringify(payload)}`);
+    __setChatTransportForTests(async (opts) => {
+      attempts.push(opts.model ?? primary);
+      throw wrapped;
+    });
+
+    await expect(run()).rejects.toBe(wrapped);
+    expect(attempts).toEqual([primary]);
+  });
+
   test('continues after a rate-limit rejection without usage metadata', async () => {
     const attempts: string[] = [];
     __setChatTransportForTests(async (opts) => {

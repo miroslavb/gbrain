@@ -3254,6 +3254,41 @@ function explicitFailedAttemptUsage(err: unknown): FailedAttemptUsage {
 }
 
 /**
+ * Claude Code CLI reports subscription quota/auth refusals as JSON embedded in
+ * a subprocess error string rather than structured Error fields. Accept only
+ * the exact pre-generation envelope: safe status, terminal api_error, explicit
+ * zero input/output usage, and zero reported cost. Any missing/non-zero field
+ * remains billing-ambiguous and fail-closed.
+ */
+function claudeCliConfirmedZeroUsage(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : '';
+  if (!message.includes('claude-cli exited 1:')) return false;
+  const marker = message.indexOf('claude-cli exited 1:');
+  const start = message.indexOf('{', marker);
+  const end = message.lastIndexOf('}');
+  if (start < 0 || end < start) return false;
+  try {
+    const payload = JSON.parse(message.slice(start, end + 1)) as {
+      is_error?: unknown;
+      terminal_reason?: unknown;
+      api_error_status?: unknown;
+      total_cost_usd?: unknown;
+      usage?: { input_tokens?: unknown; output_tokens?: unknown };
+    };
+    return payload.is_error === true &&
+      payload.terminal_reason === 'api_error' &&
+      (payload.api_error_status === 401 ||
+       payload.api_error_status === 403 ||
+       payload.api_error_status === 429) &&
+      payload.total_cost_usd === 0 &&
+      payload.usage?.input_tokens === 0 &&
+      payload.usage?.output_tokens === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A provider rejection with HTTP 429 occurs before generation begins, so it is
  * safe to try the next configured provider. Everything else must carry an
  * explicit `0/0` usage payload; a timeout, 5xx, broken stream, or malformed
@@ -3276,6 +3311,9 @@ function failedAttemptHasConfirmedZeroUsage(err: unknown): boolean {
     const current = queue.shift();
     if (!current || typeof current !== 'object' || seen.has(current)) continue;
     seen.add(current);
+
+    const claudeCliZeroUsage = claudeCliConfirmedZeroUsage(current);
+    if (claudeCliZeroUsage) safeEvidence = true;
 
     const usage = explicitFailedAttemptUsage(current);
     if (usage.state === 'partial') return false;
@@ -3311,7 +3349,7 @@ function failedAttemptHasConfirmedZeroUsage(err: unknown): boolean {
       children.push(...error.errors.filter(child => child && typeof child === 'object'));
     }
 
-    if (children.length === 0 && usage.state === 'absent' && status === undefined) {
+    if (children.length === 0 && usage.state === 'absent' && status === undefined && !claudeCliZeroUsage) {
       // Leaf with no status and no explicit usage: timeout, broken stream,
       // malformed response, or another unknown provider outcome.
       return false;

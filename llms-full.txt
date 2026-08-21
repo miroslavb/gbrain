@@ -152,7 +152,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   deduplicated. A failed attempt may advance only after explicit
   `input_tokens: 0` and `output_tokens: 0`, or an HTTP `401`, `403`, or `429`
   rejection before generation. Partial/missing usage, timeouts, 5xx responses,
-  and broken streams are billing-ambiguous and must fail closed. Add both
+  and broken streams are billing-ambiguous and must fail closed. Claude CLI
+  subscription quota/auth errors are string-wrapped subprocess JSON; fallback
+  is allowed only when the exact envelope says terminal `api_error`, status
+  401/403/429, `total_cost_usd=0`, and explicit input/output tokens `0/0`.
+  Missing/non-zero fields remain fail-closed. Add both
   fallback-order and fail-closed regression tests for every new LLM entry point.
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
