@@ -78,11 +78,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
 - **Atom grounding gate:** `extract_atoms` must request exactly one independently
   checkable claim per atom, require a ≤200-character exact contiguous
-  single-sentence `source_quote`, require a one-sentence body ≤280 characters,
-  omit `lesson`, permit `[]` when the source supports no atom, and forbid joining
-  independent claims with conjunctions/semicolons/lists or inventing unsupported
-  causation/generalization/quantities. For substantive sources (≥500 chars),
-  the parser enforces these shape and quote rules.
+  single-sentence `source_quote`, store that exact quote as the body, omit
+  `lesson`, and permit `[]` when the source supports no atom. Grounded evidence
+  must name its specific subject, may not begin with a deictic pronoun, and may
+  not join independent claims with conjunctions/semicolons/lists. For
+  substantive sources (≥500 chars), the parser enforces these rules and rejects
+  unsupported causation/generalization/quantities rather than paraphrasing them.
   Keep `autopilot.auto_drain.enabled=false` until a fresh blinded quality sample
   passes the agreed support/atomicity thresholds.
 - **Trusted migration writes:** `put_page migration_mode` / CLI

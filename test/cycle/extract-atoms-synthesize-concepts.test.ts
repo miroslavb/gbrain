@@ -122,6 +122,29 @@ describe('v0.41 T5: parseAtomsResponse', () => {
     expect(accepted[0].lesson).toBeUndefined();
   });
 
+  test('source-grounded mode stores exact evidence as body and rejects compound or deictic evidence', () => {
+    const source = `The local gate blocks remote migration requests. This makes it safer. The gate blocks writes and records denials. ${'context '.repeat(80)}`;
+    const exact = JSON.stringify([{
+      title: 'Local gate blocks remote migration', atom_type: 'insight',
+      body: 'Remote migration is always safely blocked in every environment.',
+      source_quote: 'The local gate blocks remote migration requests.',
+    }]);
+    const deictic = JSON.stringify([{
+      title: 'Safer gate', atom_type: 'insight', body: 'This makes it safer.',
+      source_quote: 'This makes it safer.',
+    }]);
+    const conjunction = JSON.stringify([{
+      title: 'Two gate effects', atom_type: 'insight',
+      body: 'The gate blocks writes and records denials.',
+      source_quote: 'The gate blocks writes and records denials.',
+    }]);
+    const accepted = parseAtomsResponse(exact, source);
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].body).toBe('The local gate blocks remote migration requests.');
+    expect(parseAtomsResponse(deictic, source)).toEqual([]);
+    expect(parseAtomsResponse(conjunction, source)).toEqual([]);
+  });
+
   test('accepts all 11 declared atom_type values', () => {
     const types = ['insight', 'anecdote', 'quote', 'framework', 'statistic',
                    'story_angle', 'strategy_angle', 'strategy', 'endorsement',
@@ -179,6 +202,8 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
     expect(system).toContain('body MUST be exactly one sentence');
     expect(system).toContain('lesson MUST be omitted');
     expect(system).toContain('Never join independent claims');
+    expect(system).toContain('body MUST equal source_quote exactly');
+    expect(system).toContain('must name its specific subject');
   });
 
   test('extracts atoms from transcript via stub chat', async () => {

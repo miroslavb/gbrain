@@ -187,6 +187,8 @@ interface ExtractedAtom {
 /** kebab-case validator for concept labels ("captive-portal", "channel-pricing"). */
 const CONCEPT_LABEL_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_GROUNDED_BODY_CHARS = 280;
+const COMPOUND_CLAIM_JOIN_RE = /\b(?:and|but|while|whereas|therefore|so)\b/i;
+const DEICTIC_START_RE = /^(?:this|that|it|they|these|those|such)\b/i;
 
 function isSingleAtomicSentence(value: string, maxChars: number): boolean {
   const text = value.trim();
@@ -196,20 +198,26 @@ function isSingleAtomicSentence(value: string, maxChars: number): boolean {
   return boundaries.length <= 1;
 }
 
+function isSelfContainedAtomicEvidence(value: string): boolean {
+  const text = value.trim();
+  return !COMPOUND_CLAIM_JOIN_RE.test(text) && !DEICTIC_START_RE.test(text);
+}
+
 const EXTRACT_PROMPT = `You extract atomic content nuggets from a transcript.
 
 An atom is a single-source, self-contained idea containing exactly one independently checkable claim. Each atom must:
   - Stand alone with enough names/context to understand it (no "as discussed above")
   - Make one clear, specific point; split independent claims into separate atoms
   - Be supported by source_quote, an exact contiguous substring of the source (required, ≤200 chars)
-  - body MUST be exactly one sentence (≤280 chars) paraphrasing only that quote
+  - body MUST be exactly one sentence (≤200 chars) and body MUST equal source_quote exactly
+  - source_quote must name its specific subject; never begin with This, That, It, They, These, Those, or Such
   - lesson MUST be omitted; it would create a second claim surface
   - Never join independent claims with "and", "but", "while", a semicolon, or a list; split them into separate atoms
   - Do not infer causation, generalize beyond the source, or invent quantities
 
 If the source does not support at least one such atom, Return [] exactly.
 Output a JSON array of atoms (1-3 per transcript, never more than 3).
-Each atom: {title (≤80 chars; one claim only), atom_type, body (exactly one sentence, ≤280 chars),
+Each atom: {title (≤80 chars; one claim only), atom_type, body (exactly the same text as source_quote),
 source_quote (verbatim contiguous single-sentence substring ≤200 chars), concepts
 (1-3 topic labels), virality_score (0-100), emotional_register (one of:
 shocking, inspiring, funny, sobering, practical, controversial)}.
@@ -859,7 +867,7 @@ export function parseAtomsResponse(raw: string, sourceText?: string): ExtractedA
     const obj = item as Record<string, unknown>;
     const title = typeof obj.title === 'string' ? obj.title.slice(0, 80) : null;
     const atomType = typeof obj.atom_type === 'string' ? obj.atom_type.trim().toLowerCase() : null;
-    const body = typeof obj.body === 'string' ? obj.body.trim() : null;
+    let body = typeof obj.body === 'string' ? obj.body.trim() : null;
     const sourceQuote = typeof obj.source_quote === 'string' ? obj.source_quote.trim() : null;
     if (!title || !atomType || !body) continue;
     if (!ATOM_TYPES.includes(atomType as typeof ATOM_TYPES[number])) continue;
@@ -867,6 +875,8 @@ export function parseAtomsResponse(raw: string, sourceText?: string): ExtractedA
       if (!sourceQuote || sourceQuote.length > 200 || !sourceText!.includes(sourceQuote)) continue;
       if (!isSingleAtomicSentence(body, MAX_GROUNDED_BODY_CHARS)) continue;
       if (!isSingleAtomicSentence(sourceQuote, 200)) continue;
+      if (!isSelfContainedAtomicEvidence(sourceQuote)) continue;
+      body = sourceQuote;
     }
     atoms.push({
       title,
