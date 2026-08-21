@@ -76,6 +76,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
+- **Trusted migration writes:** `put_page migration_mode` / CLI
+  `gbrain put ... --migration-mode` is restricted to `ctx.remote === false`.
+  It preserves the page/import/write-through path but suppresses only the
+  generative facts and Chronicle backstops, returning
+  `backstops_skipped: migration`; remote/MCP callers must receive
+  `permission_denied` before any write. Normal put behavior is unchanged.
 - **Models doctor chain axis:** `gbrain models doctor` must keep individual
   provider rows separate from the configured generative-chain viability row.
   Individual probes use their own short budget and may report an exhausted or

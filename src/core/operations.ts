@@ -1134,6 +1134,7 @@ const put_page: Operation = {
     slug: { type: 'string', required: true, description: 'Page slug' },
     content: { type: 'string', required: true, description: 'Full markdown content with YAML frontmatter' },
     allow_empty: { type: 'boolean', required: false, description: 'Allow overwriting an existing non-empty page with empty/whitespace-only content (default: false). Without it, put_page rejects the empty overwrite — the empty-stdin failure class.' },
+    migration_mode: { type: 'boolean', required: false, description: 'Trusted local CLI only: write the page but suppress generative facts/Chronicle backstops. Remote/MCP callers are denied. Intended for additive metadata/session repair.' },
     // v0.39.3.0 provenance write-through (WARN-8 + A1 + CV6). Optional fields
     // for trusted local callers (capture CLI, autopilot, dream cycle). Remote
     // MCP callers (ctx.remote !== false) have their values OVERRIDDEN with
@@ -1148,6 +1149,14 @@ const put_page: Operation = {
   scope: 'write',
   handler: async (ctx, p) => {
     const slug = p.slug as string;
+    const migrationMode = p.migration_mode === true;
+    if (migrationMode && ctx.remote !== false) {
+      throw new OperationError(
+        'permission_denied',
+        'put_page migration_mode is available only to the trusted local CLI.',
+        'Run the migration on the brain host with `gbrain put ... --migration-mode`; remote/MCP callers cannot suppress post-write backstops.',
+      );
+    }
 
     // v0.39.3.0 CV6 trust gate for provenance write-through (WARN-8).
     // Only trusted LOCAL callers (ctx.remote === false — capture CLI,
@@ -1440,7 +1449,9 @@ const put_page: Operation = {
     // the delegated (submit_agent → subagent) context carries
     // `allowedSlugPrefixes` but NOT `auth`, so an auth-only test would let a
     // bound client re-open this path simply by delegating the write.
-    if (ctx.auth?.boundSlugPrefixes || ctx.viaSubagent === true) {
+    if (migrationMode) {
+      factsQueued = { skipped: 'migration' };
+    } else if (ctx.auth?.boundSlugPrefixes || ctx.viaSubagent === true) {
       factsQueued = { skipped: 'slug_bound_client' };
     } else {
     try {
@@ -1483,7 +1494,9 @@ const put_page: Operation = {
     // behind the SAME trust gate as auto-link/timeline + the auto_chronicle
     // flag. Enqueues a chronicle_extract job; never blocks the write.
     let chronicleQueued: { queued: boolean } | { skipped: string } | undefined;
-    if (result.status !== 'imported') {
+    if (migrationMode) {
+      chronicleQueued = { skipped: 'migration' };
+    } else if (result.status !== 'imported') {
       chronicleQueued = { skipped: 'not_imported' };
     } else if (ctx.remote !== false && !trustedWorkspace) {
       chronicleQueued = { skipped: 'remote' };
@@ -1537,6 +1550,7 @@ const put_page: Operation = {
       ...(writerLint ? { writer_lint: writerLint } : {}),
       ...(factsQueued ? { facts_backstop: factsQueued } : {}),
       ...(chronicleQueued ? { chronicle_backstop: chronicleQueued } : {}),
+      ...(migrationMode ? { backstops_skipped: 'migration' } : {}),
       ...(writeThrough ? { write_through: writeThrough } : {}),
     };
   },
