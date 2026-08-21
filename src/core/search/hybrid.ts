@@ -922,6 +922,18 @@ export function resolveDateBoundary(
   );
 }
 
+export function resolveInnerSearchLimit(
+  outputLimit: number,
+  rerankerEnabled: boolean,
+  rerankerTopNIn?: number,
+): number {
+  const legacyPool = Math.max(1, outputLimit) * 2;
+  const rerankerFloor = rerankerEnabled && Number.isFinite(rerankerTopNIn)
+    ? Math.max(0, Number(rerankerTopNIn)) * 2
+    : 0;
+  return Math.min(Math.max(legacyPool, rerankerFloor), MAX_SEARCH_LIMIT);
+}
+
 export async function hybridSearch(
   engine: BrainEngine,
   query: string,
@@ -986,7 +998,15 @@ export async function hybridSearch(
 
   const limit = opts?.limit || resolvedMode.searchLimit;
   const offset = opts?.offset || 0;
-  const innerLimit = Math.min(limit * 2, MAX_SEARCH_LIMIT);
+  // Output cardinality is not retrieval depth. Each first-stage arm overfetches
+  // 2× the reranker input cap so RRF can form a good topNIn union; using topNIn
+  // itself as the per-arm cap can still hide a candidate that the cross-encoder
+  // ranks #1 when the pool is slightly deeper.
+  const innerLimit = resolveInnerSearchLimit(
+    limit,
+    resolvedMode.reranker_enabled,
+    resolvedMode.reranker_top_n_in,
+  );
 
   // v0.32.x search-lite: classify intent once up front. Drives BOTH the
   // legacy auto-detail / salience / recency suggestions AND the new

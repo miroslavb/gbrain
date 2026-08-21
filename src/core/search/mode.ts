@@ -779,7 +779,11 @@ export function attributeKnob<K extends keyof ModeBundle>(
 // to cache.ttl_seconds, with no warning and no way for an operator to tell.
 // Same one-time global cold-miss pattern as the bumps above; refills within
 // cache.ttl_seconds (3600s default).
-export const KNOBS_HASH_VERSION = 15;
+//
+// bump 15→16: reranker topNIn is now a floor for the first-stage candidate
+// pool. Pre-fix rows for the same `lim=5` were built from only 10 candidates;
+// serving them after the fix would preserve false misses for the cache TTL.
+export const KNOBS_HASH_VERSION = 16;
 
 /**
  * v0.36 (D8 / CDX-2) — second-arg context for the cache key. The
