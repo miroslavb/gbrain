@@ -129,6 +129,88 @@ function writeBody(path: string, body: string): void {
 
 // --- Subcommands ---
 
+export type TakeProposalStatus = 'pending' | 'accepted' | 'rejected' | 'superseded';
+
+export interface TakeProposalView {
+  id: number;
+  source_id: string;
+  page_slug: string;
+  status: TakeProposalStatus;
+  claim_text: string;
+  kind: string;
+  holder: string;
+  weight: number;
+  domain: string | null;
+  model_id: string;
+  evidence_span: string | null;
+  source_hash: string | null;
+  proposal_run_id: string;
+  proposed_at: Date;
+  grounding_status: 'grounded' | 'legacy_unverified';
+}
+
+/** Read-only proposal queue consumer. It never updates proposal/take state. */
+export async function listTakeProposals(
+  engine: BrainEngine,
+  opts: { sourceId: string; status?: TakeProposalStatus; runId?: string; limit?: number },
+): Promise<TakeProposalView[]> {
+  const status = opts.status ?? 'pending';
+  const limit = Math.max(1, Math.min(200, Math.floor(opts.limit ?? 50)));
+  const where = ['source_id = $1', 'status = $2'];
+  const params: unknown[] = [opts.sourceId, status];
+  if (opts.runId) {
+    params.push(opts.runId);
+    where.push(`proposal_run_id = $${params.length}`);
+  }
+  params.push(limit);
+  const rows = await engine.executeRaw<Omit<TakeProposalView, 'grounding_status'>>(
+    `SELECT id, source_id, page_slug, status, claim_text, kind, holder, weight,
+            domain, model_id, evidence_span, source_hash, proposal_run_id, proposed_at
+       FROM take_proposals
+      WHERE ${where.join(' AND ')}
+      ORDER BY proposed_at DESC, id DESC
+      LIMIT $${params.length}`,
+    params,
+  );
+  return rows.map((row) => ({
+    ...row,
+    grounding_status:
+      row.evidence_span && row.source_hash ? 'grounded' : 'legacy_unverified',
+  }));
+}
+
+async function cmdProposals(engine: BrainEngine, args: string[]): Promise<void> {
+  const statusRaw = flagValue(args, '--status') ?? 'pending';
+  const allowed: TakeProposalStatus[] = ['pending', 'accepted', 'rejected', 'superseded'];
+  if (!allowed.includes(statusRaw as TakeProposalStatus)) {
+    console.error(`Invalid --status "${statusRaw}". Expected: ${allowed.join(', ')}.`);
+    process.exit(1);
+  }
+  const sourceId = flagValue(args, '--source-id') ?? await resolveTakesSourceId(engine);
+  const limit = parseInt(flagValue(args, '--limit') ?? '50', 10);
+  const rows = await listTakeProposals(engine, {
+    sourceId,
+    status: statusRaw as TakeProposalStatus,
+    runId: flagValue(args, '--run-id'),
+    limit: Number.isFinite(limit) ? limit : 50,
+  });
+  if (flagPresent(args, '--json')) {
+    console.log(JSON.stringify(rows, null, 2));
+    return;
+  }
+  if (rows.length === 0) {
+    console.log(`No ${statusRaw} take proposals for source ${sourceId}.`);
+    return;
+  }
+  console.log(`# Take proposals — ${statusRaw} — source ${sourceId}`);
+  for (const row of rows) {
+    const claim = row.claim_text.replace(/\s+/g, ' ').trim();
+    console.log(`- [${row.id}] ${row.kind} w=${row.weight} holder=${row.holder} ${row.grounding_status}`);
+    console.log(`  page=${row.page_slug} run=${row.proposal_run_id}`);
+    console.log(`  ${claim}`);
+  }
+}
+
 async function cmdList(engine: BrainEngine, args: string[]): Promise<void> {
   // #2079: slug is optional. `gbrain takes list` (no slug) lists ALL active
   // takes — CLI parity with the takes_list operation. A leading flag is not
@@ -566,6 +648,9 @@ Subcommands:
                                           List all active takes across the brain (#2079)
   takes search "<query>" [--limit N] [--json]
                                           Keyword search across all takes
+  takes proposals [--status pending|accepted|rejected|superseded]
+                  [--source-id <id>] [--run-id <id>] [--limit N] [--json]
+                                          Read-only proposal queue; legacy rows are labeled unverified
   takes add <slug> --claim "..." --kind <fact|take|bet|hunch> --who <holder>
                    [--weight 0.5] [--source "..."] [--since YYYY-MM]
                                           Append a take (markdown + DB)
@@ -597,6 +682,7 @@ Common flags:
     // "No takes on list." — reading exactly like an empty takes table.
     case 'list':        return cmdList(engine, rest);
     case 'search':      return cmdSearch(engine, rest);
+    case 'proposals':   return cmdProposals(engine, rest);
     case 'add':         return cmdAdd(engine, rest, await resolveTakesSourceId(engine));
     case 'update':      return cmdUpdate(engine, rest, await resolveTakesSourceId(engine));
     case 'supersede':   return cmdSupersede(engine, rest, await resolveTakesSourceId(engine));

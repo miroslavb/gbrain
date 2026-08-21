@@ -103,6 +103,13 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   and an exact contiguous evidence span. One page transaction banks all claim
   rows plus one terminal `proposal_page_runs` marker; empty outcomes live only
   in that marker, never as fake proposal tombstones. Dry-run writes neither.
+- **Take proposal consumer:** `gbrain takes proposals` is read-only and uses a
+  narrow projection over `take_proposals`; it never changes status or writes
+  takes. It defaults to pending/current-source, supports status/run/limit/JSON
+  filters, labels rows with both evidence span and versioned source hash as
+  `grounded`, and labels every legacy row missing either field
+  `legacy_unverified`. Accept/reject/promotion mutations remain a separate,
+  explicitly approved canary step.
 - **Conversation-facts pre-insert gate:** every `extract-conversation-facts`
   candidate passes deterministic sensitive scanning, one batched semantic check
   for support/atomicity/self-containedness/entity attribution/causation/generalization,
