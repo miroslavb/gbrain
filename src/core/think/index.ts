@@ -732,7 +732,7 @@ async function readThinkTrajectoryEnabled(engine: BrainEngine): Promise<boolean>
  * touchpoint not supported, etc.). Caller falls through to the graceful
  * "no LLM available" stub on null.
  */
-async function tryBuildGatewayClient(
+export async function tryBuildGatewayClient(
   modelUsed: string,
   opts: { explicitModel?: boolean } = {},
 ): Promise<ThinkLLMClient | null> {

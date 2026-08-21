@@ -10,7 +10,7 @@
  */
 
 import { readFileSync, existsSync, openSync, writeSync, closeSync, writeFileSync } from 'fs';
-import Anthropic from '@anthropic-ai/sdk';
+
 import { withBenchmarkBrain, resetTables } from '../eval/longmemeval/harness.ts';
 import { haystackToPages, type LongMemEvalQuestion } from '../eval/longmemeval/adapter.ts';
 import { renderChatBlock, type ChatSessionForPrompt } from '../eval/longmemeval/sanitize.ts';
@@ -18,7 +18,8 @@ import { importFromContent } from '../core/import-file.ts';
 import { hybridSearch } from '../core/search/hybrid.ts';
 import { expandQuery } from '../core/search/expansion.ts';
 import { resolveModel } from '../core/model-config.ts';
-import type { ThinkLLMClient } from '../core/think/index.ts';
+import { tryBuildGatewayClient, type ThinkLLMClient } from '../core/think/index.ts';
+import { configureGatewayIfUninitialized } from '../core/ai/gateway.ts';
 import { createProgress } from '../core/progress.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import type { PGLiteEngine } from '../core/pglite-engine.ts';
@@ -33,7 +34,7 @@ import {
   type AliasMap,
 } from '../eval/longmemeval/extract.ts';
 import { extractCandidateEntities } from '../core/think/entity-extract.ts';
-import { splitProviderModelId } from '../core/model-id.ts';
+
 import { resolveEntitySlugWithSource, type ResolutionSource } from '../core/entities/resolve.ts';
 import { formatTrajectoryBlock } from '../core/trajectory-format.ts';
 
@@ -469,24 +470,15 @@ export async function runEvalLongMemEval(args: string[], runOpts: RunOpts = {}):
     fallback: 'sonnet',
   });
 
-  // Wrap Anthropic SDK so its `.messages.create` shape matches ThinkLLMClient.
-  // Same pattern as src/core/think/index.ts:247-249 — EXCEPT think's default
-  // client routes through the gateway, which parses `provider:model` recipe
-  // ids. This eval's client is a raw SDK by design (hermetic, no gateway
-  // dependency), and resolveModel returns RECIPE ids (`anthropic:claude-…`);
-  // passing one through unstripped 404s every answer/extractor call, which
-  // surfaces downstream as all-upstream_error batches in the nightly probe.
-  const toSdkModel = (m: string): string => splitProviderModelId(m).model || m;
-  const realClient = new Anthropic();
-  const client: ThinkLLMClient = runOpts.client ?? {
-    create: (params, callOpts) =>
-      realClient.messages.create({ ...params, model: toSdkModel(params.model) }, callOpts),
-  };
-  // v0.40.2.0 — separate extractor client (defaults to same SDK).
-  const extractorClient: ThinkLLMClient = runOpts.extractorClient ?? {
-    create: (params, callOpts) =>
-      realClient.messages.create({ ...params, model: toSdkModel(params.model) }, callOpts),
-  };
+  // LongMemEval keeps its hermetic in-memory PGLite brain, but all provider
+  // calls route through the same configured gateway as production. This picks
+  // up subscription fallback ordering, safe zero-usage gates, and provider
+  // recipes without opening the user's persistent brain.
+  configureGatewayIfUninitialized();
+  const client: ThinkLLMClient = runOpts.client
+    ?? await tryBuildGatewayClient(model, { explicitModel: true })
+    ?? (() => { throw new Error(`LongMemEval model "${model}" is unavailable through the AI gateway`); })();
+
   const trajectoryEnabled = !opts.noTrajectory;
   const extractorModel = trajectoryEnabled
     ? await resolveModel(null, {
@@ -495,6 +487,11 @@ export async function runEvalLongMemEval(args: string[], runOpts: RunOpts = {}):
         fallback: 'haiku',
       })
     : '';
+  const extractorClient: ThinkLLMClient = runOpts.extractorClient
+    ?? (trajectoryEnabled
+      ? await tryBuildGatewayClient(extractorModel, { explicitModel: true })
+        ?? (() => { throw new Error(`LongMemEval extractor model "${extractorModel}" is unavailable through the AI gateway`); })()
+      : client);
 
   process.stderr.write(`[longmemeval] estimated 20-60 minutes for ${questions.length} questions; use --limit N for shorter runs\n`);
   process.stderr.write(`[longmemeval] connecting in-memory brain...\n`);

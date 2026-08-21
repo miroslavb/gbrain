@@ -21,7 +21,7 @@
  *     rotation (via configureGateway()) invalidates stale entries.
  */
 
-import { embed as aiEmbed, embedMany, generateObject, generateText, jsonSchema } from 'ai';
+import { embed as aiEmbed, embedMany, generateText, jsonSchema } from 'ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { listRecipes } from './recipes/index.ts';
@@ -160,6 +160,10 @@ type EmbedManyFn = typeof embedMany;
 let _embedTransport: EmbedManyFn = embedMany;
 type GenerateTextFn = typeof generateText;
 let _generateTextTransport: GenerateTextFn = generateText;
+type ExpansionTransportFn = (model: string, prompt: string) => Promise<string[]>;
+let _expansionTransport: ExpansionTransportFn | null = null;
+type OcrTransportFn = (model: string, imageBytes: Buffer, mime: string) => Promise<string>;
+let _ocrTransport: OcrTransportFn | null = null;
 // v0.41.6.0 D1: tests that install a transport stub also pass the
 // embedding-creds preflight, matching the chat-transport fast-path
 // pattern. Set when __setEmbedTransportForTests is called with a
@@ -623,6 +627,8 @@ function clearGatewayState(): void {
   _generateTextTransport = generateText;
   _embedTransportInstalled = false;
   _chatTransport = null;
+  _expansionTransport = null;
+  _ocrTransport = null;
   _warnedRecipes.clear();
 }
 
@@ -693,6 +699,22 @@ export function __setChatTransportForTests(
   fn: ((opts: ChatOpts) => Promise<ChatResult>) | null,
 ): void {
   _chatTransport = fn;
+}
+
+/**
+ * Test-only seam for the model-specific expansion attempt. The outer
+ * `expand()` fallback walker remains production-real, so tests can assert
+ * provider order and billing-safe halt semantics without network calls.
+ *
+ * @internal exported for tests; not part of the public gateway API.
+ */
+export function __setExpansionTransportForTests(fn: ExpansionTransportFn | null): void {
+  _expansionTransport = fn;
+}
+
+/** @internal test-only OCR attempt seam; production code must not call it. */
+export function __setOcrTransportForTests(fn: OcrTransportFn | null): void {
+  _ocrTransport = fn;
 }
 
 /** The live gateway config, or throw if unconfigured. Exported for the
@@ -2458,6 +2480,21 @@ export function parseExpansionResponse(text: string): string[] | null {
   return parsed.success ? parsed.data.queries : null;
 }
 
+async function runExpansionAttempt(modelStr: string, expansionPrompt: string): Promise<string[]> {
+  if (_expansionTransport) return _expansionTransport(modelStr, expansionPrompt);
+
+  const { model } = await resolveExpansionProvider(modelStr);
+  // One provider attempt means one generation. Text JSON plus tolerant parsing
+  // works across native and OpenAI-compatible providers without an internal
+  // structured→text retry that could duplicate ambiguous/partially billed work.
+  const { text } = await generateText({
+    model,
+    abortSignal: withDefaultTimeout(undefined, AI_CHAT_TIMEOUT_MS),
+    prompt: expansionPrompt,
+  });
+  return parseExpansionResponse(text) ?? [];
+}
+
 /**
  * Expand a search query into up to 4 related queries.
  * Returns the original query PLUS expansions. On failure, returns just the original.
@@ -2483,53 +2520,11 @@ export async function expand(query: string): Promise<string[]> {
   ].join('\n');
 
   try {
-    const { model, recipe, modelId } = await resolveExpansionProvider(getExpansionModel());
-
-    let expansions: string[];
-
-    // Schemaless text path for openai-compatible backends whose structured-output
-    // support is unknown: the AI SDK can't send a json_schema response_format
-    // there, so generateObject would warn and silently degrade. generateText + a
-    // tolerant parse recovers the queries instead. Fresh abortSignal per call.
-    const viaText = async (): Promise<string[]> => {
-      const { text } = await generateText({
-        model,
-        abortSignal: withDefaultTimeout(undefined, AI_CHAT_TIMEOUT_MS),
-        prompt: expansionPrompt,
-      });
-      return parseExpansionResponse(text) ?? [];
-    };
-
-    if (recipe.implementation !== 'openai-compatible') {
-      // Native providers (Anthropic, OpenAI, Google) support generateObject's
-      // structured output natively — unchanged path.
-      const result = await generateObject({
-        model,
-        schema: ExpansionSchema,
-        abortSignal: withDefaultTimeout(undefined, AI_CHAT_TIMEOUT_MS),
-        prompt: expansionPrompt,
-      });
-      expansions = result.object?.queries ?? [];
-    } else if (recipeSupportsStructuredOutputs(recipe)) {
-      // openai-compatible backend that honors strict json_schema: request the
-      // schema (strict validation), and fall back to the text path if it is
-      // rejected at call time so a mis-declared capability never drops expansion.
-      try {
-        const result = await generateObject({
-          model,
-          schema: ExpansionSchema,
-          abortSignal: withDefaultTimeout(undefined, AI_CHAT_TIMEOUT_MS),
-          prompt: expansionPrompt,
-        });
-        expansions = result.object?.queries ?? [];
-      } catch {
-        expansions = await viaText();
-      }
-    } else {
-      // openai-compatible backend, structured-output support unknown: skip the
-      // json_schema attempt entirely (no SDK warning, no silent degradation).
-      expansions = await viaText();
-    }
+    const expansions = await runWithModelFallback(
+      getExpansionModel(),
+      (model) => runExpansionAttempt(model, expansionPrompt),
+      'expand',
+    );
 
     // Deduplicate + include the original query
     const seen = new Set<string>();
@@ -2565,9 +2560,10 @@ export async function expand(query: string): Promise<string[]> {
  * Eng-1B counter writes happen at the importImageFile site, not here —
  * keeping the gateway focused on the LLM call.
  */
-export async function generateOcrText(imageBytes: Buffer, mime: string): Promise<string> {
-  if (!isAvailable('expansion')) return '';
-  const { model } = await resolveExpansionProvider(getExpansionModel());
+async function runOcrAttempt(modelStr: string, imageBytes: Buffer, mime: string): Promise<string> {
+  if (_ocrTransport) return _ocrTransport(modelStr, imageBytes, mime);
+
+  const { model } = await resolveExpansionProvider(modelStr);
   const base64 = imageBytes.toString('base64');
   const result = await generateText({
     model,
@@ -2596,6 +2592,15 @@ export async function generateOcrText(imageBytes: Buffer, mime: string): Promise
     ],
   });
   return (result.text ?? '').trim();
+}
+
+export async function generateOcrText(imageBytes: Buffer, mime: string): Promise<string> {
+  if (!isAvailable('expansion')) return '';
+  return runWithModelFallback(
+    getExpansionModel(),
+    (model) => runOcrAttempt(model, imageBytes, mime),
+    'ocr',
+  );
 }
 
 // ---- BudgetTracker scope (TX5) ----
@@ -3284,36 +3289,50 @@ function failedAttemptHasConfirmedZeroUsage(err: unknown): boolean {
   return false;
 }
 
-export async function chat(opts: ChatOpts): Promise<ChatResult> {
+async function runWithModelFallback<T>(
+  requested: string,
+  attempt: (model: string) => Promise<T>,
+  route = 'chat',
+): Promise<T> {
+  let lastErr: unknown;
+  let attempted = requested;
   try {
-    return await chatOnce(opts);
+    return await attempt(requested);
   } catch (err) {
     if (!fallbackEligible(err)) throw err;
-    const requested = opts.model ?? getChatModel();
-    const chain = getChatFallbackChain().filter((m) => m !== requested);
-    let lastErr: unknown = err;
-    let attempted = requested;
-    for (const fb of chain) {
-      if (!failedAttemptHasConfirmedZeroUsage(lastErr)) {
-        console.warn(
-          `[gateway.chat] model "${attempted}" failed (${(lastErr as Error)?.message ?? lastErr}); ` +
-          'refusing fallback because provider usage is non-zero or unknown',
-        );
-        throw lastErr;
-      }
-      console.warn(
-        `[gateway.chat] model "${attempted}" failed (${(lastErr as Error)?.message ?? lastErr}); falling back to "${fb}"`,
-      );
-      try {
-        return await chatOnce({ ...opts, model: fb });
-      } catch (e2) {
-        if (!fallbackEligible(e2)) throw e2;
-        lastErr = e2;
-        attempted = fb;
-      }
-    }
-    throw lastErr;
+    lastErr = err;
   }
+
+  const chain = getChatFallbackChain().filter((model) => model !== requested);
+  for (const fallbackModel of chain) {
+    if (!failedAttemptHasConfirmedZeroUsage(lastErr)) {
+      console.warn(
+        `[gateway.${route}] model "${attempted}" failed (${(lastErr as Error)?.message ?? lastErr}); ` +
+        'refusing fallback because provider usage is non-zero or unknown',
+      );
+      throw lastErr;
+    }
+    console.warn(
+      `[gateway.${route}] model "${attempted}" failed (${(lastErr as Error)?.message ?? lastErr}); ` +
+      `falling back to "${fallbackModel}"`,
+    );
+    try {
+      return await attempt(fallbackModel);
+    } catch (err) {
+      if (!fallbackEligible(err)) throw err;
+      lastErr = err;
+      attempted = fallbackModel;
+    }
+  }
+  throw lastErr;
+}
+
+export async function chat(opts: ChatOpts): Promise<ChatResult> {
+  const requested = opts.model ?? getChatModel();
+  return runWithModelFallback(
+    requested,
+    (model) => chatOnce({ ...opts, model }),
+  );
 }
 
 async function chatOnce(opts: ChatOpts): Promise<ChatResult> {

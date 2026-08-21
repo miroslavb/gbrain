@@ -76,10 +76,15 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
-- **Chat fallback safety:** a failed chat attempt may advance to the next
-  provider only after explicit `input_tokens: 0` and `output_tokens: 0`, or an
-  HTTP `429` rejection before generation. Partial/missing usage, timeouts,
-  5xx responses, and broken streams are billing-ambiguous and must fail closed.
+- **Generative fallback safety:** every provider-neutral generative route must use
+  the shared model walker (`gateway.chat`, query expansion, OCR, and future LLM
+  entry points). The explicit task model is attempted first; configured
+  `chat_fallback_chain` entries follow in order with the requested model
+  deduplicated. A failed attempt may advance only after explicit
+  `input_tokens: 0` and `output_tokens: 0`, or an HTTP `401`, `403`, or `429`
+  rejection before generation. Partial/missing usage, timeouts, 5xx responses,
+  and broken streams are billing-ambiguous and must fail closed. Add both
+  fallback-order and fail-closed regression tests for every new LLM entry point.
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes` (manual schema-only).

@@ -26,6 +26,11 @@ import type { LongMemEvalQuestion } from '../src/eval/longmemeval/adapter.ts';
 import { createBenchmarkBrain } from '../src/eval/longmemeval/harness.ts';
 import type { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { makeStubClient } from './helpers/longmemeval-stub.ts';
+import {
+  configureGateway,
+  resetGateway,
+  __setChatTransportForTests,
+} from '../src/core/ai/gateway.ts';
 
 const FIXTURE_PATH = join(import.meta.dir, 'fixtures', 'longmemeval-mini.jsonl');
 
@@ -497,6 +502,69 @@ describe('codex CDX-3 — resume + --by-type-floor enforcement on no-op resume',
       // All rows had recall_hit: false → aggregate.rate is 0 → below 0.5 floor.
       expect(summary.aggregate.rate).toBeLessThan(0.5);
     } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+describe('runEvalLongMemEval: subscription fallback gateway', () => {
+  test('explicit Codex primary falls to Claude on safe pre-generation 429', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'lme-fallback-test-'));
+    const outPath = join(tmp, 'hypothesis.jsonl');
+    const codex = 'openai:gpt-5.6-terra';
+    const claude = 'anthropic:claude-sonnet-5';
+    const ollama = 'together:glm-5.2';
+    const attempts: string[] = [];
+    try {
+      resetGateway();
+      configureGateway({
+        chat_model: claude,
+        expansion_model: codex,
+        chat_fallback_chain: [codex, claude, ollama],
+        env: {
+          OPENAI_API_KEY: 'fake',
+          ANTHROPIC_API_KEY: 'fake',
+          TOGETHER_API_KEY: 'fake',
+        },
+      });
+      __setChatTransportForTests(async (opts) => {
+        const model = opts.model ?? claude;
+        attempts.push(model);
+        if (model === codex) throw Object.assign(new Error('quota exhausted'), { status: 429 });
+        return {
+          text: 'fallback-answer',
+          blocks: [{ type: 'text', text: 'fallback-answer' }],
+          stopReason: 'end',
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+          },
+          model,
+          providerId: 'test',
+        };
+      });
+
+      await runEvalLongMemEval(
+        [
+          FIXTURE_PATH,
+          '--keyword-only',
+          '--no-trajectory',
+          '--limit', '1',
+          '--model', codex,
+          '--output', outPath,
+        ],
+        { engine: sharedEngine },
+      );
+
+      expect(attempts).toEqual([codex, claude]);
+      const rows = readFileSync(outPath, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].hypothesis).toBe('fallback-answer');
+    } finally {
+      __setChatTransportForTests(null);
+      resetGateway();
       rmSync(tmp, { recursive: true, force: true });
     }
   }, 60_000);

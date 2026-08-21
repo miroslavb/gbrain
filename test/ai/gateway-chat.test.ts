@@ -25,8 +25,12 @@ import {
   getChatFallbackChain,
   recipeSupportsStructuredOutputs,
   parseExpansionResponse,
+  expand,
+  generateOcrText,
   chat,
   __setChatTransportForTests,
+  __setExpansionTransportForTests,
+  __setOcrTransportForTests,
   __setGenerateTextTransportForTests,
 } from '../../src/core/ai/gateway.ts';
 import { parseModelId, resolveRecipe, assertTouchpoint } from '../../src/core/ai/model-resolver.ts';
@@ -120,6 +124,91 @@ describe('expansion — schemaless recovery (parseExpansionResponse)', () => {
     expect(parseExpansionResponse('{"queries":[]}')).toBeNull(); // min(1)
     expect(parseExpansionResponse('{"rewrites":["a"]}')).toBeNull(); // wrong key
     expect(parseExpansionResponse('{"queries":[1,2]}')).toBeNull(); // wrong item type
+  });
+});
+
+describe('expansion — subscription fallback chain', () => {
+  const codex = 'openai:gpt-5.6-terra';
+  const claude = 'anthropic:claude-sonnet-5';
+  const ollama = 'together:glm-5.2';
+
+  beforeEach(() => {
+    resetGateway();
+    configureGateway({
+      expansion_model: codex,
+      chat_model: claude,
+      chat_fallback_chain: [codex, claude, ollama],
+      env: {
+        OPENAI_API_KEY: 'fake',
+        ANTHROPIC_API_KEY: 'fake',
+        TOGETHER_API_KEY: 'fake',
+      },
+    });
+  });
+
+  test('falls from explicit Codex expansion primary to Claude on safe 429', async () => {
+    const attempts: string[] = [];
+    __setExpansionTransportForTests(async (model: string) => {
+      attempts.push(model);
+      if (model === codex) throw Object.assign(new Error('quota exhausted'), { status: 429 });
+      return ['fallback rewrite'];
+    });
+
+    await expect(expand('original query')).resolves.toEqual(['original query', 'fallback rewrite']);
+    expect(attempts).toEqual([codex, claude]);
+  });
+
+  test('fails closed on expansion timeout with unknown usage', async () => {
+    const attempts: string[] = [];
+    __setExpansionTransportForTests(async (model: string) => {
+      attempts.push(model);
+      throw new Error('The operation timed out');
+    });
+
+    await expect(expand('original query')).resolves.toEqual(['original query']);
+    expect(attempts).toEqual([codex]);
+  });
+});
+
+describe('OCR — subscription fallback chain', () => {
+  const codex = 'openai:gpt-5.6-terra';
+  const claude = 'anthropic:claude-sonnet-5';
+  const ollama = 'together:glm-5.2';
+
+  beforeEach(() => {
+    resetGateway();
+    configureGateway({
+      expansion_model: codex,
+      chat_fallback_chain: [codex, claude, ollama],
+      env: {
+        OPENAI_API_KEY: 'fake',
+        ANTHROPIC_API_KEY: 'fake',
+        TOGETHER_API_KEY: 'fake',
+      },
+    });
+  });
+
+  test('falls from Codex OCR primary to Claude on safe 429', async () => {
+    const attempts: string[] = [];
+    __setOcrTransportForTests(async (model: string) => {
+      attempts.push(model);
+      if (model === codex) throw Object.assign(new Error('quota exhausted'), { status: 429 });
+      return 'OCR_OK';
+    });
+
+    await expect(generateOcrText(Buffer.from('image'), 'image/png')).resolves.toBe('OCR_OK');
+    expect(attempts).toEqual([codex, claude]);
+  });
+
+  test('fails closed on OCR timeout with unknown usage', async () => {
+    const attempts: string[] = [];
+    __setOcrTransportForTests(async (model: string) => {
+      attempts.push(model);
+      throw new Error('The operation timed out');
+    });
+
+    await expect(generateOcrText(Buffer.from('image'), 'image/png')).rejects.toThrow('timed out');
+    expect(attempts).toEqual([codex]);
   });
 });
 
@@ -452,6 +541,31 @@ describe('chat fallback — billing-safe usage gate', () => {
 
     await expect(run()).resolves.toMatchObject({ model: lastResort });
     expect(attempts).toEqual([primary, codex, lastResort]);
+  });
+
+  test('explicit Codex task primary falls to Claude before Ollama when chain contains all three', async () => {
+    const claude = 'anthropic:claude-sonnet-5';
+    const ollama = 'together:glm-5.2';
+    configureGateway({
+      chat_model: claude,
+      chat_fallback_chain: [codex, claude, ollama],
+      env: {
+        OPENAI_API_KEY: 'fake',
+        ANTHROPIC_API_KEY: 'fake',
+        TOGETHER_API_KEY: 'fake',
+      },
+    });
+    const attempts: string[] = [];
+    __setChatTransportForTests(async (opts) => {
+      const model = opts.model ?? claude;
+      attempts.push(model);
+      if (model === codex) throw Object.assign(new Error('quota exhausted'), { status: 429 });
+      return success(model);
+    });
+
+    await expect(chat({ model: codex, messages: [{ role: 'user', content: 'hello' }] }))
+      .resolves.toMatchObject({ model: claude });
+    expect(attempts).toEqual([codex, claude]);
   });
 });
 
