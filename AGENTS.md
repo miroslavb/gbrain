@@ -76,6 +76,13 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
+- **Atom grounding gate:** `extract_atoms` must request exactly one independently
+  checkable claim per atom, require a ≤200-character exact contiguous
+  `source_quote`, permit `[]` when the source supports no atom, and forbid
+  unsupported causation/generalization/quantities. For substantive sources
+  (≥500 chars), the parser rejects missing, invented, or overlong quotes.
+  Keep `autopilot.auto_drain.enabled=false` until a fresh blinded quality sample
+  passes the agreed support/atomicity thresholds.
 - **Trusted migration writes:** `put_page migration_mode` / CLI
   `gbrain put ... --migration-mode` is restricted to `ctx.remote === false`.
   It preserves the page/import/write-through path but suppresses only the

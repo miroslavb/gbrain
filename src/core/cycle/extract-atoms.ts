@@ -189,15 +189,17 @@ const CONCEPT_LABEL_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 const EXTRACT_PROMPT = `You extract atomic content nuggets from a transcript.
 
-An atom is a single-source, self-contained idea that could become a tweet,
-quote, or short essay angle. Each atom must:
-  - Stand alone (no "as discussed above")
-  - Have a clear point (not just descriptive)
-  - Be specific (not a generic platitude)
+An atom is a single-source, self-contained idea containing exactly one independently checkable claim. Each atom must:
+  - Stand alone with enough names/context to understand it (no "as discussed above")
+  - Make one clear, specific point; split independent claims into separate atoms
+  - Be supported by source_quote, an exact contiguous substring of the source (required, ≤200 chars)
+  - Keep body and lesson within what the source supports
+  - Do not infer causation, generalize beyond the source, or invent quantities
 
+If the source does not support at least one such atom, Return [] exactly.
 Output a JSON array of atoms (1-3 per transcript, never more than 3).
 Each atom: {title (≤80 chars), atom_type, body (2-4 sentences),
-source_quote (verbatim ≤200 chars), lesson (one sentence), concepts
+source_quote (verbatim contiguous substring ≤200 chars), lesson (one sentence), concepts
 (1-3 topic labels), virality_score (0-100), emotional_register (one of:
 shocking, inspiring, funny, sobering, practical, controversial)}.
 
@@ -647,7 +649,7 @@ export async function runPhaseExtractAtoms(
 
       estimatedSpendUsd = budgetTracker.totalSpent;
 
-      const atoms = parseAtomsResponse(result.text);
+      const atoms = parseAtomsResponse(result.text, item.content);
       if (atoms.length === 0) {
         // #2144: tombstone zero-yield pages so they stop being rediscovered.
         // Idempotency is keyed on atom rows — a page that yields no atoms
@@ -811,7 +813,7 @@ export async function runPhaseExtractAtoms(
  * common LLM mistakes: extra prose around the JSON, missing fields,
  * invalid atom_type values. Rejects (returns empty) on hard parse fail.
  */
-export function parseAtomsResponse(raw: string): ExtractedAtom[] {
+export function parseAtomsResponse(raw: string, sourceText?: string): ExtractedAtom[] {
   // Strip markdown code fences if the LLM wrapped JSON in them.
   let cleaned = raw.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -839,19 +841,25 @@ export function parseAtomsResponse(raw: string): ExtractedAtom[] {
   if (!Array.isArray(parsed)) return [];
 
   const atoms: ExtractedAtom[] = [];
+  const requireGrounding = typeof sourceText === 'string'
+    && sourceText.length >= MIN_PAGE_CHARS_FOR_EXTRACTION;
   for (const item of parsed) {
     if (typeof item !== 'object' || item === null) continue;
     const obj = item as Record<string, unknown>;
-    const title = typeof obj.title === 'string' ? obj.title.slice(0, 200) : null;
+    const title = typeof obj.title === 'string' ? obj.title.slice(0, 80) : null;
     const atomType = typeof obj.atom_type === 'string' ? obj.atom_type.trim().toLowerCase() : null;
     const body = typeof obj.body === 'string' ? obj.body : null;
+    const sourceQuote = typeof obj.source_quote === 'string' ? obj.source_quote.trim() : null;
     if (!title || !atomType || !body) continue;
     if (!ATOM_TYPES.includes(atomType as typeof ATOM_TYPES[number])) continue;
+    if (requireGrounding) {
+      if (!sourceQuote || sourceQuote.length > 200 || !sourceText!.includes(sourceQuote)) continue;
+    }
     atoms.push({
       title,
       atom_type: atomType as typeof ATOM_TYPES[number],
       body,
-      source_quote: typeof obj.source_quote === 'string' ? obj.source_quote.slice(0, 500) : undefined,
+      source_quote: sourceQuote ? sourceQuote.slice(0, 200) : undefined,
       lesson: typeof obj.lesson === 'string' ? obj.lesson : undefined,
       concepts: (() => {
         if (!Array.isArray(obj.concepts)) return undefined;

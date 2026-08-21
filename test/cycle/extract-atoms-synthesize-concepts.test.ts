@@ -85,6 +85,22 @@ describe('v0.41 T5: parseAtomsResponse', () => {
     expect(parseAtomsResponse('')).toEqual([]);
   });
 
+  test('source-grounded mode requires a verbatim source quote', () => {
+    const source = `The gateway failed closed because provider usage was unknown. ${'context '.repeat(80)}`;
+    const missing = `[{"title":"T","atom_type":"insight","body":"One claim."}]`;
+    const invented = `[{"title":"T","atom_type":"insight","body":"One claim.","source_quote":"A quote not present in source"}]`;
+    const grounded = `[{"title":"T","atom_type":"insight","body":"One claim.","source_quote":"provider usage was unknown"}]`;
+    expect(parseAtomsResponse(missing, source)).toEqual([]);
+    expect(parseAtomsResponse(invented, source)).toEqual([]);
+    expect(parseAtomsResponse(grounded, source)).toHaveLength(1);
+  });
+
+  test('source-grounded mode rejects overlong evidence spans', () => {
+    const quote = 'x'.repeat(201);
+    const raw = JSON.stringify([{ title: 'T', atom_type: 'insight', body: 'One claim.', source_quote: quote }]);
+    expect(parseAtomsResponse(raw, `before ${quote} after ${'context '.repeat(80)}`)).toEqual([]);
+  });
+
   test('accepts all 11 declared atom_type values', () => {
     const types = ['insight', 'anecdote', 'quote', 'framework', 'statistic',
                    'story_angle', 'strategy_angle', 'strategy', 'endorsement',
@@ -112,6 +128,33 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
     const result = await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [] });
     expect(result.status).toBe('skipped');
     expect(result.details?.reason).toBe('no_work');
+  });
+
+  test('prompt requires one source-grounded claim and permits empty output', async () => {
+    const source = `The gateway failed closed because provider usage was unknown. ${'context '.repeat(80)}`;
+    let system = '';
+    const chat = async (opts: ChatOpts): Promise<ChatResult> => {
+      system = opts.system ?? '';
+      return {
+        text: `[{"title":"Unknown usage blocks fallback","atom_type":"insight","body":"Unknown provider usage blocks fallback.","source_quote":"provider usage was unknown","concepts":["provider-fallback"]}]`,
+        blocks: [],
+        stopReason: 'end',
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 },
+        model: 'openai:gpt-5.6-terra',
+        providerId: 'openai',
+      };
+    };
+    const result = await runPhaseExtractAtoms(engine, {
+      _transcripts: [{ filePath: '/grounded.txt', content: source, contentHash: 'grounded-hash' }],
+      _pages: [],
+      _chat: chat as typeof import('../../src/core/ai/gateway.ts').chat,
+      dryRun: true,
+    });
+    expect(result.details?.atoms_extracted).toBe(1);
+    expect(system).toContain('exactly one independently checkable claim');
+    expect(system).toContain('contiguous substring');
+    expect(system).toContain('Return []');
+    expect(system).toContain('Do not infer causation');
   });
 
   test('extracts atoms from transcript via stub chat', async () => {
