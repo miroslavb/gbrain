@@ -1,3 +1,7 @@
+---
+title: "`gbrain serve` ↔ `gbrain sync` concurrency (PGLite)"
+---
+
 # `gbrain serve` ↔ `gbrain sync` concurrency (PGLite)
 
 **Short version: on a PGLite brain, stop `gbrain serve` before a large sync.**

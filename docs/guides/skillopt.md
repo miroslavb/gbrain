@@ -1,3 +1,7 @@
+---
+title: "`gbrain skillopt` — Self-evolving skills"
+---
+
 # `gbrain skillopt` — Self-evolving skills
 
 Treat your `SKILL.md` files as the trainable parameters of an agent that
