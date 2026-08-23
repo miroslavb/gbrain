@@ -18,6 +18,7 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { runExtract, extractStaleFromDB } from '../src/commands/extract.ts';
 import { LINK_EXTRACTOR_VERSION_TS } from '../src/core/link-extraction.ts';
 import type { PageInput } from '../src/core/types.ts';
+import { _resetCliExitVerdictForTests, currentExitCode } from '../src/core/cli-force-exit.ts';
 
 let engine: PGLiteEngine;
 
@@ -36,7 +37,10 @@ async function truncateAll() {
     await (engine as any).db.exec(`DELETE FROM ${t}`);
   }
 }
-beforeEach(truncateAll);
+beforeEach(async () => {
+  _resetCliExitVerdictForTests();
+  await truncateAll();
+});
 
 const personPage = (title: string, body = ''): PageInput => ({ type: 'person', title, compiled_truth: body, timeline: '' });
 const companyPage = (title: string, body = ''): PageInput => ({ type: 'company', title, compiled_truth: body, timeline: '' });
@@ -384,5 +388,65 @@ describe('gbrain extract --stale', () => {
     expect(r2.pagesProcessed).toBe(1);
     expect(r2.staleRemaining).toBe(0);
   });
+
+  test('--max-pages is an exact cross-batch cap and wins over --catch-up', async () => {
+    for (let i = 0; i < 40; i++) {
+      await engine.putPage(`people/cap-${String(i).padStart(2, '0')}`, personPage(`Cap ${i}`));
+    }
+    const result = await extractStaleFromDB(engine, {
+      dryRun: false,
+      jsonMode: true,
+      includeFrontmatter: false,
+      catchUp: true,
+      maxPages: 27,
+    });
+    expect(result.pagesProcessed).toBe(27);
+    expect(result.staleRemaining).toBe(13);
+    expect(result.pageCapHit).toBe(true);
+    const stamped = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM pages WHERE links_extracted_at IS NOT NULL`,
+    );
+    expect(stamped[0]?.n).toBe(27);
+  });
+
+  test('--max-pages dry-run reports bounded would_process and writes nothing', async () => {
+    for (let i = 0; i < 9; i++) {
+      await engine.putPage(`people/dry-cap-${i}`, personPage(`Dry cap ${i}`));
+    }
+    const original = process.stdout.write.bind(process.stdout);
+    let stdout = '';
+    (process.stdout.write as unknown as (chunk: unknown) => boolean) = (chunk) => {
+      stdout += String(chunk);
+      return true;
+    };
+    try {
+      await runExtract(engine, ['--stale', '--max-pages', '4', '--dry-run', '--json']);
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(stdout)).toMatchObject({ stale_pages: 9, max_pages: 4, would_process: 4 });
+    expect(await engine.countStalePagesForExtraction()).toBe(9);
+  });
+
+  test.each(['0', '-1', '1.5', 'many', '999999999999999999999'])(
+    'invalid --max-pages=%s fails closed before writes',
+    async (value) => {
+      await engine.putPage('people/invalid-cap', personPage('Invalid cap'));
+      const original = process.stdout.write.bind(process.stdout);
+      let stdout = '';
+      (process.stdout.write as unknown as (chunk: unknown) => boolean) = (chunk) => {
+        stdout += String(chunk);
+        return true;
+      };
+      try {
+        await runExtract(engine, ['--stale', '--max-pages', value, '--json']);
+      } finally {
+        process.stdout.write = original;
+      }
+      expect(JSON.parse(stdout).error).toContain('invalid --max-pages');
+      expect(currentExitCode()).toBe(2);
+      expect(await stampOf('people/invalid-cap')).toBeNull();
+    },
+  );
 
 });

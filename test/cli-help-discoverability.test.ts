@@ -171,6 +171,7 @@ describe('#3834 — extract flags are discoverable from both help surfaces', () 
     '--from-meetings',
     '--include-frontmatter',
     '--infer-dates',
+    '--max-pages',
     '--ner',
     '--source-id',
     '--stale',

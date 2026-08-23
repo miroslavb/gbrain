@@ -3584,7 +3584,7 @@ TOOLS
         [--workers N|--concurrency N] [--dry-run] [--json]
   extract links --by-mention [--ner] --source db
   extract timeline --from-meetings [--infer-dates] --source db
-  extract --stale [--source-id ID] [--catch-up] [--dry-run] [--json]
+  extract --stale [--source-id ID] [--max-pages N] [--catch-up] [--dry-run] [--json]
   extract --explain <kind> [--json] Full details: gbrain extract --help
   publish <page.md> [--password]     Shareable HTML (strips private data, optional AES-256)
   check-backlinks <check|fix> [dir]  Find/fix missing back-links across brain

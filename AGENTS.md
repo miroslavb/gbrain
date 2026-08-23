@@ -97,6 +97,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   `--source` / `--type` / `--prefix` / `--retrieved-since`, then ordered with
   `--hot-first`. Benchmark 100 representative pages with four workers before
   any broader tranche; JSON output must echo the resolved scope.
+- **Bounded stale extraction:** link/timeline backlog canaries must set
+  `extract --stale --max-pages N`; the exact cross-batch cap wins over
+  `--catch-up`. Validate page freshness plus link/timeline graph integrity after
+  the 100-page tranche before admitting the 500-page tranche.
 - **Private documents:** ordinary search excludes `docs/inbox/`; uploaded
   documents are read only through the caller-aware document ACL surface.
 
