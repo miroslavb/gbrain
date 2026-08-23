@@ -555,11 +555,8 @@ class ProposeTakesPhase extends BaseCyclePhase {
     _ctx: OperationContext,
     opts: ProposeTakesOpts,
   ): Promise<{ summary: string; details: Record<string, unknown>; status?: PhaseStatus }> {
-    // #4102 — off switch. The phase is ON by default (it ships in the default
-    // phase list), but `gbrain config set cycle.propose_takes.enabled false`
-    // must actually stop the LLM spend. Only an EXPLICIT falsy value skips
-    // (unset = default on, fail-open on read errors so a config-plane blip
-    // never silently disables the phase); `--once` bypasses for one run.
+    // Downstream containment: fail closed. Unset/read-error/falsy all skip;
+    // only explicit true runs automatically. `--once` is the one-call bypass.
     if (!opts.once) {
       let enabledRaw: string | null = null;
       try {
@@ -567,7 +564,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       } catch {
         enabledRaw = null;
       }
-      if (enabledRaw != null && !isConfigTruthy(enabledRaw)) {
+      if (!isConfigTruthy(enabledRaw ?? 'false')) {
         return {
           summary: 'propose_takes skipped: cycle.propose_takes.enabled=false',
           details: {

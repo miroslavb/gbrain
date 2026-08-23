@@ -48,7 +48,9 @@ function proposeEngine(pageCount: number): BrainEngine {
       if (sql.includes(PAGE_SQL_MARKER)) return pages as T[];
       return [] as T[];
     },
-    async getConfig() { return null; },
+    async getConfig(key: string) {
+      return key === 'cycle.propose_takes.enabled' ? 'true' : null;
+    },
   } as unknown as BrainEngine;
 }
 

@@ -379,6 +379,31 @@ describe('runExtractConversationFactsCore', () => {
           providerId: 'stub',
         };
       }
+      if (String(opts.system).includes('mandatory quality validator for conversation-derived')) {
+        const payload = JSON.parse(String(opts.messages[0]?.content ?? '{}')) as {
+          candidates?: Array<{ id: string }>;
+        };
+        return {
+          text: JSON.stringify({
+            decisions: (payload.candidates ?? []).map((candidate) => ({
+              id: candidate.id,
+              action: 'accept',
+              fully_supported: true,
+              exactly_one_proposition: true,
+              self_contained: true,
+              correct_entity_attribution: true,
+              no_hidden_causation: true,
+              no_overgeneralization: true,
+              no_sensitive_content: true,
+            })),
+          }),
+          blocks: [],
+          stopReason: 'end',
+          usage: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 0, cache_creation_tokens: 0 },
+          model: opts.model!,
+          providerId: 'stub-quality',
+        };
+      }
       mainChatCalls++;
       if (chatFailure) throw chatFailure;
       const hook = chatHook;
@@ -514,6 +539,60 @@ describe('runExtractConversationFactsCore', () => {
         date: '2026-06-01',
         raw_transcript: 'meetings/raw-speaker-example.raw/transcript.txt',
       },
+    });
+  });
+
+  test('pre-insert quality stop rejects sensitive facts without terminal/checkpoint writes', async () => {
+    const sensitiveFact = 'Alice can be reached at alice@example.test.';
+    let semanticCalls = 0;
+    const result = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default',
+      slug: 'conversations/imessage/alice-example',
+      sleepMs: 0,
+      extractor: async () => [{
+        fact: sensitiveFact,
+        kind: 'fact',
+        entity_slug: 'people/alice-example',
+        source: PER_SEGMENT_SOURCE_PREFIX,
+        confidence: 1,
+        notability: 'medium',
+        embedding: null,
+      }],
+      _qualitySemanticValidator: async () => {
+        semanticCalls++;
+        throw new Error('semantic validator must not see deterministic rejects');
+      },
+    });
+
+    expect(semanticCalls).toBe(0);
+    expect(result).toMatchObject({
+      facts_inserted: 0,
+      quality_candidates: 1,
+      quality_accepted: 0,
+      quality_rejected: 1,
+      quality_stop_triggered: true,
+      pages_failed: 1,
+    });
+    expect(result.quality_reason_counts).toEqual({ email: 1 });
+    const factRows = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM facts
+        WHERE source_markdown_slug = 'conversations/imessage/alice-example'
+          AND source LIKE 'cli:extract-conversation-facts%'`,
+    );
+    expect(factRows[0].n).toBe(0);
+    const checkpointRows = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM op_checkpoints WHERE op = 'extract-conversation-facts'`,
+    );
+    expect(checkpointRows[0].n).toBe(0);
+    const receipts = await engine.executeRaw<{ compiled_truth: string; frontmatter: Record<string, unknown> }>(
+      `SELECT compiled_truth, frontmatter FROM pages WHERE type = 'extract_receipt'`,
+    );
+    expect(receipts).toHaveLength(1);
+    expect(JSON.stringify(receipts[0])).not.toContain(sensitiveFact);
+    expect(receipts[0].frontmatter.quality).toMatchObject({
+      candidate_count: 1,
+      rejected_count: 1,
+      stop_triggered: true,
     });
   });
 
@@ -835,6 +914,23 @@ describe('runExtractConversationFactsCore', () => {
     expect(Number(terminalRows[0]?.count ?? 0)).toBe(1);
   });
 
+  test('segmentLimit equal to the page segment count still commits a complete epoch', async () => {
+    const result = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default',
+      slug: 'conversations/imessage/alice-example',
+      segmentLimit: 2,
+      sleepMs: 0,
+    });
+    expect(result.segments_processed).toBe(2);
+    expect(result.facts_inserted).toBe(2);
+    const terminals = await engine.executeRaw<{ count: string | number }>(
+      `SELECT COUNT(*) AS count FROM facts
+        WHERE source = $1 AND source_markdown_slug = $2`,
+      [TERMINAL_AUDIT_SOURCE, 'conversations/imessage/alice-example'],
+    );
+    expect(Number(terminals[0]?.count ?? 0)).toBe(1);
+  });
+
   test('terminal outcome skips a completed page after checkpoint GC', async () => {
     await runExtractConversationFactsCore(engine, {
       sourceId: 'default',
@@ -1020,6 +1116,107 @@ describe('runExtractConversationFactsCore', () => {
     expect(second.pages_processed).toBe(1);
   });
 
+  test('sidecar edit between final check and epoch transaction preserves the previous epoch', async () => {
+    const slug = 'meetings/raw-speaker-example';
+    const sidecarPath = join(repoDir, 'meetings/raw-speaker-example.raw/transcript.txt');
+    await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, types: ['meeting'], sleepMs: 0,
+    });
+    const before = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`, [slug],
+    );
+    writeFileSync(sidecarPath, [
+      'Speaker A: This is the second sidecar snapshot.',
+      'Speaker B: It should be extracted only if still current.',
+    ].join('\n'), 'utf8');
+
+    const engineAny = engine as any;
+    const originalInsertFacts = engineAny.insertFacts.bind(engine);
+    let raced = false;
+    engineAny.insertFacts = async (facts: unknown[], ctx: unknown, opts: unknown) => {
+      if (!raced) {
+        raced = true;
+        writeFileSync(sidecarPath, [
+          'Speaker A: This third sidecar snapshot raced the transaction.',
+          'Speaker B: The second snapshot must never become visible.',
+        ].join('\n'), 'utf8');
+      }
+      return originalInsertFacts(facts, ctx, opts);
+    };
+    try {
+      await expect(runExtractConversationFactsCore(engine, {
+        sourceId: 'default', slug, types: ['meeting'], sleepMs: 0,
+      })).rejects.toThrow('source sidecar snapshot changed');
+    } finally {
+      engineAny.insertFacts = originalInsertFacts;
+    }
+    expect(raced).toBe(true);
+    const after = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`, [slug],
+    );
+    expect(after).toEqual(before);
+  });
+
+  test('sidecar change after precheck but before transaction return rolls back the epoch', async () => {
+    const slug = 'meetings/raw-speaker-example';
+    const sidecarPath = join(repoDir, 'meetings/raw-speaker-example.raw/transcript.txt');
+    await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, types: ['meeting'], sleepMs: 0,
+    });
+    const before = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`, [slug],
+    );
+    writeFileSync(sidecarPath, [
+      'Speaker A: This is the candidate sidecar snapshot.',
+      'Speaker B: It must stay current through transaction return.',
+    ].join('\n'), 'utf8');
+
+    const engineAny = engine as any;
+    const originalInsertFacts = engineAny.insertFacts.bind(engine);
+    let raced = false;
+    engineAny.insertFacts = async (facts: unknown[], ctx: unknown, rawOpts: any) => {
+      const originalPre = rawOpts?.preCommitCheck;
+      const wrappedOpts = {
+        ...rawOpts,
+        preCommitCheck: async () => {
+          await originalPre?.();
+          if (!raced) {
+            raced = true;
+            writeFileSync(sidecarPath, [
+              'Speaker A: This mutation happened after the precheck.',
+              'Speaker B: The postcheck must roll the transaction back.',
+            ].join('\n'), 'utf8');
+          }
+        },
+      };
+      return originalInsertFacts(facts, ctx, wrappedOpts);
+    };
+    try {
+      await expect(runExtractConversationFactsCore(engine, {
+        sourceId: 'default', slug, types: ['meeting'], sleepMs: 0,
+      })).rejects.toThrow('source sidecar snapshot changed');
+    } finally {
+      engineAny.insertFacts = originalInsertFacts;
+    }
+    expect(raced).toBe(true);
+    const after = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`, [slug],
+    );
+    expect(after).toEqual(before);
+  });
+
   test('provider failure leaves no terminal and retries on the next run', async () => {
     chatFailure = new Error('synthetic provider outage');
     await expect(
@@ -1042,6 +1239,149 @@ describe('runExtractConversationFactsCore', () => {
       sleepMs: 0,
     });
     expect(retry.pages_processed).toBe(1);
+  });
+
+  test('failed replay preserves the previous completed snapshot atomically', async () => {
+    const slug = 'conversations/imessage/alice-example';
+    await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, sleepMs: 0,
+    });
+    const before = await engine.executeRaw<{
+      fact: string; source: string; source_session: string | null; row_num: number;
+    }>(
+      `SELECT fact, source, source_session, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`,
+      [slug],
+    );
+    expect(before.some((row) => row.source === TERMINAL_AUDIT_SOURCE)).toBe(true);
+
+    await engine.putPage(slug, {
+      type: 'conversation',
+      title: 'iMessage: Alice Example',
+      compiled_truth: SAMPLE_BODY.replace(
+        'Staff engineer on the platform team.',
+        'Principal engineer on the infrastructure team.',
+      ),
+      timeline: '',
+      frontmatter: {},
+    });
+
+    let calls = 0;
+    await expect(runExtractConversationFactsCore(engine, {
+      sourceId: 'default',
+      slug,
+      sleepMs: 0,
+      extractor: async () => {
+        calls++;
+        if (calls === 2) throw new Error('synthetic second-segment failure');
+        return [{
+          fact: 'replacement candidate must stay invisible',
+          kind: 'fact',
+          entity_slug: 'companies/acme-corp',
+          source: 'test',
+          confidence: 1,
+          notability: 'high',
+        }];
+      },
+    })).rejects.toThrow('synthetic second-segment failure');
+    expect(calls).toBe(2);
+
+    const after = await engine.executeRaw<{
+      fact: string; source: string; source_session: string | null; row_num: number;
+    }>(
+      `SELECT fact, source, source_session, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`,
+      [slug],
+    );
+    expect(after).toEqual(before);
+    expect(after.some((row) => row.fact === 'replacement candidate must stay invisible')).toBe(false);
+  });
+
+  test('page edit between final check and transaction preserves the previous epoch', async () => {
+    const slug = 'conversations/imessage/alice-example';
+    await runExtractConversationFactsCore(engine, { sourceId: 'default', slug, sleepMs: 0 });
+    const before = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`, [slug],
+    );
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'iMessage: Alice Example',
+      compiled_truth: SAMPLE_BODY.replace('Nice.', 'Second snapshot.'), timeline: '', frontmatter: {},
+    });
+
+    const engineAny = engine as any;
+    const originalInsertFacts = engineAny.insertFacts.bind(engine);
+    let raced = false;
+    engineAny.insertFacts = async (facts: unknown[], ctx: unknown, opts: unknown) => {
+      if (!raced) {
+        raced = true;
+        await engine.putPage(slug, {
+          type: 'conversation', title: 'iMessage: Alice Example',
+          compiled_truth: SAMPLE_BODY.replace('Nice.', 'Third snapshot raced before commit.'),
+          timeline: '', frontmatter: {},
+        });
+      }
+      return originalInsertFacts(facts, ctx, opts);
+    };
+    try {
+      await expect(runExtractConversationFactsCore(engine, {
+        sourceId: 'default', slug, sleepMs: 0,
+      })).rejects.toThrow('source page snapshot changed');
+    } finally {
+      engineAny.insertFacts = originalInsertFacts;
+    }
+    expect(raced).toBe(true);
+    const after = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`, [slug],
+    );
+    expect(after).toEqual(before);
+  });
+
+  test('bounded staging preserves the previous epoch when a page emits too many facts', async () => {
+    const slug = 'conversations/imessage/alice-example';
+    await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, sleepMs: 0,
+    });
+    const before = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`,
+      [slug],
+    );
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'iMessage: Alice Example',
+      compiled_truth: SAMPLE_BODY.replace('Nice.', 'Changed before oversized replay.'),
+      timeline: '', frontmatter: {},
+    });
+
+    await expect(runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, sleepMs: 0,
+      extractor: async () => Array.from({ length: 1001 }, (_, i) => ({
+        fact: `oversized staged fact ${i}`,
+        kind: 'fact' as const,
+        entity_slug: 'companies/acme-corp',
+        source: 'test',
+      })),
+    })).rejects.toThrow('staged fact cap');
+
+    const after = await engine.executeRaw<{ fact: string; source: string; row_num: number }>(
+      `SELECT fact, source, row_num FROM facts
+        WHERE source_id = 'default' AND source_markdown_slug = $1
+          AND source LIKE 'cli:extract-conversation-facts%'
+        ORDER BY row_num`,
+      [slug],
+    );
+    expect(after).toEqual(before);
   });
 
   test('non-terminal model stop leaves no terminal outcome', async () => {
@@ -1079,11 +1419,11 @@ describe('runExtractConversationFactsCore', () => {
   test('insert failure leaves no terminal and retries from a clean replay', async () => {
     const engineAny = engine as any;
     const originalInsertFacts = engineAny.insertFacts.bind(engine);
-    engineAny.insertFacts = async (facts: Array<{ source?: string }>, opts: unknown) => {
+    engineAny.insertFacts = async (facts: Array<{ source?: string }>, ctx: unknown, opts: unknown) => {
       if (facts.some((fact) => fact.source === PER_SEGMENT_SOURCE_PREFIX)) {
         throw new Error('synthetic insert outage');
       }
-      return originalInsertFacts(facts, opts);
+      return originalInsertFacts(facts, ctx, opts);
     };
     try {
       await expect(
@@ -1112,11 +1452,11 @@ describe('runExtractConversationFactsCore', () => {
   test('terminal insert failure is reported as unfinished in bulk mode', async () => {
     const engineAny = engine as any;
     const originalInsertFacts = engineAny.insertFacts.bind(engine);
-    engineAny.insertFacts = async (facts: Array<{ source?: string }>, opts: unknown) => {
+    engineAny.insertFacts = async (facts: Array<{ source?: string }>, ctx: unknown, opts: unknown) => {
       if (facts.some((fact) => fact.source === TERMINAL_AUDIT_SOURCE)) {
         throw new Error('synthetic terminal insert outage');
       }
-      return originalInsertFacts(facts, opts);
+      return originalInsertFacts(facts, ctx, opts);
     };
     try {
       const result = await runExtractConversationFactsCore(engine, {
@@ -1136,7 +1476,7 @@ describe('runExtractConversationFactsCore', () => {
     expect(Number(terminals[0]?.count ?? 0)).toBe(0);
   });
 
-  test('cleanup failure cannot mint a non-extractable marker', async () => {
+  test('atomic reconcile failure cannot mint a non-extractable marker', async () => {
     await engine.putPage('conversations/cleanup-failure', {
       type: 'slack',
       title: 'Cleanup failure',
@@ -1145,10 +1485,12 @@ describe('runExtractConversationFactsCore', () => {
       frontmatter: {},
     });
     const engineAny = engine as any;
-    const originalExecuteRaw = engineAny.executeRaw.bind(engine);
-    engineAny.executeRaw = async (sql: string, params?: unknown[]) => {
-      if (sql.includes('WITH del AS')) throw new Error('synthetic cleanup outage');
-      return originalExecuteRaw(sql, params);
+    const originalInsertFacts = engineAny.insertFacts.bind(engine);
+    engineAny.insertFacts = async (facts: Array<{ source?: string }>, ctx: unknown, opts: unknown) => {
+      if (facts.some((fact) => fact.source === NON_EXTRACTABLE_AUDIT_SOURCE)) {
+        throw new Error('synthetic atomic reconcile outage');
+      }
+      return originalInsertFacts(facts, ctx, opts);
     };
     try {
       await expect(
@@ -1158,9 +1500,9 @@ describe('runExtractConversationFactsCore', () => {
           types: ['slack'],
           sleepMs: 0,
         }),
-      ).rejects.toThrow('synthetic cleanup outage');
+      ).rejects.toThrow('synthetic atomic reconcile outage');
     } finally {
-      engineAny.executeRaw = originalExecuteRaw;
+      engineAny.insertFacts = originalInsertFacts;
     }
     const markers = await engine.executeRaw<{ count: string | number }>(
       `SELECT COUNT(*) AS count FROM facts WHERE source = $1`,
@@ -1353,6 +1695,39 @@ describe('runExtractConversationFactsCore', () => {
     });
     expect(third.pages_processed).toBe(1);
     expect(third.segments_processed).toBeGreaterThanOrEqual(1);
+    expect(third.facts_inserted).toBeGreaterThan(0);
+    const active = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM facts
+        WHERE source_markdown_slug = 'conversations/imessage/alice-example'
+          AND source = $1 AND expired_at IS NULL`,
+      [PER_SEGMENT_SOURCE_PREFIX],
+    );
+    expect(active[0].n).toBeGreaterThan(0);
+  });
+
+  test('forced replay with an identical fact preserves the current fact epoch', async () => {
+    const extractor = async () => [{
+      fact: 'Alice joined Acme.', kind: 'fact' as const,
+      entity_slug: 'people/alice-example', source: PER_SEGMENT_SOURCE_PREFIX,
+      confidence: 1, notability: 'medium' as const, embedding: null,
+    }];
+    const first = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug: 'conversations/imessage/alice-example', sleepMs: 0,
+      extractor,
+    });
+    expect(first.facts_inserted).toBeGreaterThan(0);
+    const replay = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug: 'conversations/imessage/alice-example', sleepMs: 0,
+      extractor, force: true,
+    });
+    expect(replay.facts_inserted).toBeGreaterThan(0);
+    const rows = await engine.executeRaw<{ fact: string }>(
+      `SELECT fact FROM facts
+        WHERE source_markdown_slug = 'conversations/imessage/alice-example'
+          AND source = $1 AND expired_at IS NULL`,
+      [PER_SEGMENT_SOURCE_PREFIX],
+    );
+    expect(rows.map((row) => row.fact)).toContain('Alice joined Acme.');
   });
 
   test('honors facts.extraction_enabled kill-switch (F2)', async () => {

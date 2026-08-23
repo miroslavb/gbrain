@@ -18,6 +18,7 @@ import {
   getBrainHotMemoryMeta,
   __resetHotMemoryCacheForTests,
 } from '../src/core/facts/meta-hook.ts';
+import { TERMINAL_AUDIT_SOURCE } from '../src/core/facts/audit-sources.ts';
 
 let engine: PGLiteEngine;
 
@@ -31,6 +32,10 @@ beforeAll(async () => {
   );
   await engine.insertFact(
     { fact: 'private fact', kind: 'fact', entity_slug: 'meta-test', visibility: 'private', source: 'test' },
+    { source_id: 'default' },
+  );
+  await engine.insertFact(
+    { fact: 'EXTRACTION_COMPLETE', kind: 'fact', visibility: 'world', source: TERMINAL_AUDIT_SOURCE },
     { source_id: 'default' },
   );
 });
@@ -79,6 +84,14 @@ describe('_meta injection on dispatch', () => {
     const facts = bhm?.facts ?? [];
     expect(facts.find(f => f.fact === 'private fact')).toBeDefined();
     expect(facts.find(f => f.fact === 'world fact')).toBeDefined();
+  });
+
+  test('audit checkpoint rows never enter hot-memory metadata', async () => {
+    const r = await dispatchToolCall(engine, 'get_stats', {}, {
+      remote: false, sourceId: 'default', metaHook: getBrainHotMemoryMeta,
+    });
+    const bhm = r._meta?.brain_hot_memory as { facts: { fact: string }[] } | undefined;
+    expect(bhm?.facts.some((fact) => fact.fact === 'EXTRACTION_COMPLETE')).toBe(false);
   });
 
   test('skipped on facts ops themselves (recall, extract_facts, forget_fact)', async () => {

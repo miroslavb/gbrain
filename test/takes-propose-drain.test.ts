@@ -53,6 +53,7 @@ beforeAll(async () => {
   await engine.initSchema();
   repo = mkdtempSync(join(tmpdir(), 'gbrain-propose-drain-'));
   await engine.setConfig('sync.repo_path', repo);
+  await engine.setConfig('cycle.propose_takes.enabled', 'true');
   await engine.putPage(SLUG, {
     type: 'company',
     title: 'Drain Example',

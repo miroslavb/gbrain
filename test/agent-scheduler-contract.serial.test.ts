@@ -82,7 +82,7 @@ describe.skipIf(SKIP)('agent-scheduler shell-chain contract', () => {
     cloneDir = join(home, 'brain-clone');
 
     // The shim is what makes `gbrain` a real command for /bin/sh.
-    writeFileSync(join(tmpbin, 'gbrain'), `#!/bin/sh\nexec bun run '${CLI}' "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(tmpbin, 'gbrain'), `#!/bin/sh\nexec '${process.execPath}' run '${CLI}' "$@"\n`, { mode: 0o755 });
     chmodSync(join(tmpbin, 'gbrain'), 0o755);
 
     const bunDir = dirname(process.execPath || '/usr/local/bin');
@@ -106,7 +106,7 @@ describe.skipIf(SKIP)('agent-scheduler shell-chain contract', () => {
         embedding_disabled: true,
       }) + '\n',
     );
-    const init = spawnSync('bun', ['run', CLI, 'init', '--migrate-only'], {
+    const init = spawnSync(process.execPath, ['run', CLI, 'init', '--migrate-only'], {
       cwd: REPO, env, encoding: 'utf8', timeout: 120_000,
     });
     if (init.status !== 0) throw new Error(`init --migrate-only failed:\n${(init.stderr ?? '').slice(-2000)}`);

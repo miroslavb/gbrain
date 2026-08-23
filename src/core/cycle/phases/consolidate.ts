@@ -5,7 +5,7 @@
  *
  *   For each (source_id, entity_slug) bucket of unconsolidated active facts:
  *     1. Skip if count < 3 OR oldest fact age < 24h.
- *     2. Cluster by embedding cosine — greedy threshold 0.85.
+ *     2. Cluster by embedding cosine — greedy threshold 0.80.
  *     3. For each cluster ≥ 2: pick the highest-confidence fact's text as
  *        the take claim (v0.31 ships without LLM synthesis to keep the
  *        cycle deterministic; see TODO at the bottom for the v0.32 Sonnet
@@ -37,7 +37,7 @@ export interface ConsolidatePhaseOpts {
    * force-evict instead of running to completion after cancellation.
    */
   signal?: AbortSignal;
-  /** Cosine cluster threshold. Default 0.85. */
+  /** Cosine cluster threshold. Default 0.80 (bge-m3 calibrated). */
   clusterThreshold?: number;
   /** Minimum facts per (source, entity) bucket before consolidation. Default 3. */
   minFactsPerBucket?: number;
@@ -50,7 +50,11 @@ export async function runPhaseConsolidate(
   opts: ConsolidatePhaseOpts = {},
 ): Promise<PhaseResult> {
   const dryRun = opts.dryRun === true;
-  const threshold = opts.clusterThreshold ?? 0.85;
+  const envThreshold = Number(process.env.GBRAIN_CONSOLIDATE_CLUSTER_THRESHOLD);
+  const threshold = opts.clusterThreshold
+    ?? (Number.isFinite(envThreshold) && envThreshold > 0 && envThreshold <= 1
+      ? envThreshold
+      : 0.80);
   const minPerBucket = opts.minFactsPerBucket ?? 3;
   const minOldestAgeMs = opts.minOldestAgeMs ?? 24 * 60 * 60 * 1000;
 

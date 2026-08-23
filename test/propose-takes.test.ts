@@ -54,6 +54,9 @@ function buildMockEngine(opts: {
 
   const engine = {
     kind: 'pglite',
+    async getConfig(key: string) {
+      return key === 'cycle.propose_takes.enabled' ? 'true' : null;
+    },
     async listPages() {
       return opts.pages;
     },
@@ -1020,14 +1023,14 @@ describe('cycle.propose_takes.enabled gate (#4102)', () => {
     }
   });
 
-  test('unset (null) = default ON: the phase runs', async () => {
+  test('unset (null) = default OFF: the phase skips fail-closed', async () => {
     const pages = [buildPage({ slug: 'wiki/ungated', body: 'Some prose worth scanning.' })];
     const { engine } = buildMockEngine({ pages });
     stubConfig(engine, null);
     const { extractor, calls } = countingExtractor();
     const result = await runPhaseProposeTakes(buildCtx(engine), { extractor });
-    expect(result.status).not.toBe('skipped');
-    expect(calls()).toBe(1);
+    expect(result.status).toBe('skipped');
+    expect(calls()).toBe(0);
   });
 
   test("explicit 'true' runs", async () => {

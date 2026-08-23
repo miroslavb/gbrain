@@ -274,6 +274,58 @@ describe('chat touchpoint — gateway config plumbing', () => {
   });
 });
 
+describe('chat touchpoint — live fallback chain', () => {
+  beforeEach(() => {
+    resetGateway();
+    __setGenerateTextTransportForTests(null);
+  });
+
+  test('provider failure advances to the configured fallback model', async () => {
+    let calls = 0;
+    __setGenerateTextTransportForTests(async () => {
+      calls++;
+      if (calls === 1) throw new Error('synthetic primary outage');
+      return {
+        content: [{ type: 'text', text: 'fallback ok' }],
+        finishReason: 'stop',
+        usage: { inputTokens: 1, outputTokens: 1 },
+      } as any;
+    });
+    configureGateway({
+      chat_model: 'openai:gpt-primary',
+      chat_fallback_chain: ['openai:gpt-primary', 'openai:gpt-fallback'],
+      env: { OPENAI_API_KEY: 'fake' },
+    });
+
+    const result = await chat({
+      model: 'openai:gpt-primary',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    expect(calls).toBe(2);
+    expect(result.model).toBe('openai:gpt-fallback');
+    expect(result.text).toBe('fallback ok');
+  });
+
+  test('AbortError is a hard stop and never advances the fallback chain', async () => {
+    let calls = 0;
+    __setGenerateTextTransportForTests(async () => {
+      calls++;
+      throw Object.assign(new Error('caller cancelled'), { name: 'AbortError' });
+    });
+    configureGateway({
+      chat_model: 'openai:gpt-primary',
+      chat_fallback_chain: ['openai:gpt-fallback'],
+      env: { OPENAI_API_KEY: 'fake' },
+    });
+
+    await expect(chat({
+      model: 'openai:gpt-primary',
+      messages: [{ role: 'user', content: 'hello' }],
+    })).rejects.toThrow('caller cancelled');
+    expect(calls).toBe(1);
+  });
+});
+
 describe('chat touchpoint — config alias resolution', () => {
   beforeEach(() => resetGateway());
 

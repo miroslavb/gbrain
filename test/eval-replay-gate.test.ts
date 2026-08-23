@@ -28,6 +28,7 @@ import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { basisEmbedding } from '../src/eval/deterministic-embed.ts';
 import type { ChunkInput } from '../src/core/types.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 
 // ---------------------------------------------------------------------------
 // Canonical PGLite block (CLAUDE.md R3+R4)
@@ -36,6 +37,11 @@ import type { ChunkInput } from '../src/core/types.ts';
 let engine: PGLiteEngine;
 
 beforeAll(async () => {
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: 1536,
+    env: {},
+  });
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
@@ -43,6 +49,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await engine.disconnect();
+  resetGateway();
 });
 
 beforeEach(async () => {

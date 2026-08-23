@@ -25,9 +25,9 @@ function ctx(over: Partial<OperationContext>, cfg: Record<string, string | null>
 }
 
 describe('advisor op gate', () => {
-  test('op exists, is read-scoped and not localOnly (exposed over MCP)', () => {
+  test('op exists, is admin-scoped and not localOnly (exposed over MCP)', () => {
     expect(advisor).toBeDefined();
-    expect(advisor.scope).toBe('read');
+    expect(advisor.scope).toBe('admin');
     expect(advisor.localOnly).not.toBe(true);
   });
 

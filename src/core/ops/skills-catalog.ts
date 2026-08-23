@@ -150,8 +150,9 @@ const advisor: Operation = {
     });
     return report;
   },
-  scope: 'read',
-  // NOT localOnly — exposed over MCP (E1) behind mcp.publish_advisor.
+  scope: 'admin',
+  // NOT localOnly — exposed over MCP behind mcp.publish_advisor, but admin-scoped
+  // because collectors intentionally summarize brain-global operational state.
   // No cliHints: the CLI surface is the richer `gbrain advisor` command
   // (commands/advisor.ts) which adds --json exit codes + --apply.
   cliHints: { name: 'advisor', hidden: true },

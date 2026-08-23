@@ -22,6 +22,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetPgliteState(engine);
+  await engine.setConfig('cycle.propose_takes.enabled', 'true');
 });
 
 function context(): OperationContext {

@@ -257,6 +257,23 @@ describe('loadConfig — GBRAIN_MAX_MARKUP_RATIO env (v0.42 #1699)', () => {
 });
 
 describe('KNOWN_CONFIG_KEYS — documented enable commands must be registered', () => {
+  test('P0 extraction quality-gate keys are operator-settable', async () => {
+    const { KNOWN_CONFIG_KEYS, KNOWN_CONFIG_KEY_PREFIXES } = await import('../src/core/config.ts');
+    const registered = (key: string) =>
+      KNOWN_CONFIG_KEYS.includes(key) || KNOWN_CONFIG_KEY_PREFIXES.some((prefix) => key.startsWith(prefix));
+    for (const key of [
+      'models.dream.extract_atoms_validator',
+      'cycle.extract_atoms.sensitive_patterns',
+      'facts.conversation_quality.sensitive_patterns',
+      'facts.conversation_quality.semantic_timeout_ms',
+      'facts.conversation_quality.max_split_fanout',
+      'facts.conversation_quality.near_duplicate_threshold',
+      'facts.conversation_quality.stop_max_rejected_ratio',
+      'facts.conversation_quality.stop_max_sensitive_count',
+      'facts.conversation_quality.stop_max_semantic_failures',
+    ]) expect(registered(key)).toBe(true);
+  });
+
   test('Life Chronicle keys are registered (v0.42.56.0 release notes say `config set auto_chronicle true`)', async () => {
     const { KNOWN_CONFIG_KEYS, KNOWN_CONFIG_KEY_PREFIXES } = await import('../src/core/config.ts');
     // The flag the chronicle backstop reads (isAutoChronicleEnabled).

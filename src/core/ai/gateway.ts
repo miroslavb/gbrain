@@ -63,7 +63,7 @@ import { loadConfig } from '../config.ts';
 import type { GBrainConfig } from '../config.ts';
 import { mergedProviderEnv } from './provider-env.ts';
 import { buildGatewayConfig, foldNativeBaseUrlsFromFilePlane } from './build-gateway-config.ts';
-
+import { runChatFallback } from './chat-fallback.ts';
 // ---- Gateway-wide AI-HTTP timeout (v0.42.20.0, #1762/#1775) ----
 //
 // Plain `fetch` (Bun/Node) has NO default request timeout, so a stalled provider
@@ -3549,8 +3549,8 @@ export function toAISDKTools(tools: ChatToolDef[] | undefined): Record<string, a
     return acc;
   }, {} as Record<string, any>);
 }
-
-export async function chat(opts: ChatOpts): Promise<ChatResult> {
+export const chat = (opts: ChatOpts): Promise<ChatResult> => runChatFallback(opts, opts.model ?? getChatModel(), getChatFallbackChain(), chatOnce);
+async function chatOnce(opts: ChatOpts): Promise<ChatResult> {
   const tracker = __budgetStore.getStore() ?? null;
   const modelStrEarly = opts.model ?? getChatModel();
 

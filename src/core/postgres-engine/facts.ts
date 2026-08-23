@@ -12,6 +12,7 @@ import type {
   FactRow, FactKind, FactVisibility, FactInsertStatus,
   NewFact, FactListOpts, FactsHealth,
 } from '../engine.ts';
+import { validateFactBatchReconcile, type FactBatchInsertOpts } from '../facts/reconcile.ts';
 import { MAX_SEARCH_LIMIT, clampSearchLimit } from '../engine.ts';
 import { tryParseEmbedding } from '../utils.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
@@ -122,15 +123,16 @@ export async function insertFacts(
   deps: PgFactsDeps,
     rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number }>,
     ctx: { source_id: string },
-    opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean } },
+    opts?: FactBatchInsertOpts,
   ): Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number }> {
-    if (rows.length === 0) return { inserted: 0, ids: [], warnings: [], deleted: 0 };
+    validateFactBatchReconcile(rows, opts);
+    if (rows.length === 0 && !opts?.deleteForPageFirst) {
+      return { inserted: 0, ids: [], warnings: [], deleted: 0 };
+    }
 
     const sql = deps.sql;
-    // v0.41.15.0 (T6, codex #20): resolve the embedding-cast suffix
-    // ONCE per process so the cast matches the actual column type
-    // (halfvec vs vector). The probe is cached after first call.
-    const castSuffix = await deps.resolveFactsEmbeddingCast();
+    // No rows means a delete-only reconcile; the cast is unused in that path.
+    const castSuffix = rows.length > 0 ? await deps.resolveFactsEmbeddingCast() : '::vector';
     const warnings: string[] = [];
     // v0.46 (#3014): captured inside the transaction below when
     // deleteForPageFirst runs; stays 0 for the standalone insert path.
@@ -152,17 +154,52 @@ export async function insertFacts(
       // exactly (#1928 excludeSourcePrefixes + #2646 preserveExpiredLegacy).
       const del = opts?.deleteForPageFirst;
       if (del) {
+        if (del.expectedPage) {
+          const expectedDate = del.expectedPage.effectiveDate == null
+            ? null
+            : new Date(del.expectedPage.effectiveDate);
+          const locked = await tx<Array<{ id: number }>>`
+            SELECT id FROM pages
+            WHERE source_id = ${ctx.source_id}
+              AND slug = ${del.slug}
+              AND deleted_at IS NULL
+              AND content_hash IS NOT DISTINCT FROM ${del.expectedPage.contentHash}
+              AND effective_date IS NOT DISTINCT FROM ${expectedDate}
+            FOR UPDATE
+          `;
+          if (!locked[0]) {
+            throw new Error(`insertFacts: source page snapshot changed for ${ctx.source_id}/${del.slug}`);
+          }
+        }
+        if (opts?.preCommitCheck) await opts.preCommitCheck();
         const expiredLegacyFilter = del.preserveExpiredLegacy
           ? tx`AND NOT (row_num IS NULL AND expired_at IS NOT NULL)`
           : tx``;
-        const prefixes = del.excludeSourcePrefixes;
-        if (prefixes && prefixes.length > 0) {
-          const patterns = prefixes.map(p => `${p}%`);
+        const included = del.includeSourcePrefixes;
+        const excluded = del.excludeSourcePrefixes;
+        if (included !== undefined) {
+          if (included.length > 0) {
+            const r = await tx`
+              DELETE FROM facts
+              WHERE source_id = ${ctx.source_id}
+                AND source_markdown_slug = ${del.slug}
+                AND EXISTS (
+                  SELECT 1 FROM unnest(${included}::text[]) AS owned(prefix)
+                  WHERE starts_with(COALESCE(source, ''), owned.prefix)
+                )
+                ${expiredLegacyFilter}
+            `;
+            deleted = r.count ?? 0;
+          }
+        } else if (excluded && excluded.length > 0) {
           const r = await tx`
             DELETE FROM facts
             WHERE source_id = ${ctx.source_id}
               AND source_markdown_slug = ${del.slug}
-              AND NOT (COALESCE(source, '') LIKE ANY(${patterns}))
+              AND NOT EXISTS (
+                SELECT 1 FROM unnest(${excluded}::text[]) AS preserved(prefix)
+                WHERE starts_with(COALESCE(source, ''), preserved.prefix)
+              )
               ${expiredLegacyFilter}
           `;
           deleted = r.count ?? 0;
@@ -223,6 +260,11 @@ export async function insertFacts(
           DO NOTHING
           RETURNING id
         `;
+        if (!ins[0] && opts?.requireAllRows) {
+          throw new Error(
+            `insertFacts: required row ${input.row_num} for ${input.source_markdown_slug} conflicted`,
+          );
+        }
         if (ins[0]) out.push(Number(ins[0].id));
         rowIds.push(ins[0] ? Number(ins[0].id) : null);
       }
@@ -261,6 +303,7 @@ export async function insertFacts(
           await tx`UPDATE facts SET superseded_by = ${superseded_by} WHERE id = ${rowIds[i]}`;
         }
       }
+      if (opts?.postCommitCheck) await opts.postCommitCheck();
       return out;
     });
     return { inserted: ids.length, ids, warnings, deleted };
@@ -418,6 +461,7 @@ export async function countUnconsolidatedFacts(deps: PgFactsDeps, source_id: str
       WHERE source_id = ${source_id}
         AND consolidated_at IS NULL
         AND expired_at IS NULL
+        AND source != ALL(${AUDIT_ROW_SOURCES}::text[])
     `;
     return Number(rows[0]?.count ?? 0);
   }
@@ -536,11 +580,13 @@ export async function getFactsHealth(deps: PgFactsDeps, source_id: string): Prom
         COUNT(*) FILTER (WHERE expired_at IS NOT NULL)                                 AS total_expired,
         COUNT(*) FILTER (WHERE consolidated_at IS NOT NULL)                            AS total_consolidated
       FROM facts WHERE source_id = ${source_id}
+        AND source != ALL(${AUDIT_ROW_SOURCES}::text[])
     `;
     const top = await sql<Array<{ entity_slug: string; count: bigint }>>`
       SELECT entity_slug, COUNT(*) AS count
       FROM facts
       WHERE source_id = ${source_id} AND expired_at IS NULL AND entity_slug IS NOT NULL
+        AND source != ALL(${AUDIT_ROW_SOURCES}::text[])
       GROUP BY entity_slug
       ORDER BY count DESC, entity_slug ASC
       LIMIT 5

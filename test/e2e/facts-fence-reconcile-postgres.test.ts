@@ -345,6 +345,77 @@ describe.skipIf(skip)('facts-fence supersession transport on Postgres (#3014)', 
     expect(row1.expired_at).not.toBeNull();
   }, 30_000);
 
+  // Include-prefix ownership is literal on real Postgres and supports a
+  // delete-only authoritative zero-fact reconcile.
+  test('includeSourcePrefixes is literal and delete-only reconcile has Postgres parity', async () => {
+    type Row = NewFact & { row_num: number; source_markdown_slug: string };
+    const row = (rowNum: number, fact: string, source: string): Row => ({
+      fact, kind: 'fact', source, row_num: rowNum, source_markdown_slug: slug,
+    });
+    await engine.insertFacts([
+      row(1, 'literal owned', 'owned%literal:v1'),
+      row(2, 'wildcard neighbor', 'ownedXliteral:v1'),
+    ], { source_id: 'default' });
+    const replaced = await engine.insertFacts(
+      [row(1, 'literal replacement', 'owned%literal:v2')],
+      { source_id: 'default' },
+      {
+        deleteForPageFirst: { slug, includeSourcePrefixes: ['owned%literal:'] },
+        requireAllRows: true,
+      },
+    );
+    expect(replaced.deleted).toBe(1);
+    let facts = await engine.executeRaw<{ fact: string }>(
+      'SELECT fact FROM facts WHERE source_markdown_slug = $1 ORDER BY row_num', [slug],
+    );
+    expect(Array.from(facts).map((f) => f.fact)).toEqual(['literal replacement', 'wildcard neighbor']);
+
+    const deleted = await engine.insertFacts(
+      [],
+      { source_id: 'default' },
+      { deleteForPageFirst: { slug, includeSourcePrefixes: ['owned%literal:'] } },
+    );
+    expect(deleted.deleted).toBe(1);
+    facts = await engine.executeRaw<{ fact: string }>(
+      'SELECT fact FROM facts WHERE source_markdown_slug = $1 ORDER BY row_num', [slug],
+    );
+    expect(Array.from(facts).map((f) => f.fact)).toEqual(['wildcard neighbor']);
+  }, 30_000);
+
+  // The page identity is rechecked while holding a row lock in the same
+  // transaction as the fact swap, closing the final-check → commit race.
+  test('expectedPage rejects a stale snapshot on real Postgres and rolls back the wipe', async () => {
+    type Row = NewFact & { row_num: number; source_markdown_slug: string };
+    const row = (fact: string): Row => ({
+      fact, kind: 'fact', source: 'cli:owned', row_num: 1, source_markdown_slug: slug,
+    });
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'snapshot', compiled_truth: 'old body', frontmatter: {}, timeline: '',
+    });
+    const oldPage = await engine.getPage(slug, { sourceId: 'default' });
+    await engine.insertFacts([row('old visible epoch')], { source_id: 'default' });
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'snapshot', compiled_truth: 'new body', frontmatter: {}, timeline: '',
+    });
+
+    await expect(engine.insertFacts([row('stale replacement')], { source_id: 'default' }, {
+      deleteForPageFirst: {
+        slug,
+        includeSourcePrefixes: ['cli:owned'],
+        expectedPage: {
+          contentHash: oldPage!.content_hash ?? null,
+          effectiveDate: oldPage!.effective_date ?? null,
+        },
+      },
+      requireAllRows: true,
+    })).rejects.toThrow('source page snapshot changed');
+
+    const facts = await engine.executeRaw<{ fact: string }>(
+      'SELECT fact FROM facts WHERE source_markdown_slug = $1', [slug],
+    );
+    expect(Array.from(facts).map((f) => f.fact)).toEqual(['old visible epoch']);
+  }, 30_000);
+
   // The wipe now runs inside insertFacts' transaction, so a failing insert
   // rolls it back and the page is never left emptied.
   test('deleteForPageFirst rolls the wipe back when the insert fails — the page survives', async () => {

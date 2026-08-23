@@ -66,6 +66,10 @@ export const DEFAULT_HARD_EXCLUDES: string[] = [
   'test/',
   'attachments/',
   '.raw/',
+  // Uploaded documents are readable only through the caller-aware document ACL broker.
+  // Keep legacy rows for non-destructive migration/read-back, but never admit them
+  // to ordinary keyword/vector/hybrid candidate sets.
+  'docs/inbox/',
 ];
 
 /**

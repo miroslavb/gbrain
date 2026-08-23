@@ -92,7 +92,7 @@ describe('embed keyless: explicit requests still fail loudly', () => {
 interface CliResult { exitCode: number; stdout: string; stderr: string }
 
 function runCli(args: string[], env: Record<string, string>, timeoutMs: number): CliResult {
-  const res = spawnSync('bun', ['run', CLI, ...args], {
+  const res = spawnSync(process.execPath, ['run', CLI, ...args], {
     cwd: REPO, // near-repo cwd keeps Bun's transpile cache warm (5-20s/spawn otherwise)
     env,
     encoding: 'utf8',

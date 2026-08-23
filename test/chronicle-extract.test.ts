@@ -49,6 +49,37 @@ describe('isChronicleEligible', () => {
   test('unrelated type is excluded', () => {
     expect(isChronicleEligible({ type: 'concept', slug: 'wiki/concepts/x', body })).toEqual({ ok: false, reason: 'kind:concept' });
   });
+  test('short conversation with explicit message_count is excluded', () => {
+    expect(isChronicleEligible({
+      type: 'conversation', slug: 'sessions/hermes/short', body,
+      messageCount: 99,
+    })).toEqual({ ok: false, reason: 'short_conversation' });
+  });
+  test('conversations/ slug rescue applies the same explicit message_count gate', () => {
+    expect(isChronicleEligible({
+      type: 'note', slug: 'conversations/legacy-short', body,
+      messageCount: 99,
+    })).toEqual({ ok: false, reason: 'short_conversation' });
+    expect(isChronicleEligible({
+      type: 'note', slug: 'conversations/legacy-threshold', body,
+      messageCount: 100,
+    }).ok).toBe(true);
+  });
+  test('100-message conversation remains eligible', () => {
+    expect(isChronicleEligible({
+      type: 'conversation', slug: 'sessions/claude/long', body,
+      messageCount: 100,
+    }).ok).toBe(true);
+  });
+  test('conversation without message_count preserves legacy eligibility', () => {
+    expect(isChronicleEligible({ type: 'conversation', slug: 'conversations/legacy', body }).ok).toBe(true);
+  });
+  test('meeting is unaffected by a small message_count', () => {
+    expect(isChronicleEligible({
+      type: 'meeting', slug: 'meetings/short', body,
+      messageCount: 1,
+    }).ok).toBe(true);
+  });
 });
 
 describe('runChronicleExtract', () => {
@@ -195,5 +226,17 @@ describe('runChronicleBackstop gating', () => {
     expect(r.enqueued).toBe(true);
     const jobs = await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM minion_jobs WHERE name = 'chronicle_extract'`);
     expect(Number(jobs[0].n)).toBeGreaterThanOrEqual(1);
+  });
+
+  test('short conversation skips before queueing when auto_chronicle is enabled', async () => {
+    await engine.setConfig('auto_chronicle', 'true');
+    const before = await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM minion_jobs WHERE name = 'chronicle_extract'`);
+    const r = await runChronicleBackstop({
+      slug: 'sessions/hermes/short', type: 'conversation', compiled_truth: LONG_BODY,
+      frontmatter: { message_count: 12 },
+    }, { engine, sourceId: 'default' });
+    expect(r).toEqual({ enqueued: false, skipped: 'short_conversation' });
+    const after = await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM minion_jobs WHERE name = 'chronicle_extract'`);
+    expect(Number(after[0].n)).toBe(Number(before[0].n));
   });
 });

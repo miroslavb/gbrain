@@ -64,6 +64,25 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Common tasks
 
+- **Conversation-facts epoch safety:** stage every page in bounded memory and
+  publish extractor-owned rows plus the terminal marker in one reconcile
+  transaction. Lock/recheck page identity; for `raw_transcript`, use the
+  symlink-safe bounded reader and run the sidecar digest check both before and
+  after row mutations. Any failure preserves the previous completed epoch.
+- **Extraction quality gates:** conversation facts and atoms must pass the
+  deterministic sensitive scanner and the batched semantic support/atomicity
+  gate before any write. Gate failure is fail-closed; receipts contain counts,
+  stable reason codes, and actual route/model only—never source or candidate text.
+- **Chronicle yield gate:** explicit conversation `message_count < 100` is
+  ineligible, including note-typed `conversations/` rescue pages. Meetings and
+  calendar events are unaffected; missing metadata keeps legacy eligibility.
+  Backstop, backfill, and advisor must call the same predicate.
+- **Drain containment:** `cycle.propose_takes.enabled` is default-off; only an
+  explicit true value or trusted one-shot `--once` runs it. Keep atom auto-drain
+  and conversation-facts bulk drain disabled until bounded quality canaries pass.
+- **Private documents:** ordinary search excludes `docs/inbox/`; uploaded
+  documents are read only through the caller-aware document ACL surface.
+
 - **Configure:** [`docs/ENGINES.md`](./docs/ENGINES.md),
   [`docs/guides/live-sync.md`](./docs/guides/live-sync.md),
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).

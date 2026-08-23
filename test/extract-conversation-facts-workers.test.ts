@@ -122,16 +122,18 @@ describe('extract-conversation-facts — structural contracts (T5)', () => {
     expect(SRC).toMatch(/pages_lock_skipped\+\+/);
   });
 
-  test('delete-orphans-first called BEFORE segment extraction (D11)', () => {
-    expect(SRC).toMatch(/deleteOrphanFactsForPage\(/);
-    // Positional check: the delete-orphans call must appear before the
-    // segment for-loop. Easier to assert that orphan_facts_cleaned is
-    // bumped before the segment loop begins.
-    const cleanedBumpIdx = SRC.indexOf('orphan_facts_cleaned +=');
+  test('page epoch is staged before extraction and reconciled only after the segment loop', () => {
+    expect(SRC).not.toMatch(/deleteOrphanFactsForPage\(/);
+    const stagedIdx = SRC.indexOf('const stagedRows:');
     const segmentLoopIdx = SRC.indexOf('for (const seg of segments)');
-    expect(cleanedBumpIdx).toBeGreaterThan(0);
-    expect(segmentLoopIdx).toBeGreaterThan(0);
-    expect(cleanedBumpIdx).toBeLessThan(segmentLoopIdx);
+    const reconcileIdx = SRC.indexOf(
+      'includeSourcePrefixes: CONVERSATION_FACT_SOURCE_PREFIXES',
+      segmentLoopIdx,
+    );
+    expect(stagedIdx).toBeGreaterThan(0);
+    expect(segmentLoopIdx).toBeGreaterThan(stagedIdx);
+    expect(reconcileIdx).toBeGreaterThan(segmentLoopIdx);
+    expect(SRC).toMatch(/requireAllRows:\s*true/);
   });
 
   test('exit 3 fires when lock-busy pages remain (codex #3)', () => {

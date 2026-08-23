@@ -18,7 +18,9 @@ afterAll(async () => { await engine.disconnect(); });
 beforeEach(async () => {
   await engine.executeRaw('DELETE FROM timeline_entries');
   await engine.executeRaw('DELETE FROM facts');
-  await engine.executeRaw(`DELETE FROM pages WHERE type = 'meeting'`);
+  await engine.executeRaw(`DELETE FROM pages
+    WHERE type IN ('meeting','conversation','calendar-event')
+       OR slug LIKE 'conversations/rescue-%'`);
 });
 
 describe('collectChronicle', () => {
@@ -38,6 +40,43 @@ describe('collectChronicle', () => {
     const conflict = findings.find((f) => f.id === 'ontology_conflicts');
     expect(conflict).toBeTruthy();
     expect(conflict!.severity).toBe('warn');
+  });
+
+  test('does not report explicit sub-100 conversations as Chronicle coverage gaps', async () => {
+    await engine.putPage('conversations/short', {
+      type: 'conversation', title: 'short', compiled_truth: 'x'.repeat(120),
+      frontmatter: { message_count: 99 },
+    });
+    const findings = await collectChronicle.collect(ctx());
+    expect(findings.find((f) => f.id === 'chronicle_coverage_gap')).toBeUndefined();
+  });
+
+  test('reports threshold and legacy conversations through the same eligibility predicate', async () => {
+    await engine.putPage('conversations/threshold', {
+      type: 'conversation', title: 'threshold', compiled_truth: 'x'.repeat(120),
+      frontmatter: { message_count: 100 },
+    });
+    await engine.putPage('conversations/legacy', {
+      type: 'conversation', title: 'legacy', compiled_truth: 'x'.repeat(120),
+      frontmatter: {},
+    });
+    const findings = await collectChronicle.collect(ctx());
+    const gap = findings.find((f) => f.id === 'chronicle_coverage_gap');
+    expect(gap?.title).toBe("2 recent meeting(s) aren't in the timeline yet");
+  });
+
+  test('advisor includes rescued conversation slugs while applying their threshold', async () => {
+    await engine.putPage('conversations/rescue-short', {
+      type: 'note', title: 'rescue short', compiled_truth: 'x'.repeat(120),
+      frontmatter: { message_count: 99 },
+    });
+    await engine.putPage('conversations/rescue-threshold', {
+      type: 'note', title: 'rescue threshold', compiled_truth: 'x'.repeat(120),
+      frontmatter: { message_count: 100 },
+    });
+    const findings = await collectChronicle.collect(ctx());
+    const gap = findings.find((f) => f.id === 'chronicle_coverage_gap');
+    expect(gap?.title).toBe("1 recent meeting(s) aren't in the timeline yet");
   });
 
   test('no findings on a clean brain', async () => {

@@ -18,7 +18,9 @@ beforeAll(async () => {
 afterAll(async () => { await engine.disconnect(); });
 beforeEach(async () => {
   await engine.executeRaw(`DELETE FROM minion_jobs WHERE name = 'chronicle_extract'`);
-  await engine.executeRaw(`DELETE FROM pages WHERE type IN ('meeting','diary')`);
+  await engine.executeRaw(`DELETE FROM pages
+    WHERE type IN ('meeting','conversation','calendar-event','diary')
+       OR slug LIKE 'conversations/rescue-%'`);
 });
 
 describe('chronicle_backfill op', () => {
@@ -61,6 +63,61 @@ describe('chronicle_backfill op', () => {
     expect(jobs.map((j) => j.data)).toEqual([
       { slug: 'meetings/default-src', sourceId: 'default' },
       { slug: 'meetings/other-src', sourceId: 'other-src' },
+    ]);
+  });
+
+  test('uses the shared message_count gate for dry-run and queue admission', async () => {
+    await engine.putPage('conversations/short', {
+      type: 'conversation', title: 'short', compiled_truth: LONG,
+      frontmatter: { message_count: 99 },
+    });
+    await engine.putPage('conversations/threshold', {
+      type: 'conversation', title: 'threshold', compiled_truth: LONG,
+      frontmatter: { message_count: 100 },
+    });
+    await engine.putPage('conversations/legacy', {
+      type: 'conversation', title: 'legacy', compiled_truth: LONG,
+      frontmatter: {},
+    });
+    await engine.putPage('conversations/rescue-short', {
+      type: 'note', title: 'rescue short', compiled_truth: LONG,
+      frontmatter: { message_count: 99 },
+    });
+    await engine.putPage('conversations/rescue-threshold', {
+      type: 'note', title: 'rescue threshold', compiled_truth: LONG,
+      frontmatter: { message_count: 100 },
+    });
+    await engine.putPage('meetings/tiny', {
+      type: 'meeting', title: 'tiny', compiled_truth: LONG,
+      frontmatter: { message_count: 1 },
+    });
+    await engine.putPage('calendar/tiny', {
+      type: 'calendar-event', title: 'calendar tiny', compiled_truth: LONG,
+      frontmatter: { message_count: 1 },
+    });
+
+    const preview = await operationsByName.chronicle_backfill.handler(mkCtx(), { dry_run: true }) as {
+      scanned: number; eligible: number; enqueued: number;
+    };
+    expect(preview.scanned).toBe(7);
+    expect(preview.eligible).toBe(5);
+    expect(preview.enqueued).toBe(0);
+
+    const applied = await operationsByName.chronicle_backfill.handler(mkCtx(), {}) as {
+      eligible: number; enqueued: number; errors: unknown[];
+    };
+    expect(applied.eligible).toBe(5);
+    expect(applied.enqueued).toBe(5);
+    expect(applied.errors).toHaveLength(0);
+    const jobs = await engine.executeRaw<{ data: { slug: string } }>(
+      `SELECT data FROM minion_jobs WHERE name='chronicle_extract' ORDER BY data->>'slug'`,
+    );
+    expect(jobs.map((j) => j.data.slug)).toEqual([
+      'calendar/tiny',
+      'conversations/legacy',
+      'conversations/rescue-threshold',
+      'conversations/threshold',
+      'meetings/tiny',
     ]);
   });
 });

@@ -77,6 +77,24 @@ beforeAll(async () => {
       err.name = 'AbortError';
       throw err;
     }
+    if (String(opts.system).includes('mandatory quality validator for conversation-derived')) {
+      const payload = JSON.parse(String(opts.messages[0]?.content ?? '{}')) as {
+        candidates?: Array<{ id: string }>;
+      };
+      return {
+        text: JSON.stringify({
+          decisions: (payload.candidates ?? []).map((candidate) => ({
+            id: candidate.id, action: 'accept', fully_supported: true,
+            exactly_one_proposition: true, self_contained: true,
+            correct_entity_attribution: true, no_hidden_causation: true,
+            no_overgeneralization: true, no_sensitive_content: true,
+          })),
+        }),
+        blocks: [], stopReason: 'end',
+        usage: { input_tokens: 100, output_tokens: chatOutputTokens, cache_read_tokens: 0, cache_creation_tokens: 0 },
+        model: 'anthropic:claude-sonnet-4-6', providerId: 'anthropic',
+      };
+    }
     return {
       text: JSON.stringify({
         facts: [{

@@ -112,13 +112,13 @@ export async function getBrainHotMemoryMeta(
   let rows: FactRow[] = [];
   if (sessionId) {
     rows = await ctx.engine.listFactsBySession(sourceId, sessionId, {
-      activeOnly: true, limit: topK, visibility,
+      activeOnly: true, limit: topK, visibility, excludeAuditRows: true,
     });
   }
   // If no session-scoped rows, fall back to recent across the source.
   if (rows.length === 0) {
     rows = await ctx.engine.listFactsSince(sourceId, new Date(Date.now() - 24 * 60 * 60 * 1000), {
-      activeOnly: true, limit: topK, visibility,
+      activeOnly: true, limit: topK, visibility, excludeAuditRows: true,
     });
   }
   if (rows.length === 0) {

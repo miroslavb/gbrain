@@ -241,7 +241,7 @@ const chronicle_backfill: Operation = {
     dry_run: { type: 'boolean', description: 'Count eligible pages without enqueuing.' },
   },
   handler: async (ctx, p) => {
-    const { isChronicleEligible } = await import('../chronicle/eligibility.ts');
+    const { isChronicleEligible, CHRONICLE_RESCUE_SLUG_PREFIXES } = await import('../chronicle/eligibility.ts');
     const TYPES = ['meeting', 'conversation', 'calendar-event'] as const;
     const limit = typeof p.limit === 'number' ? p.limit : 1000;
     const updated_after = typeof p.since === 'string' ? p.since : undefined;
@@ -255,12 +255,27 @@ const chronicle_backfill: Operation = {
     }
     let scanned = 0, eligible = 0, enqueued = 0;
     const errors: { slug: string; error: string }[] = [];
-    for (const type of TYPES) {
-      const pages = await ctx.engine.listPages({ type, updated_after, limit, ...scope });
+    const scans: Array<{ type?: typeof TYPES[number]; slugPrefix?: string }> = [
+      ...TYPES.map((type) => ({ type })),
+      ...CHRONICLE_RESCUE_SLUG_PREFIXES.map((slugPrefix) => ({ slugPrefix })),
+    ];
+    const seen = new Set<string>();
+    for (const scan of scans) {
+      const pages = await ctx.engine.listPages({ ...scan, updated_after, limit, ...scope });
       for (const page of pages) {
+        const pageKey = `${page.source_id}\u0000${page.slug}`;
+        if (seen.has(pageKey)) continue;
+        seen.add(pageKey);
         scanned++;
-        const dreamGenerated = (page.frontmatter as Record<string, unknown> | undefined)?.dream_generated === true;
-        const elig = isChronicleEligible({ type: page.type, slug: page.slug, body: page.compiled_truth, dreamGenerated });
+        const frontmatter = page.frontmatter as Record<string, unknown> | undefined;
+        const dreamGenerated = frontmatter?.dream_generated === true;
+        const elig = isChronicleEligible({
+          type: page.type,
+          slug: page.slug,
+          body: page.compiled_truth,
+          dreamGenerated,
+          messageCount: frontmatter?.message_count,
+        });
         if (!elig.ok) continue;
         eligible++;
         if (dryRun || !queue) continue;

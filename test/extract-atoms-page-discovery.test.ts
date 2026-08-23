@@ -40,15 +40,34 @@ beforeEach(async () => {
   await resetPgliteState(engine);
 });
 
+function addGroundingQuote(text: string, opts: ChatOpts): string {
+  const user = opts.messages.find(message => message.role === 'user');
+  const raw = typeof user?.content === 'string' ? user.content : '';
+  const source = raw.split('\n\n---\n\n').slice(1).join('\n\n---\n\n');
+  if (source.length < 500) return text;
+  try {
+    const parsed = JSON.parse(text) as Array<Record<string, unknown>>;
+    for (const atom of parsed) {
+      if (typeof atom.source_quote !== 'string') atom.source_quote = source.slice(0, 50);
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return text;
+  }
+}
+
 function stubChat(text: string): (o: ChatOpts) => Promise<ChatResult> {
-  return async (_o: ChatOpts) => ({
-    text,
-    blocks: [{ type: 'text', text }],
-    stopReason: 'end',
-    usage: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 0, cache_creation_tokens: 0 },
-    model: 'anthropic:claude-haiku-4-5',
-    providerId: 'anthropic',
-  });
+  return async (o: ChatOpts) => {
+    const grounded = addGroundingQuote(text, o);
+    return {
+      text: grounded,
+      blocks: [{ type: 'text', text: grounded }],
+      stopReason: 'end',
+      usage: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 0, cache_creation_tokens: 0 },
+      model: 'anthropic:claude-haiku-4-5',
+      providerId: 'anthropic',
+    };
+  };
 }
 
 /**
@@ -58,9 +77,12 @@ function stubChat(text: string): (o: ChatOpts) => Promise<ChatResult> {
  */
 function stubChatUnique(): (o: ChatOpts) => Promise<ChatResult> {
   let counter = 0;
-  return async (_o: ChatOpts) => {
+  return async (o: ChatOpts) => {
     counter++;
-    const text = `[{"title":"unique-atom-${counter}","atom_type":"insight","body":"b${counter}"}]`;
+    const text = addGroundingQuote(
+      `[{"title":"unique-atom-${counter}","atom_type":"insight","body":"b${counter}"}]`,
+      o,
+    );
     return {
       text,
       blocks: [{ type: 'text', text }],

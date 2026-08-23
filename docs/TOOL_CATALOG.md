@@ -23,7 +23,7 @@ Every non-localOnly operation on the MCP surface: 118 tools across 22 areas. **S
 
 | Tool | Description | Scope | Starter | Gate |
 |---|---|---|---|---|
-| `advisor` | Ranked, read-only "what to do next" for this brain: version drift, pending migrations, schema-pack issues, stalled jobs, usage-shape gaps, and setup smells. | read |  | `mcp.publish_advisor` |
+| `advisor` | Ranked, read-only "what to do next" for this brain: version drift, pending migrations, schema-pack issues, stalled jobs, usage-shape gaps, and setup smells. | admin |  | `mcp.publish_advisor` |
 
 ## chronicle
 

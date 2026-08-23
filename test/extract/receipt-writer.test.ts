@@ -176,6 +176,41 @@ describe('writeReceipt — frontmatter D-EXTRACT-19 belt+suspenders', () => {
     expect(page.frontmatter?.dream_generated).toBe(true);
   });
 
+  test('quality metadata is aggregate-only and never serializes raw fact text', async () => {
+    const rawCanary = 'DO-NOT-LEAK-CONVERSATION-FACT';
+    const { page } = await writeReceipt(engine, {
+      ...BASE_INPUT,
+      run_id: 'quality-receipt',
+      quality: {
+        candidate_count: 12,
+        accepted_count: 7,
+        rejected_count: 3,
+        split_count: 1,
+        duplicate_count: 2,
+        supersession_count: 1,
+        reason_counts: { not_atomic: 2, email: 1 },
+        actual_model: 'shared:model',
+        actual_route: ['shared:model'],
+        stop_triggered: false,
+        stop_reasons: [],
+      },
+    });
+    const serialized = JSON.stringify({
+      frontmatter: page.frontmatter,
+      body: page.compiled_truth,
+    });
+    expect(serialized).not.toContain(rawCanary);
+    expect(page.frontmatter?.quality).toMatchObject({
+      candidate_count: 12,
+      accepted_count: 7,
+      rejected_count: 3,
+      duplicate_count: 2,
+      supersession_count: 1,
+    });
+    expect(page.compiled_truth).toContain('Candidates: **12**');
+    expect(page.compiled_truth).toContain('not_atomic=2');
+  });
+
   test('idempotent on resume: same run_id+round overwrites prior receipt', async () => {
     const first = await writeReceipt(engine, {
       ...BASE_INPUT,

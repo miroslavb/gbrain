@@ -12,10 +12,14 @@
  * path could read arbitrary host files.
  */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readConversationBodyForParsing } from '../src/core/conversation-parser/body.ts';
+import {
+  readConversationBodyForParsing,
+  readConversationBodySnapshot,
+  readRawTranscriptPathSnapshot,
+} from '../src/core/conversation-parser/body.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import type { Page } from '../src/core/types.ts';
 
@@ -35,6 +39,10 @@ beforeAll(() => {
   writeFileSync(join(sourceRepo, 'transcripts', 'meeting.txt'), 'SOURCE transcript body\n');
   writeFileSync(join(globalRepo, 'transcripts', 'meeting.txt'), 'GLOBAL transcript body\n');
   writeFileSync(join(outsideDir, 'secret.txt'), 'OUTSIDE THE ROOT\n');
+  symlinkSync(outsideDir, join(sourceRepo, 'inside-link'), 'dir');
+  writeFileSync(join(sourceRepo, 'transcripts', 'oversize.txt'), 'X'.repeat(64));
+  mkdirSync(join(sourceRepo, 'swap-dir'));
+  writeFileSync(join(sourceRepo, 'swap-dir', 'secret.txt'), 'INSIDE BEFORE SWAP');
 });
 
 afterAll(() => {
@@ -95,6 +103,32 @@ describe('#3911 raw_transcript source-root resolution', () => {
     );
     expect(body).toBe('SUMMARY body');
     expect(body).not.toContain('OUTSIDE THE ROOT');
+  });
+
+  test('an in-root symlink cannot escape to a file outside the registered root', async () => {
+    const engine = stubEngine({ sourceLocalPath: sourceRepo, repoPath: globalRepo });
+    const body = await readConversationBodyForParsing(engine, pageWith('inside-link/secret.txt'));
+    expect(body).toBe('SUMMARY body');
+    expect(body).not.toContain('OUTSIDE THE ROOT');
+  });
+
+  test('bounded snapshot rejects an oversized sidecar before returning its body', async () => {
+    const engine = stubEngine({ sourceLocalPath: sourceRepo, repoPath: globalRepo });
+    const snapshot = await readConversationBodySnapshot(
+      engine,
+      pageWith('transcripts/oversize.txt'),
+      { maxBytes: 16 },
+    );
+    expect(snapshot.tooLarge).toBe(true);
+    expect(snapshot.byteLength).toBeGreaterThan(16);
+    expect(snapshot.body).toBe('');
+  });
+
+  test('post-resolution intermediate-directory symlink swap is rejected at open time', () => {
+    const path = join(sourceRepo, 'swap-dir', 'secret.txt');
+    rmSync(join(sourceRepo, 'swap-dir'), { recursive: true, force: true });
+    symlinkSync(outsideDir, join(sourceRepo, 'swap-dir'), 'dir');
+    expect(() => readRawTranscriptPathSnapshot(path, 1024, sourceRepo)).toThrow();
   });
 
   test('sync.repo_path fallback still works when the source row has no local_path', async () => {

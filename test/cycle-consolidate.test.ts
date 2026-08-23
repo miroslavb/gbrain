@@ -12,6 +12,7 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:tes
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { configureGateway } from '../src/core/ai/gateway.ts';
 import { runPhaseConsolidate } from '../src/core/cycle/phases/consolidate.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 let engine: PGLiteEngine;
 
@@ -50,6 +51,19 @@ const recentDate = () => new Date(Date.now() - 60 * 1000).toISOString();
 function unitVec(): string {
   const a = new Float32Array(1536);
   a[0] = 1.0;
+  return '[' + Array.from(a).join(',') + ']';
+}
+
+function cosineVec(cosine: number): string {
+  const a = new Float32Array(1536);
+  a[0] = cosine;
+  a[1] = Math.sqrt(1 - cosine * cosine);
+  return '[' + Array.from(a).join(',') + ']';
+}
+
+function orthogonalVec(): string {
+  const a = new Float32Array(1536);
+  a[2] = 1.0;
   return '[' + Array.from(a).join(',') + ']';
 }
 
@@ -127,6 +141,35 @@ describe('runPhaseConsolidate', () => {
       expect(f.consolidated_at).not.toBeNull();
       expect(f.consolidated_into).not.toBeNull();
     }
+  });
+
+  test('bge-m3 calibrated default clusters 0.82 cosine; env can restore a stricter threshold', async () => {
+
+    const seed = async (slug: string) => {
+      await seedPage(slug);
+      const vectors = [unitVec(), cosineVec(0.82), orthogonalVec()];
+      for (let i = 0; i < vectors.length; i++) {
+        await engine.executeRaw(
+          `INSERT INTO facts (source_id, entity_slug, fact, kind, source, valid_from, embedding, embedded_at)
+           VALUES ('default', $1, $2, 'fact', 'test', $3::timestamptz, $4::vector, $3::timestamptz)`,
+          [slug, `${slug} fact ${i}`, oldDate(), vectors[i]],
+        );
+      }
+    };
+    await withEnv({ GBRAIN_CONSOLIDATE_CLUSTER_THRESHOLD: undefined }, async () => {
+      await seed('cons-bge-default');
+      const calibrated = await runPhaseConsolidate(engine, {});
+      expect(calibrated.details.facts_consolidated).toBe(2);
+      expect(calibrated.details.takes_written).toBe(1);
+    });
+
+    await engine.executeRaw('DELETE FROM facts');
+    await engine.executeRaw('DELETE FROM takes');
+    await withEnv({ GBRAIN_CONSOLIDATE_CLUSTER_THRESHOLD: '0.85' }, async () => {
+      await seed('cons-bge-strict');
+      const strict = await runPhaseConsolidate(engine, {});
+      expect(strict.details.facts_consolidated).toBe(0);
+    });
   });
 
   test('dryRun honored: counters tick but no rows written', async () => {

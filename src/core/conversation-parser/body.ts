@@ -1,5 +1,14 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, resolve, sep } from 'node:path';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
+import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import type { Page } from '../types.ts';
 import { loadSourceRow } from '../contextual-retrieval-service.ts';
@@ -25,10 +34,23 @@ function extractRawTranscriptPath(page: Page): string | null {
  * from a mounted repo must not read arbitrary host files). Returns the
  * resolved absolute path, or null on escape.
  */
-function resolveWithinRoot(root: string, rel: string): string | null {
+interface ResolvedTranscriptPath { path: string; root: string }
+
+function resolveWithinRoot(root: string, rel: string): ResolvedTranscriptPath | null {
   const rootAbs = resolve(root);
   const candidate = resolve(rootAbs, rel);
-  if (candidate === rootAbs || candidate.startsWith(rootAbs + sep)) return candidate;
+  if (!(candidate === rootAbs || candidate.startsWith(rootAbs + sep))) return null;
+  try {
+    const rootReal = realpathSync(rootAbs);
+    const candidateReal = existsSync(candidate)
+      ? realpathSync(candidate)
+      : resolve(realpathSync(dirname(candidate)), basename(candidate));
+    if (candidateReal === rootReal || candidateReal.startsWith(rootReal + sep)) {
+      return { path: candidateReal, root: rootReal };
+    }
+  } catch {
+    // Missing/unresolvable root or parent, including broken symlinks: reject.
+  }
   return null;
 }
 
@@ -55,7 +77,7 @@ async function resolveTranscriptPath(
   engine: BrainEngine,
   page: Page,
   rawTranscript: string,
-): Promise<string | null> {
+): Promise<ResolvedTranscriptPath | null> {
   let sourceLocalPath: string | null = null;
   if (page.source_id) {
     try {
@@ -85,17 +107,98 @@ async function resolveTranscriptPath(
   return null;
 }
 
+export interface ConversationBodySnapshot {
+  body: string;
+  /** Canonical confinement-checked candidate path; may not exist yet. */
+  rawTranscriptPath: string | null;
+  rawTranscriptRoot: string | null;
+  byteLength: number;
+  tooLarge: boolean;
+}
+
+export function readRawTranscriptPathSnapshot(
+  path: string,
+  maxBytes: number,
+  root?: string,
+): { body: string; byteLength: number; tooLarge: boolean } {
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const before = fstatSync(fd);
+    if (root) {
+      const rootReal = realpathSync(root);
+      const openedPath = realpathSync(path);
+      const pathStat = statSync(openedPath);
+      if (
+        !(openedPath === rootReal || openedPath.startsWith(rootReal + sep)) ||
+        pathStat.dev !== before.dev || pathStat.ino !== before.ino
+      ) throw new Error('raw transcript escaped registered root during open');
+    }
+    if (before.size > maxBytes) return { body: '', byteLength: before.size, tooLarge: true };
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total <= maxBytes) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes - total + 1));
+      const read = readSync(fd, chunk, 0, chunk.length, null);
+      if (read === 0) break;
+      chunks.push(chunk.subarray(0, read));
+      total += read;
+      if (total > maxBytes) return { body: '', byteLength: total, tooLarge: true };
+    }
+    const after = fstatSync(fd);
+    if (
+      before.dev !== after.dev || before.ino !== after.ino ||
+      before.size !== after.size || before.mtimeMs !== after.mtimeMs
+    ) {
+      throw new Error('raw transcript changed while reading');
+    }
+    return { body: Buffer.concat(chunks, total).toString('utf8').trim(), byteLength: total, tooLarge: false };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export async function readConversationBodySnapshot(
+  engine: BrainEngine,
+  page: Page,
+  opts: { maxBytes?: number } = {},
+): Promise<ConversationBodySnapshot> {
+  const maxBytes = typeof opts.maxBytes === 'number' && opts.maxBytes >= 0
+    ? opts.maxBytes
+    : Number.POSITIVE_INFINITY;
+  const rawTranscript = extractRawTranscriptPath(page);
+  if (rawTranscript) {
+    const resolved = await resolveTranscriptPath(engine, page, rawTranscript);
+    if (resolved && existsSync(resolved.path)) {
+      try {
+        const raw = readRawTranscriptPathSnapshot(resolved.path, maxBytes, resolved.root);
+        if (raw.tooLarge) return { ...raw, rawTranscriptPath: resolved.path, rawTranscriptRoot: resolved.root };
+        if (raw.body.length > 0) return { ...raw, rawTranscriptPath: resolved.path, rawTranscriptRoot: resolved.root };
+      } catch {
+        // Symlink swap, unstable read, or I/O failure: fail closed to summary.
+      }
+    }
+    const body = readSummaryBody(page);
+    return {
+      body,
+      rawTranscriptPath: resolved?.path ?? null,
+      rawTranscriptRoot: resolved?.root ?? null,
+      byteLength: Buffer.byteLength(body, 'utf8'),
+      tooLarge: false,
+    };
+  }
+  const body = readSummaryBody(page);
+  return {
+    body,
+    rawTranscriptPath: null,
+    rawTranscriptRoot: null,
+    byteLength: Buffer.byteLength(body, 'utf8'),
+    tooLarge: false,
+  };
+}
+
 export async function readConversationBodyForParsing(
   engine: BrainEngine,
   page: Page,
 ): Promise<string> {
-  const rawTranscript = extractRawTranscriptPath(page);
-  if (rawTranscript) {
-    const resolved = await resolveTranscriptPath(engine, page, rawTranscript);
-    if (resolved && existsSync(resolved)) {
-      const rawBody = readFileSync(resolved, 'utf8').trim();
-      if (rawBody.length > 0) return rawBody;
-    }
-  }
-  return readSummaryBody(page);
+  return (await readConversationBodySnapshot(engine, page)).body;
 }

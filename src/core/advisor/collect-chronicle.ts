@@ -4,6 +4,7 @@
 //   - recent meetings not yet swept into the timeline (coverage gap)
 // Advisory display only (no dispatch_id) — the user runs the shown command.
 import type { AdvisorCollector, AdvisorContext, AdvisorFinding } from './types.ts';
+import { CHRONICLE_RESCUE_SLUG_PREFIXES, isChronicleEligible } from '../chronicle/eligibility.ts';
 
 export const collectChronicle: AdvisorCollector = {
   id: 'chronicle',
@@ -28,18 +29,46 @@ export const collectChronicle: AdvisorCollector = {
       // Ontology columns may be absent on a brain that hasn't migrated; ignore.
     }
 
-    // 2. Recent meetings not yet in the timeline (coverage gap).
+    // 2. Recent Chronicle-eligible pages not yet in the timeline. Enumerate
+    // only the small metadata projection, then apply the exact shared JS
+    // predicate so advisor, write backstop, and bulk backfill cannot drift.
     try {
-      const rows = await ctx.engine.executeRaw<{ n: number }>(
-        `SELECT count(*)::int AS n FROM pages p
-         WHERE p.type IN ('meeting','conversation','calendar-event') AND p.deleted_at IS NULL
-           AND p.updated_at > now() - interval '30 days'
-           AND NOT EXISTS (
-             SELECT 1 FROM timeline_entries te
-             WHERE te.page_id = p.id AND te.event_page_id IS NOT NULL
-           )`,
+      const rows = await ctx.engine.executeRaw<{
+        type: string;
+        slug: string;
+        frontmatter: Record<string, unknown> | null;
+        body_chars: number | string;
+      }>(
+        `SELECT p.type, p.slug, p.frontmatter,
+                char_length(COALESCE(p.compiled_truth, ''))::int AS body_chars
+           FROM pages p
+          WHERE (
+              p.type IN ('meeting','conversation','calendar-event')
+              OR EXISTS (
+                SELECT 1 FROM unnest($1::text[]) AS rescue(prefix)
+                WHERE starts_with(p.slug, rescue.prefix)
+              )
+            )
+            AND p.deleted_at IS NULL
+            AND p.updated_at > now() - interval '30 days'
+            AND NOT EXISTS (
+              SELECT 1 FROM timeline_entries te
+              WHERE te.page_id = p.id AND te.event_page_id IS NOT NULL
+            )`,
+        [Array.from(CHRONICLE_RESCUE_SLUG_PREFIXES)],
       );
-      const gap = Number(rows[0]?.n ?? 0);
+      const gap = rows.reduce((count, row) => {
+        const frontmatter = row.frontmatter ?? {};
+        const bodyChars = Number(row.body_chars) || 0;
+        const eligible = isChronicleEligible({
+          type: row.type,
+          slug: row.slug,
+          body: bodyChars >= 80 ? 'x'.repeat(80) : '',
+          dreamGenerated: frontmatter.dream_generated === true,
+          messageCount: frontmatter.message_count,
+        });
+        return count + (eligible.ok ? 1 : 0);
+      }, 0);
       if (gap > 0) {
         findings.push({
           id: 'chronicle_coverage_gap',

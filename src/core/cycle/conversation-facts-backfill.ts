@@ -229,6 +229,17 @@ export async function runPhaseConversationFactsBackfill(
     segments_processed: 0,
     facts_extracted: 0,
     facts_inserted: 0,
+    quality_candidates: 0,
+    quality_accepted: 0,
+    quality_rejected: 0,
+    quality_splits: 0,
+    quality_duplicates: 0,
+    quality_supersessions: 0,
+    quality_reason_counts: {},
+    quality_stop_triggered: false,
+    quality_stop_reasons: [],
+    quality_actual_models: [],
+    quality_actual_routes: [],
   });
 
   // #3627: the per-source caps (max_cost_usd / max_walltime_min) were parsed
@@ -296,6 +307,7 @@ export async function runPhaseConversationFactsBackfill(
           }, controller.signal),
         );
         perSourceResults[src.id] = result;
+        if (result.quality_stop_triggered) break;
         // #3627: per-source exhaustion (cost or the tracker's runtime cap)
         // is recorded and the loop CONTINUES — the next source gets its own
         // fresh budget. Only the brain-wide checks at the loop top break.

@@ -43,10 +43,10 @@
  *     (source_id, source_markdown_slug, row_num); per-segment row_num
  *     would collide on segment 2. Per-page counter increments across
  *     segments.
- *   - Snapshot-bound terminal audit row on completion. After all segments
- *     commit, one v2 row binds completion to the exact page version or raw
- *     transcript digest. Partial extraction has no matching terminal and the
- *     next claim performs a delete-first full replay.
+ *   - Snapshot-bound atomic page epochs. Facts stay staged until every segment
+ *     succeeds and the source snapshot is rechecked; extractor-owned rows plus
+ *     one v2 terminal marker then replace the prior epoch in one transaction.
+ *     Failure or partial extraction leaves the prior completed epoch intact.
  *   - Optional budgetTracker via opts. If a tracker is in opts, use it
  *     as-is (NO `withBudgetTracker` wrap, which would REPLACE the active
  *     tracker per gateway.ts AsyncLocalStorage semantics, defeating an
@@ -84,7 +84,7 @@ import { createProgress } from '../core/progress.ts';
 import { getCliOptions, cliOptsToProgressOptions, maybeBackground } from '../core/cli-options.ts';
 import { createHash } from 'crypto';
 // v0.41.15.0 (T5): worker-pool primitive + per-source-clamp wrapper +
-// per-page advisory lock + delete-orphans-first replay safety. See plan
+// per-page advisory lock; P0 memory hardening adds an atomic staged epoch swap. See plan
 // `~/.claude/plans/system-instruction-you-are-working-fancy-creek.md`
 // decisions D2, D6, D9, D11, D12, D13, D15.
 import { runSlidingPool } from '../core/worker-pool.ts';
@@ -218,6 +218,9 @@ export function pageTypesForAllowed(types: readonly AllowedType[]): string[] {
  */
 export const PAGE_LIST_BATCH = 10;
 
+/** Hard ceiling for one page epoch buffered before the atomic swap. */
+export const MAX_STAGED_FACTS_PER_PAGE = 1000;
+
 /** Op name for the checkpoint primitive. */
 export const CHECKPOINT_OP = 'extract-conversation-facts';
 
@@ -226,6 +229,7 @@ export const CHECKPOINT_OP = 'extract-conversation-facts';
  * TERMINAL variant below; this variant marks individual fact provenance.
  */
 export const PER_SEGMENT_SOURCE_PREFIX = 'cli:extract-conversation-facts';
+const CONVERSATION_FACT_SOURCE_PREFIXES = [PER_SEGMENT_SOURCE_PREFIX];
 
 // TERMINAL_AUDIT_SOURCE / NON_EXTRACTABLE_AUDIT_SOURCE: defined in
 // ../core/facts/audit-sources.ts, imported + re-exported above. (Doctor's
@@ -305,7 +309,7 @@ export interface ExtractConversationFactsCoreOpts {
    * fan-out. Default 1 (back-compat). Recommended 5-20 for LLM-bound
    * work; PGLite engines silently clamp to 1 with a stderr warn. Cross-
    * process safety is structurally guaranteed by D2's per-page advisory
-   * lock + D11's delete-orphans-first replay.
+   * lock plus the final transaction-scoped epoch swap.
    *
    * Worst-case overshoot on `--max-cost-usd`: D3 documented overshoot is
    * `N × avg_per_call_cost` over the configured cap because per-worker
@@ -322,6 +326,8 @@ export interface ExtractConversationFactsCoreOpts {
    * dedup → provenance all execute THIS production pipeline with zero LLM calls.
    */
   extractor?: (input: ExtractInput) => Promise<ExtractedFact[]>;
+  /** Test seam for the mandatory pre-insert semantic quality validator. */
+  _qualitySemanticValidator?: ConversationFactSemanticValidator;
 }
 
 export interface ExtractConversationFactsResult {
@@ -357,15 +363,25 @@ export interface ExtractConversationFactsResult {
    */
   pages_lock_skipped: number;
   /**
-   * v0.41.15.0 (D11): facts deleted by the per-page delete-orphans-first
-   * replay safety pass. Non-zero means a prior run crashed mid-extract;
-   * the current worker cleaned up and re-extracted from scratch. Always
-   * safe; surfaced for operator observability.
+   * Extractor-owned rows replaced by a successful page-epoch commit. This
+   * includes stale completed epochs and partial legacy rows; failures never
+   * increment it because their transaction rolls back.
    */
   orphan_facts_cleaned: number;
   segments_processed: number;
   facts_extracted: number;
   facts_inserted: number;
+  quality_candidates: number;
+  quality_accepted: number;
+  quality_rejected: number;
+  quality_splits: number;
+  quality_duplicates: number;
+  quality_supersessions: number;
+  quality_reason_counts: Record<string, number>;
+  quality_stop_triggered: boolean;
+  quality_stop_reasons: string[];
+  quality_actual_models: string[];
+  quality_actual_routes: string[];
   budget_exhausted?: boolean;
   spent_usd?: number;
 }
@@ -389,9 +405,22 @@ import {
   parseConversation,
   type ParseConversationOpts as OrchestratorParseOpts,
 } from '../core/conversation-parser/parse.ts';
-import { readConversationBodyForParsing } from '../core/conversation-parser/body.ts';
+import {
+  readConversationBodySnapshot,
+  readRawTranscriptPathSnapshot,
+  readSummaryBody,
+} from '../core/conversation-parser/body.ts';
 import { runLlmFallback } from '../core/conversation-parser/llm-fallback.ts';
 import { resolveModel } from '../core/model-config.ts';
+import {
+  gatewayConversationFactSemanticValidator,
+  loadConversationFactExisting,
+  loadConversationFactQualityConfig,
+  runConversationFactQualityGate,
+  type ConversationFactQualityConfig,
+  type ConversationFactQualityReceipt,
+  type ConversationFactSemanticValidator,
+} from '../core/facts/conversation-quality-gate.ts';
 
 /**
  * v0.41.13.0 — back-compat shape for direct callers + the existing
@@ -571,14 +600,8 @@ function filterOutSlug(entries: string[], sourceId: string, slug: string): strin
 }
 
 // ---------------------------------------------------------------------------
-// Body cap (Eng A2).
+// Body cap (Eng A2) is enforced against the bounded parser snapshot.
 // ---------------------------------------------------------------------------
-
-function pageBodyBytes(page: Page): number {
-  const compiled = page.compiled_truth ?? '';
-  const timeline = page.timeline ?? '';
-  return Buffer.byteLength(compiled, 'utf8') + Buffer.byteLength(timeline, 'utf8');
-}
 
 // ---------------------------------------------------------------------------
 // Types config resolver (Eng-v2 A2 — unified single source of truth).
@@ -660,44 +683,6 @@ function logLockBusyRateLimited(sourceId: string, slug: string): void {
   );
 }
 
-/**
- * D11: delete-orphans-first replay safety. Removes any facts row written
- * by a prior crashed / killed / partial run for this (sourceId, slug)
- * pair, scoped to fact rows with this command's source-prefix so we
- * never touch facts written by other paths (extract.ts, facts/absorb,
- * markdown fences, etc.).
- *
- * The terminal audit row (source=TERMINAL_AUDIT_SOURCE) is ALSO deleted
- * here — if a prior run wrote it after partial inserts (the
- * pre-v0.41.15.0 bug class codex caught), we want a clean slate. A
- * fresh run will re-write the terminal row only after every segment's
- * insertFacts succeeds.
- *
- * Returns the number of rows deleted (surfaced in the result counter
- * for operator observability; non-zero means a prior run crashed).
- */
-async function deleteOrphanFactsForPage(
-  engine: BrainEngine,
-  sourceId: string,
-  slug: string,
-): Promise<number> {
-  // A cleanup failure is authoritative: callers must not write a terminal or
-  // non-extractable marker while facts from an older snapshot may remain.
-  const rows = await engine.executeRaw<{ count: string }>(
-    `WITH del AS (
-       DELETE FROM facts
-       WHERE source_id = $1
-         AND source_markdown_slug = $2
-         AND source LIKE 'cli:extract-conversation-facts%'
-       RETURNING 1
-     )
-     SELECT COUNT(*)::text AS count FROM del`,
-    [sourceId, slug],
-  );
-  const n = parseInt(rows[0]?.count ?? '0', 10);
-  return Number.isFinite(n) ? n : 0;
-}
-
 // ---------------------------------------------------------------------------
 // Core extraction loop (single source).
 // ---------------------------------------------------------------------------
@@ -717,6 +702,8 @@ interface ExtractCoreState {
    * `extractFactsFromTurnWithOutcome` path runs.
    */
   extractor?: (input: ExtractInput) => Promise<ExtractedFact[]>;
+  qualityConfig: ConversationFactQualityConfig;
+  qualitySemanticValidator: ConversationFactSemanticValidator;
   /**
    * v0.41.15.0 (D11): shared per-(sourceId, slug) checkpoint map mutated
    * in place from processPage callers. Map.set is atomic in JS's single-
@@ -731,6 +718,41 @@ interface ExtractCoreState {
    * parser path.
    */
   llmFallbackModel: string | null;
+}
+
+class ConversationFactQualityStopError extends Error {
+  constructor(public readonly reasons: string[]) {
+    super(`conversation fact quality stop: ${reasons.join(',')}`);
+    this.name = 'ConversationFactQualityStopError';
+  }
+}
+
+function mergeQualityReceipt(
+  result: ExtractConversationFactsResult,
+  receipt: ConversationFactQualityReceipt,
+): void {
+  result.quality_candidates += receipt.candidate_count;
+  result.quality_accepted += receipt.accepted_count;
+  result.quality_rejected += receipt.rejected_count;
+  result.quality_splits += receipt.split_count;
+  result.quality_duplicates += receipt.duplicate_count;
+  result.quality_supersessions += receipt.supersession_count;
+  for (const [reason, count] of Object.entries(receipt.reason_counts)) {
+    result.quality_reason_counts[reason] =
+      (result.quality_reason_counts[reason] ?? 0) + Number(count ?? 0);
+  }
+  if (receipt.actual_model && !result.quality_actual_models.includes(receipt.actual_model)) {
+    result.quality_actual_models.push(receipt.actual_model);
+  }
+  for (const route of receipt.actual_route ?? []) {
+    if (!result.quality_actual_routes.includes(route)) result.quality_actual_routes.push(route);
+  }
+  if (receipt.stop_triggered) {
+    result.quality_stop_triggered = true;
+    for (const reason of receipt.stop_reasons) {
+      if (!result.quality_stop_reasons.includes(reason)) result.quality_stop_reasons.push(reason);
+    }
+  }
 }
 
 function cpMapKey(sourceId: string, slug: string): string {
@@ -768,6 +790,10 @@ export type DurableExtractionOutcome = 'complete' | 'non_extractable';
 interface ConversationPageSnapshot {
   page: Page;
   body: string;
+  rawTranscriptPath: string | null;
+  rawTranscriptRoot: string | null;
+  bodyBytes: number;
+  tooLarge: boolean;
   versionToken: string;
 }
 
@@ -817,8 +843,18 @@ async function preparePageSnapshot(
   engine: BrainEngine,
   page: Page,
 ): Promise<ConversationPageSnapshot> {
-  const body = await readConversationBodyForParsing(engine, page);
-  return { page, body, versionToken: snapshotVersionToken(page, body) };
+  const bodySnapshot = await readConversationBodySnapshot(engine, page, {
+    maxBytes: MAX_PAGE_BODY_BYTES,
+  });
+  return {
+    page,
+    body: bodySnapshot.body,
+    rawTranscriptPath: bodySnapshot.rawTranscriptPath,
+    rawTranscriptRoot: bodySnapshot.rawTranscriptRoot,
+    bodyBytes: bodySnapshot.byteLength,
+    tooLarge: bodySnapshot.tooLarge,
+    versionToken: snapshotVersionToken(page, bodySnapshot.body),
+  };
 }
 
 function outcomeSession(source: string, slug: string, versionToken: string): string {
@@ -907,11 +943,29 @@ async function processPage(
   sinceIso: string | undefined,
 ): Promise<{ newEndIso: string | null }> {
   const { page, body } = snapshot;
+  const sidecarCommitCheck = hasRawTranscriptSidecar(page)
+    ? (): void => {
+        let currentBody = readSummaryBody(page);
+        if (snapshot.rawTranscriptPath) {
+          const raw = readRawTranscriptPathSnapshot(
+            snapshot.rawTranscriptPath,
+            MAX_PAGE_BODY_BYTES,
+            snapshot.rawTranscriptRoot ?? undefined,
+          );
+          if (raw.tooLarge) {
+            throw new Error(`source sidecar exceeds body cap for ${state.sourceId}/${page.slug}`);
+          }
+          if (raw.body.length > 0) currentBody = raw.body;
+        }
+        if (snapshotVersionToken(page, currentBody) !== snapshot.versionToken) {
+          throw new Error(`source sidecar snapshot changed for ${state.sourceId}/${page.slug}`);
+        }
+      }
+    : undefined;
   state.result.pages_considered++;
-
   // Body cap check first — pre-parse, pre-segment, pre-extraction.
-  const bytes = pageBodyBytes(page);
-  if (bytes > MAX_PAGE_BODY_BYTES) {
+  const bytes = snapshot.bodyBytes;
+  if (snapshot.tooLarge || bytes > MAX_PAGE_BODY_BYTES) {
     state.result.pages_skipped_too_large++;
     process.stderr.write(
       `[extract-conversation-facts] SKIP ${page.slug}: ${(bytes / 1024 / 1024).toFixed(1)}MB exceeds 25MB cap\n`,
@@ -1001,20 +1055,13 @@ async function processPage(
       !declinedUnrecognizedSpeaker
     ) {
       if (await snapshotIsCurrent(state.engine, state.sourceId, snapshot)) {
-        const cleaned = await deleteOrphanFactsForPage(
-          state.engine,
-          state.sourceId,
-          page.slug,
-        );
-        state.result.orphan_facts_cleaned += cleaned;
         const rowNum = await peekRowNumStart(
           state.engine,
           state.sourceId,
           page.slug,
+          CONVERSATION_FACT_SOURCE_PREFIXES,
         );
-        await writeNonExtractableAuditRow(
-          state.engine,
-          state.sourceId,
+        const marker = buildNonExtractableAuditRow(
           page.slug,
           rowNum,
           snapshot.versionToken,
@@ -1022,33 +1069,43 @@ async function processPage(
             ? 'no conversation messages found'
             : 'fewer than two eligible messages',
         );
+        const committed = await state.engine.insertFacts( // gbrain-allow-direct-insert: atomic conversation-page epoch reconcile; transcript is canonical
+          [marker],
+          { source_id: state.sourceId },
+          {
+            deleteForPageFirst: {
+              slug: page.slug,
+              includeSourcePrefixes: CONVERSATION_FACT_SOURCE_PREFIXES,
+              expectedPage: {
+                contentHash: page.content_hash ?? null,
+                effectiveDate: page.effective_date ?? null,
+              },
+            },
+            preCommitCheck: sidecarCommitCheck,
+            postCommitCheck: sidecarCommitCheck,
+            requireAllRows: true,
+          },
+        );
+        state.result.orphan_facts_cleaned += committed.deleted;
         state.result.pages_marked_non_extractable++;
       }
     }
     return { newEndIso: null };
   }
 
-  // D11: delete-orphans-first replay safety. Wipes any facts written by
-  // a prior crashed / killed / partial run for this (sourceId, slug)
-  // pair before we re-extract. The lock we hold (D2 + D12 refreshing
-  // lock above the caller) guarantees no other worker is writing to
-  // this page right now, so the DELETE+INSERT pair is safe.
-  if (!state.dryRun) {
-    const cleaned = await deleteOrphanFactsForPage(state.engine, state.sourceId, page.slug);
-    if (cleaned > 0) {
-      state.result.orphan_facts_cleaned += cleaned;
-      process.stderr.write(
-        `[extract-conversation-facts] cleaned ${cleaned} orphan fact(s) for ${page.slug} from prior partial run\n`,
-      );
-    }
-  }
-
-  // Page-global row_num: after delete-orphans-first the table has no
-  // rows for this (sourceId, slug), so we always start from 0. Peek
-  // is kept as a defensive fallback for dry-run + non-deleting paths.
-  let rowNum = state.dryRun
-    ? await peekRowNumStart(state.engine, state.sourceId, page.slug)
-    : 0;
+  // Stage every segment in memory. The page's previous completed epoch stays
+  // visible until all extraction and snapshot checks succeed; one final
+  // insertFacts transaction swaps the owned rows and terminal marker together.
+  const stagedRows: Array<NewFact & {
+    row_num: number;
+    source_markdown_slug: string;
+  }> = [];
+  let rowNum = await peekRowNumStart(
+    state.engine,
+    state.sourceId,
+    page.slug,
+    CONVERSATION_FACT_SOURCE_PREFIXES,
+  );
   let newestEnd: string | null = null;
   let segmentsThisPage = 0;
   let pageInsertedTotal = 0;
@@ -1103,31 +1160,54 @@ async function processPage(
     segmentsThisPage++;
     state.result.facts_extracted += extracted.length;
 
-    if (!state.dryRun && extracted.length > 0) {
-      // Eng-v2 C1 / E11: page-global row_num. Each fact in this batch gets
-      // a unique row_num within (source_id, source_markdown_slug); the
-      // accumulator increments across the segment loop.
+    if (extracted.length > 0) {
+      const existingFacts = await loadConversationFactExisting(
+        state.engine,
+        state.sourceId,
+        page.slug,
+        extracted
+          .map((fact) => fact.entity_slug)
+          .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0),
+      );
+      const quality = await runConversationFactQualityGate({
+        sourceText: text,
+        candidates: extracted,
+        existingFacts,
+        config: state.qualityConfig,
+        semanticValidator: state.qualitySemanticValidator,
+        signal: state.signal,
+      });
+      mergeQualityReceipt(state.result, quality.receipt);
+      if (quality.receipt.stop_triggered) {
+        throw new ConversationFactQualityStopError(quality.receipt.stop_reasons);
+      }
+      extracted = quality.accepted.map((entry) => entry.fact);
+    }
+
+    if (extracted.length > 0) {
+      // Page-global row_num. All rows stay staged until the complete page and
+      // its terminal marker can be committed in one atomic reconcile.
       const rows = extracted.map((fact, i) => ({
         ...fact,
         row_num: rowNum + i,
         source_markdown_slug: page.slug,
         source: PER_SEGMENT_SOURCE_PREFIX,
         source_session: sessionId,
-        // Preserve the conversation's valid time instead of defaulting every
-        // extracted fact to extraction time. Epoch-anchored parses have no
-        // trustworthy date, so they retain the existing now() fallback.
         ...(seg.startIso && !seg.startIso.startsWith('1970-')
           ? { valid_from: new Date(seg.startIso) }
           : {}),
         context:
           fact.context ?? `from ${page.slug} segment ${seg.startIso}..${seg.endIso}`,
       }));
-      const ins = await state.engine.insertFacts(rows, { source_id: state.sourceId }); // gbrain-allow-direct-insert: canonical bulk extraction path for conversation pages — fences-as-system-of-record doesn't apply because conversations don't carry `## Facts` fences (the chat-log shape is the source-of-truth)
-      pageInsertedTotal += ins.inserted;
-      state.result.facts_inserted += ins.inserted;
-      rowNum += extracted.length;
-    } else {
-      // dry-run: count for reporting, no DB write.
+      if (!state.dryRun) {
+        if (stagedRows.length + rows.length > MAX_STAGED_FACTS_PER_PAGE) {
+          throw new Error(
+            `staged fact cap exceeded for ${page.slug}: ` +
+            `${stagedRows.length + rows.length} > ${MAX_STAGED_FACTS_PER_PAGE}`,
+          );
+        }
+        stagedRows.push(...rows);
+      }
       rowNum += extracted.length;
     }
 
@@ -1135,31 +1215,47 @@ async function processPage(
     if (state.sleepMs > 0) await sleep(state.sleepMs);
   }
 
-  // Eng-v2 C7 / E16: write terminal audit row after all segments commit
-  // successfully. Only run when not dry-run AND we got through every
-  // segment (no break on segmentLimit; that's an explicit partial run).
+  // Commit only a complete, still-current page. Facts plus terminal marker and
+  // deletion of the previous owned epoch are one transaction; failures leave
+  // the prior completed snapshot visible and partial runs remain invisible.
   const fullyProcessed =
-    state.segmentLimit === 0 || segmentsThisPage < state.segmentLimit;
+    state.segmentLimit === 0 || segmentsThisPage === segments.length;
   if (
     !state.dryRun &&
     fullyProcessed &&
     newestEnd !== null &&
     await snapshotIsCurrent(state.engine, state.sourceId, snapshot)
   ) {
-    // A terminal insert is part of the page transaction contract. Propagate
-    // failure so bulk accounting, CLI exit status, cycle status, and rollups all
-    // report the page as unfinished.
-    await writeTerminalAuditRow(
-      state.engine,
-      state.sourceId,
-      page.slug,
-      rowNum,
-      snapshot.versionToken,
+    const terminal = buildTerminalAuditRow(page.slug, rowNum, snapshot.versionToken);
+    const committed = await state.engine.insertFacts( // gbrain-allow-direct-insert: atomic conversation-page epoch reconcile; transcript is canonical
+      [...stagedRows, terminal],
+      { source_id: state.sourceId },
+      {
+        deleteForPageFirst: {
+          slug: page.slug,
+          includeSourcePrefixes: CONVERSATION_FACT_SOURCE_PREFIXES,
+          expectedPage: {
+            contentHash: page.content_hash ?? null,
+            effectiveDate: page.effective_date ?? null,
+          },
+        },
+        preCommitCheck: sidecarCommitCheck,
+        postCommitCheck: sidecarCommitCheck,
+        requireAllRows: true,
+      },
     );
+    state.result.orphan_facts_cleaned += committed.deleted;
+    pageInsertedTotal = stagedRows.length;
+    state.result.facts_inserted += pageInsertedTotal;
     rowNum++;
   } else if (!state.dryRun && fullyProcessed && newestEnd !== null) {
     process.stderr.write(
-      `[extract-conversation-facts] ${page.slug} changed during extraction; leaving it unfinished for replay\n`,
+      `[extract-conversation-facts] ${page.slug} changed during extraction; preserving the previous epoch for replay\n`,
+    );
+    newestEnd = null;
+  } else if (!state.dryRun && !fullyProcessed) {
+    process.stderr.write(
+      `[extract-conversation-facts] ${page.slug} stopped at segment-limit; preserving the previous epoch for replay\n`,
     );
     newestEnd = null;
   }
@@ -1181,14 +1277,12 @@ async function processPage(
   return { newEndIso: newestEnd };
 }
 
-async function writeTerminalAuditRow(
-  engine: BrainEngine,
-  sourceId: string,
+function buildTerminalAuditRow(
   slug: string,
   rowNum: number,
   versionToken: string,
-): Promise<void> {
-  const fact: NewFact & { row_num: number; source_markdown_slug: string } = {
+): NewFact & { row_num: number; source_markdown_slug: string } {
+  return {
     fact: 'EXTRACTION_COMPLETE',
     kind: 'fact',
     entity_slug: null,
@@ -1199,28 +1293,15 @@ async function writeTerminalAuditRow(
     row_num: rowNum,
     source_markdown_slug: slug,
   };
-  await engine.insertFacts([fact], { source_id: sourceId }); // gbrain-allow-direct-insert: page-level TERMINAL audit row (Codex C7 / E16) marks extraction completion in the durable facts table — there's no fence equivalent because this is internal audit state, not user-facing knowledge
 }
 
-/**
- * Core entry point — one source per call. Caller (CLI / Minion / cycle
- * phase) handles multi-source iteration externally.
- *
- * Budget tracker semantics:
- *   - If `opts.budgetTracker` is set: use it as-is (no wrap). Caller
- *     owns lifecycle; nested wrap would REPLACE the active tracker.
- *   - If absent: create a fresh tracker scoped to `opts.maxCostUsd`
- *     and run the body inside `withBudgetTracker`.
- */
-async function writeNonExtractableAuditRow(
-  engine: BrainEngine,
-  sourceId: string,
+function buildNonExtractableAuditRow(
   slug: string,
   rowNum: number,
   versionToken: string,
   reason: string,
-): Promise<void> {
-  const fact: NewFact & { row_num: number; source_markdown_slug: string } = {
+): NewFact & { row_num: number; source_markdown_slug: string } {
+  return {
     fact: 'EXTRACTION_NOT_APPLICABLE',
     kind: 'fact',
     entity_slug: null,
@@ -1236,9 +1317,18 @@ async function writeNonExtractableAuditRow(
     row_num: rowNum,
     source_markdown_slug: slug,
   };
-  await engine.insertFacts([fact], { source_id: sourceId }); // gbrain-allow-direct-insert: durable non-extractable audit outcome prevents repeated scans while remaining distinct from successful extraction
 }
 
+/**
+ * Core entry point — one source per call. Caller (CLI / Minion / cycle
+ * phase) handles multi-source iteration externally.
+ *
+ * Budget tracker semantics:
+ *   - If `opts.budgetTracker` is set: use it as-is (no wrap). Caller
+ *     owns lifecycle; nested wrap would REPLACE the active tracker.
+ *   - If absent: create a fresh tracker scoped to `opts.maxCostUsd`
+ *     and run the body inside `withBudgetTracker`.
+ */
 export async function runExtractConversationFactsCore(
   engine: BrainEngine,
   opts: ExtractConversationFactsCoreOpts,
@@ -1266,6 +1356,17 @@ export async function runExtractConversationFactsCore(
     segments_processed: 0,
     facts_extracted: 0,
     facts_inserted: 0,
+    quality_candidates: 0,
+    quality_accepted: 0,
+    quality_rejected: 0,
+    quality_splits: 0,
+    quality_duplicates: 0,
+    quality_supersessions: 0,
+    quality_reason_counts: {},
+    quality_stop_triggered: false,
+    quality_stop_reasons: [],
+    quality_actual_models: [],
+    quality_actual_routes: [],
   };
 
   // F2: honor brain-wide kill-switch unless overridden.
@@ -1317,6 +1418,31 @@ export async function runExtractConversationFactsCore(
         fallback: 'anthropic:claude-haiku-4-5-20251001',
       })
     : null;
+  const qualityConfig = await loadConversationFactQualityConfig(engine);
+  const deterministicExtractorValidator: ConversationFactSemanticValidator | undefined =
+    opts.extractor && !opts._qualitySemanticValidator
+      ? async (request) => ({
+          payload: {
+            decisions: request.candidates.map((candidate) => ({
+              id: candidate.id,
+              action: 'accept',
+              fully_supported: true,
+              exactly_one_proposition: true,
+              self_contained: true,
+              correct_entity_attribution: true,
+              no_hidden_causation: true,
+              no_overgeneralization: true,
+              no_sensitive_content: true,
+            })),
+          },
+          actualModel: 'test:injected-extractor',
+          actualRoute: ['test'],
+        })
+      : undefined;
+  const qualitySemanticValidator =
+    opts._qualitySemanticValidator ??
+    deterministicExtractorValidator ??
+    gatewayConversationFactSemanticValidator;
 
   const state: ExtractCoreState = {
     result,
@@ -1328,6 +1454,8 @@ export async function runExtractConversationFactsCore(
     types,
     signal,
     extractor: opts.extractor,
+    qualityConfig,
+    qualitySemanticValidator,
     cpMap: new Map(),
     llmFallbackModel,
   };
@@ -1383,7 +1511,7 @@ export async function runExtractConversationFactsCore(
 
             // A checkpoint without a matching durable v2 outcome cannot prove
             // which page snapshot it describes. Clear it and replay safely;
-            // delete-orphans-first makes that replay deterministic.
+            // the atomic page-epoch swap makes that replay deterministic.
             state.cpMap.delete(cpMapKey(sourceId, currentPage.slug));
             const snapshot = await preparePageSnapshot(engine, currentPage);
             return processPage(state, snapshot, opts.sinceIso);
@@ -1491,13 +1619,20 @@ export async function runExtractConversationFactsCore(
             workers,
             signal,
             onItem: (page) => processPageWithLock(page),
-            onError: (error) => (isAbortError(error) ? 'abort' : 'continue'),
+            onError: (error) =>
+              isAbortError(error) || error instanceof ConversationFactQualityStopError
+                ? 'abort'
+                : 'continue',
             failureLabel: (page) => page.slug,
           });
           const cancellation = poolResult.failures.find((failure) =>
             isAbortError(failure.error),
           );
           if (cancellation) throw cancellation.error;
+          const qualityStop = poolResult.failures.find((failure) =>
+            failure.error instanceof ConversationFactQualityStopError,
+          );
+          if (qualityStop) throw qualityStop.error;
           if (signal?.aborted) {
             if (signal.reason instanceof Error) throw signal.reason;
             throw Object.assign(new Error('caller cancelled'), {
@@ -1565,6 +1700,12 @@ export async function runExtractConversationFactsCore(
       // surface. NOT a thrown failure.
       return result;
     }
+    if (err instanceof ConversationFactQualityStopError) {
+      result.quality_stop_triggered = true;
+      result.pages_failed++;
+      if (!dryRun) await writeRunReceiptAndRollup(engine, sourceId, result, /* halted */ true);
+      return result;
+    }
     throw err;
   }
 
@@ -1622,8 +1763,8 @@ async function writeRunReceiptAndRollup(
   // receipt slug. shortRunId() truncates to 8 chars.
   const runId = `ecf-${Date.now().toString(36)}-${sourceId.slice(0, 4)}`;
 
-  // Receipt write: only when the run actually inserted facts.
-  if (result.facts_inserted > 0) {
+  // Facts and quality-only outcomes are both auditable.
+  if (result.facts_inserted > 0 || result.quality_candidates > 0) {
     try {
       await writeReceipt(engine, {
         kind: 'facts.conversation',
@@ -1633,6 +1774,23 @@ async function writeRunReceiptAndRollup(
         extracted_at: now,
         total_rows: result.facts_inserted,
         cost_usd: result.spent_usd ?? 0,
+        quality: {
+          candidate_count: result.quality_candidates,
+          accepted_count: result.quality_accepted,
+          rejected_count: result.quality_rejected,
+          split_count: result.quality_splits,
+          duplicate_count: result.quality_duplicates,
+          supersession_count: result.quality_supersessions,
+          reason_counts: { ...result.quality_reason_counts },
+          ...(result.quality_actual_models[0]
+            ? { actual_model: result.quality_actual_models[0] }
+            : {}),
+          ...(result.quality_actual_routes.length > 0
+            ? { actual_route: [...result.quality_actual_routes] }
+            : {}),
+          stop_triggered: result.quality_stop_triggered,
+          stop_reasons: [...result.quality_stop_reasons],
+        },
         summary:
           `Extracted ${result.facts_inserted} facts from ` +
           `${result.pages_processed}/${result.pages_considered} eligible pages` +
@@ -1670,20 +1828,29 @@ async function peekRowNumStart(
   engine: BrainEngine,
   sourceId: string,
   slug: string,
+  excludeSourcePrefixes: readonly string[] = [],
 ): Promise<number> {
   try {
-    const rows = await engine.executeRaw<{ max_row: number | null }>(
-      `SELECT COALESCE(MAX(row_num), -1) AS max_row
-         FROM facts
-        WHERE source_id = $1 AND source_markdown_slug = $2`,
-      [sourceId, slug],
-    );
+    const rows = excludeSourcePrefixes.length > 0
+      ? await engine.executeRaw<{ max_row: number | null }>(
+          `SELECT COALESCE(MAX(row_num), -1) AS max_row
+             FROM facts
+            WHERE source_id = $1 AND source_markdown_slug = $2
+              AND NOT (COALESCE(source, '') LIKE ANY($3::text[]))`,
+          [sourceId, slug, excludeSourcePrefixes.map((prefix) => `${prefix}%`)],
+        )
+      : await engine.executeRaw<{ max_row: number | null }>(
+          `SELECT COALESCE(MAX(row_num), -1) AS max_row
+             FROM facts
+            WHERE source_id = $1 AND source_markdown_slug = $2`,
+          [sourceId, slug],
+        );
     const maxRow = rows[0]?.max_row ?? -1;
     return Number(maxRow) + 1;
   } catch {
     // Pre-migration brains may not have source_markdown_slug populated.
-    // Fall back to 0; insertFacts will fail with a clearer error if
-    // there's a real collision.
+    // Fall back to 0; requireAllRows will roll back with a clear conflict if
+    // a preserved row already owns that row number.
     return 0;
   }
 }
@@ -1807,7 +1974,7 @@ Options:
                          Recommended 5-20 for LLM-bound work on Postgres. PGLite
                          silently clamps to 1 (single-writer engine). Cross-process
                          safety is guaranteed by the per-page advisory lock + replay
-                         safety (delete-orphans-first on each page claim).
+                         safety (stage first; atomically swap on completion).
   --override-disabled    Bypass facts.extraction_enabled=false brain-wide kill-switch.
   --background           Submit as a Minion job; print job_id; exit (use 'gbrain jobs follow').
   --yes                  Auto-confirm cost preview in non-TTY contexts.
@@ -1903,6 +2070,17 @@ export async function runExtractConversationFacts(
     segments_processed: 0,
     facts_extracted: 0,
     facts_inserted: 0,
+    quality_candidates: 0,
+    quality_accepted: 0,
+    quality_rejected: 0,
+    quality_splits: 0,
+    quality_duplicates: 0,
+    quality_supersessions: 0,
+    quality_reason_counts: {},
+    quality_stop_triggered: false,
+    quality_stop_reasons: [],
+    quality_actual_models: [],
+    quality_actual_routes: [],
   };
   let totalSpent = 0;
   let anyBudgetExhausted = false;
@@ -1949,6 +2127,26 @@ export async function runExtractConversationFacts(
       aggregate.segments_processed += perSource.segments_processed;
       aggregate.facts_extracted += perSource.facts_extracted;
       aggregate.facts_inserted += perSource.facts_inserted;
+      aggregate.quality_candidates += perSource.quality_candidates;
+      aggregate.quality_accepted += perSource.quality_accepted;
+      aggregate.quality_rejected += perSource.quality_rejected;
+      aggregate.quality_splits += perSource.quality_splits;
+      aggregate.quality_duplicates += perSource.quality_duplicates;
+      aggregate.quality_supersessions += perSource.quality_supersessions;
+      for (const [reason, count] of Object.entries(perSource.quality_reason_counts)) {
+        aggregate.quality_reason_counts[reason] =
+          (aggregate.quality_reason_counts[reason] ?? 0) + count;
+      }
+      aggregate.quality_stop_triggered ||= perSource.quality_stop_triggered;
+      for (const reason of perSource.quality_stop_reasons) {
+        if (!aggregate.quality_stop_reasons.includes(reason)) aggregate.quality_stop_reasons.push(reason);
+      }
+      for (const model of perSource.quality_actual_models) {
+        if (!aggregate.quality_actual_models.includes(model)) aggregate.quality_actual_models.push(model);
+      }
+      for (const route of perSource.quality_actual_routes) {
+        if (!aggregate.quality_actual_routes.includes(route)) aggregate.quality_actual_routes.push(route);
+      }
       if (perSource.budget_exhausted) anyBudgetExhausted = true;
       if (perSource.spent_usd) totalSpent += perSource.spent_usd;
 

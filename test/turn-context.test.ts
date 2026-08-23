@@ -28,6 +28,7 @@ import type { OperationContext } from '../src/core/operations.ts';
 import type { GBrainConfig } from '../src/core/config.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import type { WindowTurn } from '../src/core/context/entity-salience.ts';
+import { TERMINAL_AUDIT_SOURCE } from '../src/core/facts/audit-sources.ts';
 import {
   loadCorpusPages,
   loadCorpusBeliefs,
@@ -106,6 +107,26 @@ describe('assembleTurnContext', () => {
     expect(r.factsCount).toBe(1);
     expect(r.degradedReason).toBeUndefined();
     expect(Buffer.byteLength(r.text, 'utf8')).toBeLessThanOrEqual(TURN_CONTEXT_DEFAULT_MAX_BYTES);
+  });
+
+  test('audit checkpoint rows never enter turn context or its fact count', async () => {
+    await seedPage('people/alice-example', 'Alice Example', 'Alice Example profile.');
+    await seedFact('WORLD-FACT retained', 'world');
+    await engine.insertFact(
+      {
+        fact: 'EXTRACTION_COMPLETE', kind: 'fact', visibility: 'world',
+        source: TERMINAL_AUDIT_SOURCE, entity_slug: 'people/alice-example',
+      },
+      { source_id: 'default' },
+    );
+
+    const r = await assembleTurnContext(engine, {
+      sourceId: 'default', mode: 'delta',
+      window: [{ role: 'user', text: 'Alice Example' }],
+    });
+    expect(r.text).toContain('WORLD-FACT retained');
+    expect(r.text).not.toContain('EXTRACTION_COMPLETE');
+    expect(r.factsCount).toBe(1);
   });
 
   test('volunteer section dedupes against reflex pointers (slug appears once)', async () => {

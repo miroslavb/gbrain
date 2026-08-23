@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import {
   __setChatTransportForTests,
   __setEmbedTransportForTests,
+  type ChatOpts,
   type ChatResult,
 } from '../src/core/ai/gateway.ts';
 import { createBenchmarkBrain, resetTables } from '../src/eval/longmemeval/harness.ts';
@@ -59,6 +60,34 @@ describe('makeGoldExtractor', () => {
   }, 30_000);
 });
 
+async function llmWriteBackStub(opts: ChatOpts): Promise<ChatResult> {
+  if (String(opts.system).includes('mandatory quality validator for conversation-derived')) {
+    const payload = JSON.parse(String(opts.messages[0]?.content ?? '{}')) as {
+      candidates?: Array<{ id: string }>;
+    };
+    return {
+      text: JSON.stringify({ decisions: (payload.candidates ?? []).map((candidate) => ({
+        id: candidate.id, action: 'accept', fully_supported: true,
+        exactly_one_proposition: true, self_contained: true,
+        correct_entity_attribution: true, no_hidden_causation: true,
+        no_overgeneralization: true, no_sensitive_content: true,
+      })) }),
+      blocks: [], stopReason: 'end',
+      usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
+      model: 'stub:quality', providerId: 'stub',
+    };
+  }
+  return {
+    text: JSON.stringify({ facts: [{
+      fact: 'Alice Example flagged the pricing model undercutting gross margin',
+      kind: 'belief', entity: 'people/alice-example', confidence: 1.0, notability: 'high',
+    }] }),
+    blocks: [], stopReason: 'end',
+    usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
+    model: 'stub:stub', providerId: 'stub',
+  };
+}
+
 describe('runWriteBack (deterministic, production pipeline)', () => {
   test('gold facts survive with full fidelity and correct provenance', async () => {
     await resetTables(engine);
@@ -99,22 +128,7 @@ describe('runWriteBack (deterministic, production pipeline)', () => {
     // Stubbed chat transport plays the real extractor's role: one fact whose
     // text carries one gold probe's keywords, so extraction metrics land
     // strictly between 0 and 1 (partial recall, full precision).
-    __setChatTransportForTests(async (): Promise<ChatResult> => ({
-      text: JSON.stringify({
-        facts: [{
-          fact: 'Alice Example flagged the pricing model undercutting gross margin',
-          kind: 'belief',
-          entity: 'people/alice-example',
-          confidence: 1.0,
-          notability: 'high',
-        }],
-      }),
-      blocks: [],
-      stopReason: 'end',
-      usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
-      model: 'stub:stub',
-      providerId: 'stub',
-    }));
+    __setChatTransportForTests(llmWriteBackStub);
     __setEmbedTransportForTests(
       (async () => ({ embeddings: [Array.from({ length: 1536 }, () => 0.1)] })) as never,
     );
@@ -133,22 +147,7 @@ describe('runWriteBack (deterministic, production pipeline)', () => {
   }, 30_000);
 
   test('--llm extraction metrics reach the harness CELLS (review finding: they were dropped in aggregation)', async () => {
-    __setChatTransportForTests(async (): Promise<ChatResult> => ({
-      text: JSON.stringify({
-        facts: [{
-          fact: 'Alice Example flagged the pricing model undercutting gross margin',
-          kind: 'belief',
-          entity: 'people/alice-example',
-          confidence: 1.0,
-          notability: 'high',
-        }],
-      }),
-      blocks: [],
-      stopReason: 'end',
-      usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
-      model: 'stub:stub',
-      providerId: 'stub',
-    }));
+    __setChatTransportForTests(llmWriteBackStub);
     __setEmbedTransportForTests(
       (async () => ({ embeddings: [Array.from({ length: 1536 }, () => 0.1)] })) as never,
     );

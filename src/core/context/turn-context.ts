@@ -560,6 +560,7 @@ async function assembleDelta(
           activeOnly: true,
           limit: 50,
           visibility,
+          excludeAuditRows: true,
         });
         acc.facts = rows
           .filter((r) => !since || isAfter(r.created_at.toISOString(), since))

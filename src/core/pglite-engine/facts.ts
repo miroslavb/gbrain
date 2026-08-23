@@ -8,6 +8,7 @@ import type {
   FactRow, FactKind, FactVisibility, FactInsertStatus,
   NewFact, FactListOpts, FactsHealth,
 } from '../engine.ts';
+import { validateFactBatchReconcile, type FactBatchInsertOpts } from '../facts/reconcile.ts';
 import { MAX_SEARCH_LIMIT, clampSearchLimit } from '../engine.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { resolveSupersededByRow, isInt4RowRef, type SupersedeTarget } from '../facts/supersede-resolve.ts';
@@ -126,9 +127,12 @@ export async function insertFacts(
   deps: PgliteFactsDeps,
     rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number }>,
     ctx: { source_id: string },
-    opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean } },
+    opts?: FactBatchInsertOpts,
   ): Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number }> {
-    if (rows.length === 0) return { inserted: 0, ids: [], warnings: [], deleted: 0 };
+    validateFactBatchReconcile(rows, opts);
+    if (rows.length === 0 && !opts?.deleteForPageFirst) {
+      return { inserted: 0, ids: [], warnings: [], deleted: 0 };
+    }
 
     const warnings: string[] = [];
     // v0.46 (#3014): captured inside the transaction below when
@@ -151,17 +155,49 @@ export async function insertFacts(
       // preserveExpiredLegacy).
       const del = opts?.deleteForPageFirst;
       if (del) {
+        if (del.expectedPage) {
+          const expectedDate = del.expectedPage.effectiveDate == null
+            ? null
+            : new Date(del.expectedPage.effectiveDate);
+          const locked = await tx.query<{ id: number }>(
+            `SELECT id FROM pages
+              WHERE source_id = $1 AND slug = $2 AND deleted_at IS NULL
+                AND content_hash IS NOT DISTINCT FROM $3
+                AND effective_date IS NOT DISTINCT FROM $4`,
+            [ctx.source_id, del.slug, del.expectedPage.contentHash, expectedDate],
+          );
+          if (!locked.rows[0]) {
+            throw new Error(`insertFacts: source page snapshot changed for ${ctx.source_id}/${del.slug}`);
+          }
+        }
+        if (opts?.preCommitCheck) await opts.preCommitCheck();
         const expiredLegacyFilter = del.preserveExpiredLegacy
           ? ` AND NOT (row_num IS NULL AND expired_at IS NOT NULL)`
           : '';
-        const prefixes = del.excludeSourcePrefixes;
-        if (prefixes && prefixes.length > 0) {
-          const patterns = prefixes.map(p => `${p}%`);
+        const included = del.includeSourcePrefixes;
+        const excluded = del.excludeSourcePrefixes;
+        if (included !== undefined) {
+          if (included.length > 0) {
+            const r = await tx.query(
+              `DELETE FROM facts
+                 WHERE source_id = $1 AND source_markdown_slug = $2
+                   AND EXISTS (
+                     SELECT 1 FROM unnest($3::text[]) AS owned(prefix)
+                     WHERE starts_with(COALESCE(source, ''), owned.prefix)
+                   )${expiredLegacyFilter}`,
+              [ctx.source_id, del.slug, included],
+            );
+            deleted = r.affectedRows ?? 0;
+          }
+        } else if (excluded && excluded.length > 0) {
           const r = await tx.query(
             `DELETE FROM facts
                WHERE source_id = $1 AND source_markdown_slug = $2
-                 AND NOT (COALESCE(source, '') LIKE ANY($3::text[]))${expiredLegacyFilter}`,
-            [ctx.source_id, del.slug, patterns],
+                 AND NOT EXISTS (
+                   SELECT 1 FROM unnest($3::text[]) AS preserved(prefix)
+                   WHERE starts_with(COALESCE(source, ''), preserved.prefix)
+                 )${expiredLegacyFilter}`,
+            [ctx.source_id, del.slug, excluded],
           );
           deleted = r.affectedRows ?? 0;
         } else {
@@ -246,6 +282,11 @@ export async function insertFacts(
             ? [ctx.source_id, entitySlug, input.fact, kind, visibility, notability, context, validFrom, validUntil, expiredAt, input.source, sourceSession, confidence, embeddedAt, input.row_num, input.source_markdown_slug, claimMetric, claimValue, claimUnit, claimPeriod, eventType]
             : [ctx.source_id, entitySlug, input.fact, kind, visibility, notability, context, validFrom, validUntil, expiredAt, input.source, sourceSession, confidence, embedStr, embeddedAt, input.row_num, input.source_markdown_slug, claimMetric, claimValue, claimUnit, claimPeriod, eventType],
         );
+        if (!ins.rows[0] && opts?.requireAllRows) {
+          throw new Error(
+            `insertFacts: required row ${input.row_num} for ${input.source_markdown_slug} conflicted`,
+          );
+        }
         if (ins.rows[0]) out.push(ins.rows[0].id);
         rowIds.push(ins.rows[0] ? Number(ins.rows[0].id) : null);
       }
@@ -284,6 +325,7 @@ export async function insertFacts(
           await tx.query(`UPDATE facts SET superseded_by = $1 WHERE id = $2`, [superseded_by, rowIds[i]]);
         }
       }
+      if (opts?.postCommitCheck) await opts.postCommitCheck();
       return out;
     });
     return { inserted: ids.length, ids, warnings, deleted };
@@ -417,8 +459,9 @@ export async function listSupersessions(
 export async function countUnconsolidatedFacts(deps: PgliteFactsDeps, source_id: string): Promise<number> {
     const r = await deps.db.query<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM facts
-       WHERE source_id = $1 AND consolidated_at IS NULL AND expired_at IS NULL`,
-      [source_id],
+       WHERE source_id = $1 AND consolidated_at IS NULL AND expired_at IS NULL
+         AND NOT (source = ANY($2::text[]))`,
+      [source_id, [...AUDIT_ROW_SOURCES]],
     );
     return Number(r.rows[0]?.count ?? 0);
   }
@@ -580,17 +623,18 @@ export async function getFactsHealth(deps: PgliteFactsDeps, source_id: string): 
          COUNT(*) FILTER (WHERE expired_at IS NULL AND created_at > now() - interval '7 days')   AS total_week,
          COUNT(*) FILTER (WHERE expired_at IS NOT NULL)                                AS total_expired,
          COUNT(*) FILTER (WHERE consolidated_at IS NOT NULL)                           AS total_consolidated
-       FROM facts WHERE source_id = $1`,
-      [source_id],
+       FROM facts WHERE source_id = $1 AND NOT (source = ANY($2::text[]))`,
+      [source_id, [...AUDIT_ROW_SOURCES]],
     );
     const top = await deps.db.query<{ entity_slug: string; count: number }>(
       `SELECT entity_slug, COUNT(*)::int AS count
        FROM facts
        WHERE source_id = $1 AND expired_at IS NULL AND entity_slug IS NOT NULL
+         AND NOT (source = ANY($2::text[]))
        GROUP BY entity_slug
        ORDER BY count DESC, entity_slug ASC
        LIMIT 5`,
-      [source_id],
+      [source_id, [...AUDIT_ROW_SOURCES]],
     );
     const r = total.rows[0] ?? {
       total_active: 0, total_today: 0, total_week: 0, total_expired: 0, total_consolidated: 0,

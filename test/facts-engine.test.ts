@@ -14,6 +14,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
+import { TERMINAL_AUDIT_SOURCE } from '../src/core/facts/audit-sources.ts';
 
 let engine: PGLiteEngine;
 
@@ -133,6 +134,176 @@ describe('expireFact', () => {
 
   test('returns false on unknown id', async () => {
     expect(await engine.expireFact(99999999)).toBe(false);
+  });
+});
+
+describe('insertFacts page reconcile source scoping', () => {
+  test('includeSourcePrefixes atomically replaces only the owned conversation-fact rows', async () => {
+    const slug = `conversations/atomic-${Math.random().toString(36).slice(2, 10)}`;
+    const row = (rowNum: number, fact: string, source: string) => ({
+      fact,
+      kind: 'fact' as const,
+      entity_slug: 'people/alice-example',
+      source,
+      row_num: rowNum,
+      source_markdown_slug: slug,
+    });
+    await engine.insertFacts([
+      row(1, 'old conversation fact', 'cli:extract-conversation-facts'),
+      row(900, 'manual fact must survive', 'mcp:put_page'),
+    ], { source_id: 'default' });
+
+    const result = await engine.insertFacts(
+      [row(1, 'replacement conversation fact', 'cli:extract-conversation-facts')],
+      { source_id: 'default' },
+      {
+        deleteForPageFirst: {
+          slug,
+          includeSourcePrefixes: ['cli:extract-conversation-facts'],
+        },
+      },
+    );
+
+    expect(result.deleted).toBe(1);
+    const stored = await engine.executeRaw<{ fact: string; source: string }>(
+      `SELECT fact, source FROM facts WHERE source_id = 'default' AND source_markdown_slug = $1 ORDER BY row_num`,
+      [slug],
+    );
+    expect(stored).toEqual([
+      { fact: 'replacement conversation fact', source: 'cli:extract-conversation-facts' },
+      { fact: 'manual fact must survive', source: 'mcp:put_page' },
+    ]);
+  });
+
+  test('include prefixes are literal and do not treat wildcard characters as patterns', async () => {
+    const slug = `conversations/literal-${Math.random().toString(36).slice(2, 10)}`;
+    const row = (rowNum: number, fact: string, source: string) => ({
+      fact, kind: 'fact' as const, source, row_num: rowNum, source_markdown_slug: slug,
+    });
+    await engine.insertFacts([
+      row(1, 'literal owned', 'owned%literal:v1'),
+      row(2, 'wildcard neighbor', 'ownedXliteral:v1'),
+    ], { source_id: 'default' });
+    const result = await engine.insertFacts(
+      [row(1, 'literal replacement', 'owned%literal:v2')],
+      { source_id: 'default' },
+      { deleteForPageFirst: { slug, includeSourcePrefixes: ['owned%literal:'] }, requireAllRows: true },
+    );
+    expect(result.deleted).toBe(1);
+    const stored = await engine.executeRaw<{ fact: string }>(
+      `SELECT fact FROM facts WHERE source_markdown_slug = $1 ORDER BY row_num`, [slug],
+    );
+    expect(stored.map((r) => r.fact)).toEqual(['literal replacement', 'wildcard neighbor']);
+  });
+
+  test('delete-only reconcile is transactional and supports authoritative zero-fact pages', async () => {
+    const slug = `conversations/zero-${Math.random().toString(36).slice(2, 10)}`;
+    await engine.insertFacts([{
+      fact: 'old extractor row', kind: 'fact', source: 'cli:owned',
+      row_num: 1, source_markdown_slug: slug,
+    }], { source_id: 'default' });
+    const result = await engine.insertFacts(
+      [],
+      { source_id: 'default' },
+      { deleteForPageFirst: { slug, includeSourcePrefixes: ['cli:owned'] } },
+    );
+    expect(result.deleted).toBe(1);
+    const left = await engine.executeRaw<{ n: number }>(
+      `SELECT count(*)::int AS n FROM facts WHERE source_markdown_slug = $1`, [slug],
+    );
+    expect(Number(left[0].n)).toBe(0);
+  });
+
+  test('reconcile refuses row slugs or sources outside its declared ownership', async () => {
+    const slug = `conversations/owner-${Math.random().toString(36).slice(2, 10)}`;
+    const other = `${slug}-other`;
+    await expect(engine.insertFacts([{
+      fact: 'wrong page', kind: 'fact', source: 'cli:owned',
+      row_num: 1, source_markdown_slug: other,
+    }], { source_id: 'default' }, {
+      deleteForPageFirst: { slug, includeSourcePrefixes: ['cli:owned'] },
+    })).rejects.toThrow('reconcile slug');
+    await expect(engine.insertFacts([{
+      fact: 'wrong source', kind: 'fact', source: 'mcp:manual',
+      row_num: 1, source_markdown_slug: slug,
+    }], { source_id: 'default' }, {
+      deleteForPageFirst: { slug, includeSourcePrefixes: ['cli:owned'] },
+    })).rejects.toThrow('reconcile source ownership');
+  });
+
+  test('source page snapshot precondition is checked inside the reconcile transaction', async () => {
+    const slug = `conversations/snapshot-${Math.random().toString(36).slice(2, 10)}`;
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'snapshot', compiled_truth: 'old body', frontmatter: {}, timeline: '',
+    });
+    const oldPage = await engine.getPage(slug, { sourceId: 'default' });
+    await engine.insertFacts([{
+      fact: 'old visible epoch', kind: 'fact', source: 'cli:owned',
+      row_num: 1, source_markdown_slug: slug,
+    }], { source_id: 'default' });
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'snapshot', compiled_truth: 'new body', frontmatter: {}, timeline: '',
+    });
+
+    await expect(engine.insertFacts([{
+      fact: 'stale replacement', kind: 'fact', source: 'cli:owned',
+      row_num: 1, source_markdown_slug: slug,
+    }], { source_id: 'default' }, {
+      deleteForPageFirst: {
+        slug,
+        includeSourcePrefixes: ['cli:owned'],
+        expectedPage: {
+          contentHash: oldPage!.content_hash ?? null,
+          effectiveDate: oldPage!.effective_date ?? null,
+        },
+      },
+      requireAllRows: true,
+    })).rejects.toThrow('source page snapshot changed');
+
+    const stored = await engine.executeRaw<{ fact: string }>(
+      `SELECT fact FROM facts WHERE source_markdown_slug = $1`, [slug],
+    );
+    expect(stored.map((row) => row.fact)).toEqual(['old visible epoch']);
+  });
+
+  test('post-reconcile check failure rolls back both wipe and inserted rows', async () => {
+    const slug = `conversations/post-check-${Math.random().toString(36).slice(2, 10)}`;
+    const row = (fact: string) => ({
+      fact, kind: 'fact' as const, source: 'cli:owned', row_num: 1,
+      source_markdown_slug: slug,
+    });
+    await engine.insertFacts([row('old visible epoch')], { source_id: 'default' });
+
+    await expect(engine.insertFacts([row('replacement must roll back')], { source_id: 'default' }, {
+      deleteForPageFirst: { slug, includeSourcePrefixes: ['cli:owned'] },
+      requireAllRows: true,
+      postCommitCheck: () => { throw new Error('synthetic post-reconcile drift'); },
+    })).rejects.toThrow('synthetic post-reconcile drift');
+
+    const stored = await engine.executeRaw<{ fact: string }>(
+      `SELECT fact FROM facts WHERE source_markdown_slug = $1`, [slug],
+    );
+    expect(stored.map((entry) => entry.fact)).toEqual(['old visible epoch']);
+  });
+
+  test('empty ownership prefixes are rejected before any page rows can be deleted', async () => {
+    const slug = `conversations/empty-prefix-${Math.random().toString(36).slice(2, 10)}`;
+    await engine.insertFacts([
+      { fact: 'extractor row', kind: 'fact', source: 'cli:owned', row_num: 1, source_markdown_slug: slug },
+      { fact: 'manual row', kind: 'fact', source: 'mcp:manual', row_num: 2, source_markdown_slug: slug },
+    ], { source_id: 'default' });
+
+    await expect(engine.insertFacts([], { source_id: 'default' }, {
+      deleteForPageFirst: { slug, includeSourcePrefixes: [''] },
+    })).rejects.toThrow('non-empty');
+    await expect(engine.insertFacts([], { source_id: 'default' }, {
+      deleteForPageFirst: { slug, excludeSourcePrefixes: [''] },
+    })).rejects.toThrow('non-empty');
+
+    const left = await engine.executeRaw<{ fact: string }>(
+      `SELECT fact FROM facts WHERE source_markdown_slug = $1 ORDER BY row_num`, [slug],
+    );
+    expect(left.map((row) => row.fact)).toEqual(['extractor row', 'manual row']);
   });
 });
 
@@ -356,5 +527,31 @@ describe('getFactsHealth', () => {
     const health = await engine.getFactsHealth('default');
     expect(health.total_today).toBeLessThanOrEqual(health.total_week);
     expect(health.total_active + health.total_expired).toBeGreaterThanOrEqual(health.total_week);
+  });
+
+  test('audit checkpoint rows do not inflate pending or health counters', async () => {
+    const sourceId = `facts-health-${Math.random().toString(36).slice(2, 10)}`;
+    await engine.executeRaw(
+      `INSERT INTO sources (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING`,
+      [sourceId],
+    );
+    await engine.insertFacts([
+      {
+        fact: 'real fact', kind: 'fact', source: 'test', entity_slug: 'people/real',
+        row_num: 1, source_markdown_slug: 'conversations/health-real',
+      },
+      {
+        fact: 'EXTRACTION_COMPLETE', kind: 'fact', source: TERMINAL_AUDIT_SOURCE,
+        entity_slug: 'people/audit', row_num: 2,
+        source_markdown_slug: 'conversations/health-audit',
+      },
+    ], { source_id: sourceId });
+
+    expect(await engine.countUnconsolidatedFacts(sourceId)).toBe(1);
+    const health = await engine.getFactsHealth(sourceId);
+    expect(health.total_active).toBe(1);
+    expect(health.total_today).toBe(1);
+    expect(health.total_week).toBe(1);
+    expect(health.top_entities).toEqual([{ entity_slug: 'people/real', count: 1 }]);
   });
 });

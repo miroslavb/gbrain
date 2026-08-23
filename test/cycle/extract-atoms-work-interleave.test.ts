@@ -185,8 +185,9 @@ describe('extract_atoms work-list interleave (budget-starvation regression)', ()
     });
     expect(await countExtractAtomsBacklog(engine, 'default')).toBe(1);
 
+    const sourceQuote = 'x'.repeat(20);
     const validAtomJson = JSON.stringify([
-      { title: 'A', atom_type: 'insight', body: 'body a' },
+      { title: 'A', atom_type: 'insight', body: sourceQuote, source_quote: sourceQuote },
     ]);
     await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
@@ -196,6 +197,20 @@ describe('extract_atoms work-list interleave (budget-starvation regression)', ()
         { filePath: '/tmp/t3.txt', content: 'transcript three', contentHash: '3'.repeat(16) },
       ],
       _chat: chatExhaustingAfter(1, validAtomJson),
+      _semanticValidator: async ({ candidates }) => ({
+        verdicts: candidates.map((_, index) => ({
+          index,
+          scores: {
+            source_support: 1,
+            exactly_one_claim: 1,
+            self_contained: 1,
+            no_hidden_causation_or_overgeneralization: 1,
+            no_sensitive_content: 1,
+          },
+        })),
+        actualModel: 'test:atom-validator',
+        route: 'test',
+      }),
     });
 
     expect(await countExtractAtomsBacklog(engine, 'default')).toBe(0);

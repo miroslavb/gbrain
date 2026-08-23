@@ -137,6 +137,9 @@ function buildMockEngine(pageCount: number): { engine: BrainEngine; captured: Ca
   const captured: CapturedSql[] = [];
   const engine = {
     kind: 'pglite',
+    async getConfig(key: string) {
+      return key === 'cycle.propose_takes.enabled' ? 'true' : null;
+    },
     async executeRaw<T>(sql: string, params?: unknown[]): Promise<T[]> {
       captured.push({ sql, params: params ?? [] });
       if (sql.includes('SELECT slug, source_id, compiled_truth')) {
