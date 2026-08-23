@@ -80,6 +80,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Drain containment:** `cycle.propose_takes.enabled` is default-off; only an
   explicit true value or trusted one-shot `--once` runs it. Keep atom auto-drain
   and conversation-facts bulk drain disabled until bounded quality canaries pass.
+- **Atom population containment:** pack-extractable `note` and `conversation`
+  pages require frontmatter `atom_extract: true`; `atom_extract: false` denies
+  any otherwise extractable page. Discovery, backlog/doctor, drain, and
+  autopilot must share this predicate. Do not broaden these high-volume types
+  back to implicit eligibility without a measured, privacy-safe corpus canary.
 - **Private documents:** ordinary search excludes `docs/inbox/`; uploaded
   documents are read only through the caller-aware document ACL surface.
 

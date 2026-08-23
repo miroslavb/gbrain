@@ -134,11 +134,12 @@ async function seedPage(opts: {
 
 describe('v0.41.2.1: discoverExtractablePages SQL contract', () => {
   test('discovers legacy + pack-extractable types, excludes synthesis outputs', async () => {
-    // Legacy floor + `note` (declared extractable:true in gbrain-base, now
-    // honored via the pack manifest — the D2 fix).
-    for (const type of ['meeting', 'source', 'article', 'video', 'book', 'original', 'note']) {
+    // Legacy floor remains automatic. `note` is pack-extractable but is a
+    // catch-all and therefore requires explicit per-page atom consent.
+    for (const type of ['meeting', 'source', 'article', 'video', 'book', 'original']) {
       await seedPage({ slug: `${type}/x`, type });
     }
+    await seedPage({ slug: 'note/x', type: 'note', frontmatter: { atom_extract: true } });
     // `concept` is also extractable:true in gbrain-base, but extracting atoms
     // FROM concepts would loop — synthesis outputs are always excluded.
     await seedPage({ slug: 'wiki/concepts/skip-me', type: 'concept' });
@@ -154,6 +155,39 @@ describe('v0.41.2.1: discoverExtractablePages SQL contract', () => {
       'source/x',
       'video/x',
     ]);
+  });
+
+  test('broad note/conversation types require atom_extract:true', async () => {
+    await seedPage({ slug: 'notes/default-deny', type: 'note' });
+    await seedPage({
+      slug: 'notes/explicit-allow',
+      type: 'note',
+      frontmatter: { atom_extract: true },
+    });
+    await seedPage({ slug: 'conversations/default-deny', type: 'conversation' });
+    await seedPage({
+      slug: 'conversations/explicit-allow',
+      type: 'conversation',
+      frontmatter: { atom_extract: 'TRUE' },
+    });
+
+    const discovered = await discoverExtractablePages(engine, 'default');
+    expect(discovered.map((d) => d.slug).sort()).toEqual([
+      'conversations/explicit-allow',
+      'notes/explicit-allow',
+    ]);
+  });
+
+  test('atom_extract:false denies otherwise extractable types', async () => {
+    await seedPage({ slug: 'meeting/default-allow', type: 'meeting' });
+    await seedPage({
+      slug: 'meeting/explicit-deny',
+      type: 'meeting',
+      frontmatter: { atom_extract: false },
+    });
+
+    const discovered = await discoverExtractablePages(engine, 'default');
+    expect(discovered.map((d) => d.slug)).toEqual(['meeting/default-allow']);
   });
 
   test('NOT EXISTS subquery skips pages whose source_hash has existing atoms', async () => {

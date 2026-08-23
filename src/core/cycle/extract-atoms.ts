@@ -116,6 +116,27 @@ const LEGACY_EXTRACTABLE_TYPES = [
 // extractable:true flag being a documented forward-compat marker.
 const SYNTHESIS_OUTPUT_TYPES = new Set<string>(['atom', 'concept']);
 
+// `note` is the schema catch-all and `conversation` is the high-volume archive
+// surface. Treating either pack-level `extractable:true` bit as blanket consent
+// makes a federated brain spend its atom budget on source code, skills, session
+// archives, and raw operator transcripts. These broad types therefore require
+// an explicit per-page `atom_extract: true` frontmatter opt-in. Curated legacy
+// and media types retain their pack-driven behavior. Any page type can opt out
+// explicitly with `atom_extract: false`.
+export const ATOM_EXPLICIT_OPT_IN_TYPES = ['note', 'conversation'] as const;
+const ATOM_EXPLICIT_OPT_IN_TYPES_SQL = ATOM_EXPLICIT_OPT_IN_TYPES
+  .map((type) => `'${type}'`)
+  .join(', ');
+
+// Shared by discovery and backlog counting. Keep this as one SQL fragment so
+// doctor/autopilot never advertise work that the phase itself will refuse.
+const ATOM_PAGE_OPT_IN_POLICY_SQL = `
+      AND lower(COALESCE(p.frontmatter->>'atom_extract', '')) <> 'false'
+      AND (
+        NOT (p.type = ANY(ARRAY[${ATOM_EXPLICIT_OPT_IN_TYPES_SQL}]::text[]))
+        OR lower(COALESCE(p.frontmatter->>'atom_extract', '')) = 'true'
+      )`;
+
 const PAGE_DISCOVERY_BUDGET = 50;
 const MIN_PAGE_CHARS_FOR_EXTRACTION = 500;
 // Source pages whose frontmatter declares a `raw` payload pointer hold raw
@@ -294,6 +315,8 @@ interface DiscoveredPage {
  *      import payload are not extractable prose; counting them creates a
  *      permanent backlog/no-progress loop (see
  *      RAW_SOURCE_HOLDER_EXCLUSION_SQL).
+ *   #6 broad catch-all/archive types (`note`, `conversation`) require an
+ *      explicit `atom_extract: true`; explicit false denies every type.
  */
 export async function discoverExtractablePages(
   engine: BrainEngine,
@@ -313,6 +336,7 @@ export async function discoverExtractablePages(
       AND COALESCE(p.frontmatter->>'imported_from',   '') <> 'markdown-greenfield'
       AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
       ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
+      ${ATOM_PAGE_OPT_IN_POLICY_SQL}
       AND length(COALESCE(p.compiled_truth, '')) >= $3
       AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
       ${hasFilter ? "AND p.slug = ANY($5::text[])" : ''}
@@ -387,6 +411,7 @@ export async function countExtractAtomsBacklog(
            AND COALESCE(p.frontmatter->>'imported_from',   '') <> 'markdown-greenfield'
            AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
+           ${ATOM_PAGE_OPT_IN_POLICY_SQL}
            AND length(COALESCE(p.compiled_truth, '')) >= $3
            AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
            AND NOT EXISTS (
@@ -402,6 +427,7 @@ export async function countExtractAtomsBacklog(
            AND COALESCE(p.frontmatter->>'imported_from',   '') <> 'markdown-greenfield'
            AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
+           ${ATOM_PAGE_OPT_IN_POLICY_SQL}
            AND length(COALESCE(p.compiled_truth, '')) >= $2
            AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
            AND NOT EXISTS (

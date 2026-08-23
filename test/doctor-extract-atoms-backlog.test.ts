@@ -88,6 +88,36 @@ describe('countExtractAtomsBacklog (issue #1678)', () => {
     expect(await countExtractAtomsBacklog(engine)).toBe(0);
     expect(await countExtractAtomsBacklog(engine, 'default')).toBe(0);
   });
+
+  it('counts broad note/conversation pages only with explicit atom opt-in', async () => {
+    await engine.putPage('notes/default-deny', {
+      type: 'note', title: 'n0', compiled_truth: BODY,
+    });
+    await engine.putPage('notes/explicit-allow', {
+      type: 'note', title: 'n1', compiled_truth: BODY,
+      frontmatter: { atom_extract: true },
+    });
+    await engine.putPage('conversations/default-deny', {
+      type: 'conversation', title: 'c0', compiled_truth: BODY,
+    });
+    await engine.putPage('conversations/explicit-allow', {
+      type: 'conversation', title: 'c1', compiled_truth: BODY,
+      frontmatter: { atom_extract: 'true' },
+    });
+
+    expect(await countExtractAtomsBacklog(engine)).toBe(2);
+    expect(await countExtractAtomsBacklog(engine, 'default')).toBe(2);
+  });
+
+  it('honors atom_extract:false for otherwise extractable pages', async () => {
+    await seedArticle('article-default-allow');
+    await engine.putPage('article-explicit-deny', {
+      type: 'article', title: 'denied', compiled_truth: BODY,
+      frontmatter: { atom_extract: false },
+    });
+
+    expect(await countExtractAtomsBacklog(engine)).toBe(1);
+  });
 });
 
 describe('computeExtractAtomsBacklogCheck (issue #1678)', () => {
