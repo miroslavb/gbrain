@@ -401,6 +401,9 @@ export interface ExtractConversationFactsResult {
 // ---------------------------------------------------------------------------
 
 import {
+  loadPricingOverrides,
+} from '../core/budget/budget-tracker.ts';
+import {
   deriveDateContext,
   parseConversation,
   type ParseConversationOpts as OrchestratorParseOpts,
@@ -1678,6 +1681,10 @@ export async function runExtractConversationFactsCore(
       const tracker = new BudgetTracker({
         maxCostUsd: opts.maxCostUsd ?? DEFAULT_MAX_COST_USD,
         label: `extract-conversation-facts:${sourceId}`,
+        // #4312 — honor operator price overrides so fallback-chain models
+        // declared via `pricing.overrides` stay costable instead of tripping
+        // the TX2 no-pricing fail-closed path (same contract as enrich).
+        pricingOverrides: await loadPricingOverrides(engine),
       });
       ownedTracker = tracker;
       try {
