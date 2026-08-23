@@ -199,6 +199,64 @@ describe('gbrain reindex --markdown (v0.32.7)', () => {
     ]);
   });
 
+  test('source + prefix + retrieved-since scopes compose and round-trip in JSON', async () => {
+    await seedLegacyPage('projects/hot', 'target body');
+    await seedLegacyPage('projects/old', 'old body');
+    await seedLegacyPage('notes/hot', 'wrong prefix');
+    await seedLegacyPage('projects/hot', 'wrong source', null, { sourceId: 'work' });
+    await engine.executeRaw(
+      `UPDATE pages
+          SET last_retrieved_at = CASE slug
+            WHEN 'projects/old' THEN '2026-07-01T00:00:00Z'::timestamptz
+            ELSE '2026-08-20T00:00:00Z'::timestamptz
+          END`,
+    );
+
+    const { result, stdout } = await captureOutput(() => runReindex(engine, [
+      '--markdown', '--source=default', '--prefix=projects/',
+      '--retrieved-since=2026-08-01', '--hot-first', '--dry-run', '--no-embed', '--json',
+    ]));
+    expect(result.pending).toBe(1);
+    expect(result).toMatchObject({
+      sourceId: 'default', prefix: 'projects', retrievedSince: '2026-08-01', hotFirst: true,
+    });
+    expect(JSON.parse(stdout)).toMatchObject({
+      pending: 1, would_reindex: 1, source: 'default', prefix: 'projects',
+      retrieved_since: '2026-08-01', hot_first: true,
+    });
+  });
+
+  test('--hot-first prioritizes retrieval recency before update time and raw id', async () => {
+    await seedLegacyPage('analysis/cold-first-id', 'cold body');
+    await seedLegacyPage('analysis/hottest', 'hot body');
+    await seedLegacyPage('analysis/middle', 'middle body');
+    await engine.executeRaw(
+      `UPDATE pages SET
+         last_retrieved_at = CASE slug
+           WHEN 'analysis/hottest' THEN '2026-08-22T00:00:00Z'::timestamptz
+           WHEN 'analysis/middle' THEN '2026-08-21T00:00:00Z'::timestamptz
+           ELSE NULL
+         END,
+         updated_at = CASE slug
+           WHEN 'analysis/cold-first-id' THEN '2026-08-23T00:00:00Z'::timestamptz
+           ELSE '2026-08-01T00:00:00Z'::timestamptz
+         END`,
+    );
+
+    const result = await runReindex(engine, [
+      '--markdown', '--prefix', 'analysis', '--hot-first', '--limit', '2', '--workers', '4', '--no-embed',
+    ]);
+    expect(result.reindexed).toBe(2);
+    const rows = await engine.executeRaw<{ slug: string; chunker_version: number }>(
+      `SELECT slug, chunker_version FROM pages ORDER BY slug`,
+    );
+    expect(rows).toEqual([
+      { slug: 'analysis/cold-first-id', chunker_version: 1 },
+      { slug: 'analysis/hottest', chunker_version: MARKDOWN_CHUNKER_VERSION },
+      { slug: 'analysis/middle', chunker_version: MARKDOWN_CHUNKER_VERSION },
+    ]);
+  });
+
   test('inline type and limit forms stay scoped and bounded', async () => {
     await seedLegacyPage('atoms/inline-a', 'atom body a', null, { type: 'atom' });
     await seedLegacyPage('atoms/inline-b', 'atom body b', null, { type: 'atom' });
@@ -261,6 +319,40 @@ describe('gbrain reindex --markdown (v0.32.7)', () => {
           WHERE p.slug LIKE 'atoms/after-failure-%'`,
       );
       expect(Number(rows[0]?.chunks)).toBe(101);
+    } finally {
+      engine.getPage = originalGetPage;
+    }
+  });
+
+  test('hot-first keyset lets a failed hottest row reach the next batch', async () => {
+    await seedLegacyPage('analysis/hottest-fails', 'synthetic failure');
+    for (let i = 0; i < 101; i++) {
+      await seedLegacyPage(`analysis/hot-after-${i}`, `valid analysis ${i}`);
+    }
+    await engine.executeRaw(
+      `UPDATE pages
+          SET last_retrieved_at = '2026-08-23T00:00:00Z'::timestamptz
+            - (id * interval '1 second')`,
+    );
+    const originalGetPage = engine.getPage.bind(engine);
+    let failedReads = 0;
+    engine.getPage = async (slug, opts) => {
+      if (slug === 'analysis/hottest-fails') {
+        failedReads++;
+        throw new Error('synthetic hot read failure');
+      }
+      return originalGetPage(slug, opts);
+    };
+
+    try {
+      const result = await runReindex(engine, [
+        '--markdown', '--prefix', 'analysis', '--hot-first', '--no-embed',
+      ]);
+      expect(result.pending).toBe(102);
+      expect(result.reindexed).toBe(101);
+      expect(result.failed).toBe(1);
+      expect(result.pendingAfter).toBe(1);
+      expect(failedReads).toBe(1);
     } finally {
       engine.getPage = originalGetPage;
     }
@@ -445,10 +537,28 @@ describe('gbrain reindex --markdown (v0.32.7)', () => {
     expect(currentExitCode()).toBe(2);
   });
 
+  test.each([
+    ['source', ['--markdown', '--source', '--json', '--no-embed'], 'invalid --source'],
+    ['prefix traversal', ['--markdown', '--prefix', '../projects', '--json', '--no-embed'], 'invalid --prefix'],
+    ['prefix wildcard', ['--markdown', '--prefix', 'projects/%', '--json', '--no-embed'], 'invalid --prefix'],
+    ['retrieved-since shape', ['--markdown', '--retrieved-since', '08/01/2026', '--json', '--no-embed'], 'invalid --retrieved-since'],
+    ['retrieved-since calendar', ['--markdown', '--retrieved-since', '2026-02-30', '--json', '--no-embed'], 'invalid --retrieved-since'],
+  ])('invalid hot-scope value (%s) fails closed', async (_label, args, expected) => {
+    await seedLegacyPage('analysis/scope-invalid', 'body');
+    const { result, stdout } = await captureOutput(() => runReindex(engine, args));
+    expect(result.pending).toBe(0);
+    expect(JSON.parse(stdout).error).toContain(expected);
+    expect(currentExitCode()).toBe(2);
+  });
+
   test('scope flags reject reindex modes that do not consume them', () => {
     expect(validateReindexModeScope(['--multimodal', '--type', 'atom'])).toContain('--multimodal');
     expect(validateReindexModeScope(['--multimodal', '--type=atom'])).toContain('--multimodal');
     expect(validateReindexModeScope(['--aliases', '--type', 'atom'])).toContain('--aliases');
+    expect(validateReindexModeScope(['--aliases', '--prefix', 'projects'])).toContain('--aliases');
+    expect(validateReindexModeScope(['--multimodal', '--source', 'default'])).toContain('--multimodal');
+    expect(validateReindexModeScope(['--markdown', '--source', 'default'])).toBeNull();
+    expect(validateReindexModeScope(['--markdown', '--retrieved-since=2026-08-01', '--hot-first'])).toBeNull();
     expect(validateReindexModeScope(['--markdown', '--type', 'atom'])).toBeNull();
   });
 

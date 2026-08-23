@@ -33,6 +33,15 @@ import { resolve } from 'path';
 // v0.41.15.0 (T10, D9): per-batch parallel workers.
 import { runSlidingPool } from '../core/worker-pool.ts';
 import { resolveWorkersWithClamp } from '../core/sync-concurrency.ts';
+import {
+  buildReindexScopeSql,
+  normalizeReindexPrefix,
+  normalizeRetrievedSince,
+  reindexScopeLabel,
+  toReindexHotCursor,
+  type ReindexHotCursor,
+  type ReindexScope,
+} from './reindex-scope.ts';
 
 interface ReindexOpts {
   /** Cap total pages reindexed. Useful for triage runs on huge brains. */
@@ -51,6 +60,14 @@ interface ReindexOpts {
   noEmbed?: boolean;
   /** Optional open-world page type scope, e.g. atom. */
   type?: string;
+  /** Restrict markdown rows to one federated source. */
+  sourceId?: string;
+  /** Restrict markdown rows to one canonical slug prefix. */
+  prefix?: string;
+  /** Include only pages retrieved on/after this UTC day. */
+  retrievedSince?: string;
+  /** Prioritize recently retrieved, then recently updated pages. */
+  hotFirst?: boolean;
   /**
    * v0.41.15.0 (T10, D9): in-process per-batch parallel workers.
    * Default 1. PGLite clamps to 1. Recommended 4-8 for large brains.
@@ -69,6 +86,30 @@ export interface ReindexResult {
   dryRun: boolean;
   chunkerVersion: number;
   type: string | null;
+  sourceId: string | null;
+  prefix: string | null;
+  retrievedSince: string | null;
+  hotFirst: boolean;
+}
+
+function emptyReindexResult(
+  dryRun: boolean,
+  scope: Partial<ReindexScope> & { hotFirst?: boolean } = {},
+): ReindexResult {
+  return {
+    pending: 0,
+    pendingAfter: 0,
+    reindexed: 0,
+    skipped: 0,
+    failed: 0,
+    dryRun,
+    chunkerVersion: MARKDOWN_CHUNKER_VERSION,
+    type: scope.type ?? null,
+    sourceId: scope.sourceId ?? null,
+    prefix: scope.prefix ?? null,
+    retrievedSince: scope.retrievedSince ?? null,
+    hotFirst: scope.hotFirst === true,
+  };
 }
 
 // #3686: real usage, reachable via `gbrain reindex --help` (the generic
@@ -78,7 +119,9 @@ export interface ReindexResult {
 const REINDEX_HELP = `gbrain reindex — re-chunk / re-embed existing pages after a pipeline upgrade
 
 USAGE
-  gbrain reindex --markdown   [--type PAGE_TYPE] [--limit N] [--dry-run] [--no-embed] [--json] [--repo PATH]
+  gbrain reindex --markdown   [--type PAGE_TYPE] [--source ID] [--prefix SLUG_PREFIX]
+                              [--retrieved-since YYYY-MM-DD] [--hot-first]
+                              [--limit N] [--workers N] [--dry-run] [--no-embed] [--json] [--repo PATH]
   gbrain reindex --multimodal [--limit N] [--workers N] [--dry-run] [--cost-estimate] [--no-embed] [--yes] [--json]
   gbrain reindex --aliases    [--limit N] [--dry-run] [--json] [--source <id>]
 
@@ -93,14 +136,18 @@ TARGETS (exactly one required)
 
 OPTIONS
   --type <t>        --markdown only: restrict to one page type
+  --source <id>     --markdown/--aliases: restrict to one source
+  --prefix <slug>   --markdown only: restrict to an exact slug subtree
+  --retrieved-since <YYYY-MM-DD>
+                    --markdown only: include pages retrieved since UTC day
+  --hot-first       --markdown only: newest retrieval, then update, then id
   --limit N         Cap pages/chunks processed this run
-  --workers N       --multimodal only: parallel UPDATEs per batch
+  --workers N       --markdown/--multimodal: parallel work per batch
                     (--concurrency is an alias)
   --dry-run         Report what would change; write nothing
   --cost-estimate   --multimodal only: print the embed cost estimate and stop
   --no-embed        Skip re-embedding (chunk-only reindex)
   --yes             --multimodal only: skip the cost confirm
-  --source <id>     --aliases only: restrict to one source
   --repo PATH       --markdown only: brain repo override
   --json            Machine-readable output
   --help, -h        Show this help
@@ -113,7 +160,9 @@ export function printReindexHelp(): void {
   console.log(REINDEX_HELP);
 }
 
-const REINDEX_VALUE_FLAGS = new Set(['--type', '--limit', '--repo', '--workers', '--concurrency']);
+const REINDEX_VALUE_FLAGS = new Set([
+  '--type', '--source', '--prefix', '--retrieved-since', '--limit', '--repo', '--workers', '--concurrency',
+]);
 
 export function normalizeReindexArgs(args: string[]): string[] {
   return args.flatMap((arg) => {
@@ -131,17 +180,16 @@ function parsePageType(raw: string | undefined): string | null {
   return raw;
 }
 
-function pendingDriftPredicate(noEmbed: boolean): string {
-  return noEmbed
-    ? 'chunker_version < $1'
-    : '(chunker_version < $1 OR contextual_retrieval_mode IS NULL)';
-}
-
 export function validateReindexModeScope(args: string[]): string | null {
   args = normalizeReindexArgs(args);
-  if (!args.includes('--type')) return null;
-  if (args.includes('--multimodal')) return '--type is only supported with reindex --markdown, not --multimodal';
-  if (args.includes('--aliases')) return '--type is only supported with reindex --markdown, not --aliases';
+  const markdownOnly = ['--type', '--prefix', '--retrieved-since', '--hot-first']
+    .find((flag) => args.includes(flag));
+  if (args.includes('--multimodal') && (markdownOnly || args.includes('--source'))) {
+    return `${markdownOnly ?? '--source'} is not supported with reindex --multimodal`;
+  }
+  if (args.includes('--aliases') && markdownOnly) {
+    return `${markdownOnly} is only supported with reindex --markdown, not --aliases`;
+  }
   return null;
 }
 
@@ -177,6 +225,16 @@ function parseArgs(args: string[]): ReindexOpts {
     } else if (a === '--type') {
       const type = parsePageType(args[++i]);
       if (type) out.type = type;
+    } else if (a === '--source') {
+      out.sourceId = args[++i];
+    } else if (a === '--prefix') {
+      const prefix = normalizeReindexPrefix(args[++i]);
+      if (prefix) out.prefix = prefix;
+    } else if (a === '--retrieved-since') {
+      const since = normalizeRetrievedSince(args[++i]);
+      if (since) out.retrievedSince = since;
+    } else if (a === '--hot-first') {
+      out.hotFirst = true;
     } else if (a === '--workers' || a === '--concurrency') {
       // v0.41.15.0 (T10, D9): per-batch parallel workers.
       const v = parseInt(args[++i] ?? '', 10);
@@ -207,28 +265,13 @@ function parseArgs(args: string[]): ReindexOpts {
  * hook for post-v81 brains. The simple `chunker_version OR mode IS NULL`
  * predicate covers the headline upgrade case the wave is shipping.
  */
-async function countPending(engine: BrainEngine, type: string | null = null, noEmbed = false): Promise<number> {
-  const driftPredicate = pendingDriftPredicate(noEmbed);
-  if (type) {
-    const rows = await engine.executeRaw<{ count: string | number }>(
-      `SELECT COUNT(*)::bigint AS count
-         FROM pages
-        WHERE page_kind = 'markdown'
-          AND ${driftPredicate}
-          AND deleted_at IS NULL
-          AND type = $2`,
-      [MARKDOWN_CHUNKER_VERSION, type],
-    );
-    return Number(rows[0]?.count ?? 0);
-  }
-
+async function countPending(engine: BrainEngine, scope: ReindexScope, noEmbed = false): Promise<number> {
+  const scoped = buildReindexScopeSql(scope, noEmbed);
   const rows = await engine.executeRaw<{ count: string | number }>(
     `SELECT COUNT(*)::bigint AS count
        FROM pages
-      WHERE page_kind = 'markdown'
-        AND ${driftPredicate}
-        AND deleted_at IS NULL`,
-    [MARKDOWN_CHUNKER_VERSION],
+      WHERE ${scoped.where}`,
+    scoped.params,
   );
   return Number(rows[0]?.count ?? 0);
 }
@@ -241,36 +284,62 @@ async function countPending(engine: BrainEngine, type: string | null = null, noE
 async function readBatch(
   engine: BrainEngine,
   batchSize: number,
-  type: string | null = null,
+  scope: ReindexScope,
   noEmbed = false,
   afterId: number | null = null,
-): Promise<Array<{ id: number; slug: string; source_path: string | null; compiled_truth: string; source_id: string }>> {
-  const driftPredicate = pendingDriftPredicate(noEmbed);
-  if (type) {
+  hotFirst = false,
+  hotCursor: ReindexHotCursor | null = null,
+): Promise<Array<{
+  id: number;
+  slug: string;
+  source_path: string | null;
+  compiled_truth: string;
+  source_id: string;
+  hot_at: Date | string;
+  updated_at: Date | string;
+}>> {
+  const scoped = buildReindexScopeSql(scope, noEmbed);
+  if (hotFirst) {
+    const cursorParams = hotCursor
+      ? [hotCursor.hotAt, hotCursor.updatedAt, hotCursor.id]
+      : [];
+    const hotBind = scoped.params.length + 1;
+    const updatedBind = scoped.params.length + 2;
+    const idBind = scoped.params.length + 3;
+    const cursorSql = hotCursor
+      ? `AND (
+           COALESCE(last_retrieved_at, 'epoch'::timestamptz) < $${hotBind}::timestamptz
+           OR (COALESCE(last_retrieved_at, 'epoch'::timestamptz) = $${hotBind}::timestamptz AND updated_at < $${updatedBind}::timestamptz)
+           OR (COALESCE(last_retrieved_at, 'epoch'::timestamptz) = $${hotBind}::timestamptz AND updated_at = $${updatedBind}::timestamptz AND id > $${idBind}::integer)
+         )`
+      : '';
+    const limitBind = scoped.params.length + cursorParams.length + 1;
     return engine.executeRaw(
-      `SELECT id, slug, source_path, compiled_truth, source_id
+      `SELECT id, slug, source_path, compiled_truth, source_id,
+              COALESCE(last_retrieved_at, 'epoch'::timestamptz) AS hot_at,
+              updated_at
          FROM pages
-        WHERE page_kind = 'markdown'
-          AND ${driftPredicate}
-          AND deleted_at IS NULL
-          AND type = $2
-          AND ($4::integer IS NULL OR id > $4)
-        ORDER BY id ASC
-        LIMIT $3`,
-      [MARKDOWN_CHUNKER_VERSION, type, batchSize, afterId],
+        WHERE ${scoped.where}
+          ${cursorSql}
+        ORDER BY COALESCE(last_retrieved_at, 'epoch'::timestamptz) DESC,
+                 updated_at DESC,
+                 id ASC
+        LIMIT $${limitBind}`,
+      [...scoped.params, ...cursorParams, batchSize],
     );
   }
-
+  const afterBind = scoped.params.length + 1;
+  const limitBind = scoped.params.length + 2;
   return engine.executeRaw(
-    `SELECT id, slug, source_path, compiled_truth, source_id
+    `SELECT id, slug, source_path, compiled_truth, source_id,
+            COALESCE(last_retrieved_at, 'epoch'::timestamptz) AS hot_at,
+            updated_at
        FROM pages
-      WHERE page_kind = 'markdown'
-        AND ${driftPredicate}
-        AND deleted_at IS NULL
-        AND ($3::integer IS NULL OR id > $3)
+      WHERE ${scoped.where}
+        AND ($${afterBind}::integer IS NULL OR id > $${afterBind})
       ORDER BY id ASC
-      LIMIT $2`,
-    [MARKDOWN_CHUNKER_VERSION, batchSize, afterId],
+      LIMIT $${limitBind}`,
+    [...scoped.params, afterId, batchSize],
   );
 }
 
@@ -286,7 +355,23 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
       process.stderr.write(`[reindex] ${payload.error}\n`);
     }
     setCliExitVerdict(2);
-    return { pending: 0, pendingAfter: 0, reindexed: 0, skipped: 0, failed: 0, dryRun: args.includes('--dry-run'), chunkerVersion: MARKDOWN_CHUNKER_VERSION, type: null };
+    return emptyReindexResult(args.includes('--dry-run'));
+  }
+  const invalidSource = invalidRequiredValueFlag(args, '--source');
+  const invalidPrefix = args.some((arg, index) =>
+    arg === '--prefix' && !normalizeReindexPrefix(args[index + 1]));
+  const invalidRetrievedSince = args.some((arg, index) =>
+    arg === '--retrieved-since' && !normalizeRetrievedSince(args[index + 1]));
+  if (invalidSource || invalidPrefix || invalidRetrievedSince) {
+    const error = invalidSource
+      ? 'invalid --source: expected a non-empty source id'
+      : invalidPrefix
+        ? 'invalid --prefix: expected a canonical slug prefix'
+        : 'invalid --retrieved-since: expected a real YYYY-MM-DD date';
+    if (args.includes('--json')) process.stdout.write(JSON.stringify({ error }) + '\n');
+    else process.stderr.write(`[reindex] ${error}\n`);
+    setCliExitVerdict(2);
+    return emptyReindexResult(args.includes('--dry-run'));
   }
   if (invalidPositiveIntegerFlag(args, '--limit')) {
     const payload = { error: 'invalid --limit: expected a positive integer' };
@@ -296,7 +381,7 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
       process.stderr.write(`[reindex] ${payload.error}\n`);
     }
     setCliExitVerdict(2);
-    return { pending: 0, pendingAfter: 0, reindexed: 0, skipped: 0, failed: 0, dryRun: args.includes('--dry-run'), chunkerVersion: MARKDOWN_CHUNKER_VERSION, type: null };
+    return emptyReindexResult(args.includes('--dry-run'));
   }
   const invalidWorkerFlag = ['--workers', '--concurrency'].find((flag) =>
     invalidPositiveIntegerFlag(args, flag));
@@ -312,10 +397,24 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
       process.stderr.write(`[reindex] ${error}\n`);
     }
     setCliExitVerdict(2);
-    return { pending: 0, pendingAfter: 0, reindexed: 0, skipped: 0, failed: 0, dryRun: args.includes('--dry-run'), chunkerVersion: MARKDOWN_CHUNKER_VERSION, type: null };
+    return emptyReindexResult(args.includes('--dry-run'));
   }
   const opts = parseArgs(args);
   const type = opts.type ?? null;
+  const selectionScope: ReindexScope = {
+    type,
+    sourceId: opts.sourceId ?? null,
+    prefix: opts.prefix ?? null,
+    retrievedSince: opts.retrievedSince ?? null,
+  };
+  const scopeJson = {
+    type,
+    source: selectionScope.sourceId,
+    prefix: selectionScope.prefix,
+    retrieved_since: selectionScope.retrievedSince,
+    hot_first: opts.hotFirst === true,
+  };
+  const resultScope = { ...selectionScope, hotFirst: opts.hotFirst === true };
 
   // Require `--markdown` explicitly. Future modes (e.g. --code) get their
   // own routing here.
@@ -323,35 +422,35 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
     if (opts.json) {
       process.stdout.write(JSON.stringify({ error: 'gbrain reindex requires a target flag, e.g. --markdown' }) + '\n');
     } else {
-      process.stderr.write('Usage: gbrain reindex --markdown [--type PAGE_TYPE] [--limit N] [--dry-run] [--json] [--repo PATH]\n');
+      process.stderr.write('Usage: gbrain reindex --markdown [--type PAGE_TYPE] [--source ID] [--prefix SLUG_PREFIX] [--retrieved-since YYYY-MM-DD] [--hot-first] [--limit N] [--dry-run] [--json] [--repo PATH]\n');
     }
     setCliExitVerdict(2);
-    return { pending: 0, pendingAfter: 0, reindexed: 0, skipped: 0, failed: 0, dryRun: !!opts.dryRun, chunkerVersion: MARKDOWN_CHUNKER_VERSION, type };
+    return emptyReindexResult(!!opts.dryRun, resultScope);
   }
 
-  const pending = await countPending(engine, type, !!opts.noEmbed);
+  const pending = await countPending(engine, selectionScope, !!opts.noEmbed);
 
   if (opts.json && pending === 0) {
-    process.stdout.write(JSON.stringify({ pending: 0, pending_after: 0, reindexed: 0, skipped: 0, failed: 0, chunker_version: MARKDOWN_CHUNKER_VERSION, type }) + '\n');
-    return { pending: 0, pendingAfter: 0, reindexed: 0, skipped: 0, failed: 0, dryRun: !!opts.dryRun, chunkerVersion: MARKDOWN_CHUNKER_VERSION, type };
+    process.stdout.write(JSON.stringify({ pending: 0, pending_after: 0, reindexed: 0, skipped: 0, failed: 0, chunker_version: MARKDOWN_CHUNKER_VERSION, ...scopeJson }) + '\n');
+    return emptyReindexResult(!!opts.dryRun, resultScope);
   }
 
   if (pending === 0) {
-    const scope = type ? ` type=${type}` : '';
-    process.stderr.write(`[reindex] All markdown pages${scope} already at chunker_version ${MARKDOWN_CHUNKER_VERSION}. Nothing to do.\n`);
-    return { pending: 0, pendingAfter: 0, reindexed: 0, skipped: 0, failed: 0, dryRun: !!opts.dryRun, chunkerVersion: MARKDOWN_CHUNKER_VERSION, type };
+    const label = reindexScopeLabel(selectionScope, opts.hotFirst === true);
+    process.stderr.write(`[reindex] All markdown pages${label ? ` ${label}` : ''} already at chunker_version ${MARKDOWN_CHUNKER_VERSION}. Nothing to do.\n`);
+    return emptyReindexResult(!!opts.dryRun, resultScope);
   }
 
   const target = typeof opts.limit === 'number' ? Math.min(opts.limit, pending) : pending;
 
   if (opts.dryRun) {
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ pending, pending_after: pending, would_reindex: target, dry_run: true, chunker_version: MARKDOWN_CHUNKER_VERSION, type }) + '\n');
+      process.stdout.write(JSON.stringify({ pending, pending_after: pending, would_reindex: target, dry_run: true, chunker_version: MARKDOWN_CHUNKER_VERSION, ...scopeJson }) + '\n');
     } else {
-      const scope = type ? ` (type=${type})` : '';
-      process.stderr.write(`[reindex] DRY-RUN: would re-chunk ${target} of ${pending} pending markdown pages${scope}.\n`);
+      const label = reindexScopeLabel(selectionScope, opts.hotFirst === true);
+      process.stderr.write(`[reindex] DRY-RUN: would re-chunk ${target} of ${pending} pending markdown pages${label ? ` (${label})` : ''}.\n`);
     }
-    return { pending, pendingAfter: pending, reindexed: 0, skipped: 0, failed: 0, dryRun: true, chunkerVersion: MARKDOWN_CHUNKER_VERSION, type };
+    return { ...emptyReindexResult(true, resultScope), pending, pendingAfter: pending };
   }
 
   const reporter = createProgress(cliOptsToProgressOptions(getCliOptions()));
@@ -361,17 +460,27 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
   let skipped = 0;
   let failed = 0;
   let afterId: number | null = null;
+  let hotCursor: ReindexHotCursor | null = null;
   const BATCH = 100;
   const repoPath = opts.repoPath ? resolve(opts.repoPath) : null;
 
   while (reindexed + skipped + failed < target) {
     const remaining = target - (reindexed + skipped + failed);
     const batchSize = Math.min(BATCH, remaining);
-    const batch = await readBatch(engine, batchSize, type, !!opts.noEmbed, afterId);
+    const batch = await readBatch(
+      engine,
+      batchSize,
+      selectionScope,
+      !!opts.noEmbed,
+      afterId,
+      opts.hotFirst === true,
+      hotCursor,
+    );
     if (batch.length === 0) break;
     // Advance before processing so a failed row cannot be selected again in
     // this invocation and starve later IDs.
     afterId = batch[batch.length - 1]!.id;
+    if (opts.hotFirst) hotCursor = toReindexHotCursor(batch[batch.length - 1]!);
 
     // v0.41.15.0 (T10, D9): per-batch sliding pool. Counters are JS-
     // single-thread atomic so reindexed++ / failed++ are race-free
@@ -456,7 +565,7 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
 
   reporter.finish();
 
-  const pendingAfter = await countPending(engine, type, !!opts.noEmbed);
+  const pendingAfter = await countPending(engine, selectionScope, !!opts.noEmbed);
   if (failed > 0) setCliExitVerdict(1);
 
   const result: ReindexResult = {
@@ -467,18 +576,22 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
     failed,
     dryRun: false,
     chunkerVersion: MARKDOWN_CHUNKER_VERSION,
-    type,
+    type: selectionScope.type,
+    sourceId: selectionScope.sourceId,
+    prefix: selectionScope.prefix,
+    retrievedSince: selectionScope.retrievedSince,
+    hotFirst: opts.hotFirst === true,
   };
 
   if (opts.json) {
     process.stdout.write(JSON.stringify({
       pending, pending_after: pendingAfter, reindexed, skipped, failed,
       chunker_version: MARKDOWN_CHUNKER_VERSION,
-      type,
+      ...scopeJson,
     }) + '\n');
   } else {
-    const scope = type ? ` type=${type}` : '';
-    process.stderr.write(`[reindex] Done.${scope} reindexed=${reindexed} skipped=${skipped} failed=${failed} pending_before=${pending} pending_after=${pendingAfter}\n`);
+    const label = reindexScopeLabel(selectionScope, opts.hotFirst === true);
+    process.stderr.write(`[reindex] Done.${label ? ` ${label}` : ''} reindexed=${reindexed} skipped=${skipped} failed=${failed} pending_before=${pending} pending_after=${pendingAfter}\n`);
   }
 
   return result;

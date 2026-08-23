@@ -93,6 +93,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   any otherwise extractable page. Discovery, backlog/doctor, drain, and
   autopilot must share this predicate. Do not broaden these high-volume types
   back to implicit eligibility without a measured, privacy-safe corpus canary.
+- **Value-ordered reindex:** markdown queue work must be bounded and scoped with
+  `--source` / `--type` / `--prefix` / `--retrieved-since`, then ordered with
+  `--hot-first`. Benchmark 100 representative pages with four workers before
+  any broader tranche; JSON output must echo the resolved scope.
 - **Private documents:** ordinary search excludes `docs/inbox/`; uploaded
   documents are read only through the caller-aware document ACL surface.
 
