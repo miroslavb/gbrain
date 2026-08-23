@@ -63,6 +63,15 @@ export interface AdvisorContext {
   now: Date;
   /** True when invoked over MCP (untrusted/no-workspace); false for local CLI. */
   remote: boolean;
+  /**
+   * Source-scope containment (post-cutover P0 review): when the caller is
+   * source-scoped, collectors must not name pages/entities outside the grant.
+   * `allowedSources` (operator-set federated-read union; [] = deny-all) wins
+   * over scalar `sourceId`; both undefined = local CLI brain-global view.
+   * Mirrors OperationContext.sourceId/allowedSources in ops/contract.ts.
+   */
+  sourceId?: string;
+  allowedSources?: string[];
 }
 
 export interface AdvisorCollector {

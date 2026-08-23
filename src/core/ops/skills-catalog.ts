@@ -147,6 +147,10 @@ const advisor: Operation = {
       skillsDir: null,
       now: new Date(),
       remote: ctx.remote !== false,
+      // Source-scope containment: thread the caller's grant so collectors
+      // never name pages/entities outside it (aggregate counts stay global).
+      ...(ctx.auth?.sourceId !== undefined ? { sourceId: ctx.auth.sourceId } : {}),
+      ...(ctx.auth?.allowedSources !== undefined ? { allowedSources: ctx.auth.allowedSources } : {}),
     });
     return report;
   },

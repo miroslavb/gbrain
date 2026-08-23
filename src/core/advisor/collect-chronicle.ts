@@ -3,8 +3,29 @@
 //   - unresolved ontology conflicts (genuine disagreement, not supersession)
 //   - recent meetings not yet swept into the timeline (coverage gap)
 // Advisory display only (no dispatch_id) — the user runs the shown command.
+//
+// Source-scope containment (#p0-review follow-up): over MCP the caller's
+// `sourceId` / `allowedSources` grant bounds which pages may be named in
+// findings. Coverage-gap COUNTS stay brain-global (aggregate, no slugs), but
+// any finding that names specific entity slugs or per-page detail is computed
+// from scoped rows only. Local CLI (ctx.sourceId === undefined) keeps the
+// brain-global view.
 import type { AdvisorCollector, AdvisorContext, AdvisorFinding } from './types.ts';
 import { CHRONICLE_RESCUE_SLUG_PREFIXES, isChronicleEligible } from '../chronicle/eligibility.ts';
+
+/** SQL source filter mirroring postgres-engine's canonical pattern. The
+ *  rescue-prefix array binds $1, so the scope param is $2. Empty arrays never
+ *  match (fail-closed). */
+function sourceScopeSql(ctx: AdvisorContext): { clause: string; params: unknown[] } {
+  if (ctx.allowedSources !== undefined) {
+    // Operator-set grant: [] = deny-all beyond nothing; non-empty = the union.
+    return { clause: ' AND p.source_id = ANY($2::text[])', params: [ctx.allowedSources] };
+  }
+  if (ctx.sourceId !== undefined) {
+    return { clause: ' AND p.source_id = $2::text', params: [ctx.sourceId] };
+  }
+  return { clause: '', params: [] };
+}
 
 export const collectChronicle: AdvisorCollector = {
   id: 'chronicle',
@@ -33,6 +54,8 @@ export const collectChronicle: AdvisorCollector = {
     // only the small metadata projection, then apply the exact shared JS
     // predicate so advisor, write backstop, and bulk backfill cannot drift.
     try {
+      const scope = sourceScopeSql(ctx);
+      const params: unknown[] = [Array.from(CHRONICLE_RESCUE_SLUG_PREFIXES), ...scope.params];
       const rows = await ctx.engine.executeRaw<{
         type: string;
         slug: string;
@@ -51,11 +74,12 @@ export const collectChronicle: AdvisorCollector = {
             )
             AND p.deleted_at IS NULL
             AND p.updated_at > now() - interval '30 days'
+            ${scope.clause}
             AND NOT EXISTS (
               SELECT 1 FROM timeline_entries te
               WHERE te.page_id = p.id AND te.event_page_id IS NOT NULL
             )`,
-        [Array.from(CHRONICLE_RESCUE_SLUG_PREFIXES)],
+        params,
       );
       const gap = rows.reduce((count, row) => {
         const frontmatter = row.frontmatter ?? {};
