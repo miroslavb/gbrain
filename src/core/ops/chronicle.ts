@@ -9,6 +9,7 @@
 
 import type { Operation } from './contract.ts';
 import { sourceScopeOpts } from './context.ts';
+import type { Page } from '../types.ts';
 
 // ── v0.42.x — Life Chronicle (#2390) timeline read ops ───────────────────
 // CLI names avoid the existing `timeline` (get_timeline, a page's own timeline):
@@ -231,19 +232,30 @@ const chronicle_backfill: Operation = {
   description:
     'Life Chronicle: sweep existing meeting/conversation/calendar pages into timeline events by ' +
     'enqueuing chronicle_extract jobs (one per eligible page). --dry-run counts without enqueuing. ' +
-    'Local-only bulk op. CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--limit N] [--dry-run]`.',
+    'Local-only bulk op. CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--limit N] ' +
+    '[--max-total N] [--dry-run]`.',
   scope: 'admin',
   mutating: true,
   localOnly: true,
   params: {
     since: { type: 'string', description: 'Only pages updated on/after this date (YYYY-MM-DD).' },
     limit: { type: 'number', description: 'Max pages per type to sweep (default 1000).' },
+    max_total: {
+      type: 'number',
+      description: 'Global max eligible pages to count/enqueue, newest first across all types.',
+    },
     dry_run: { type: 'boolean', description: 'Count eligible pages without enqueuing.' },
   },
   handler: async (ctx, p) => {
     const { isChronicleEligible, CHRONICLE_RESCUE_SLUG_PREFIXES } = await import('../chronicle/eligibility.ts');
     const TYPES = ['meeting', 'conversation', 'calendar-event'] as const;
     const limit = typeof p.limit === 'number' ? p.limit : 1000;
+    // Fail closed for non-finite/negative canary caps. `limit` remains the
+    // backwards-compatible per-scan discovery bound; max_total is the hard
+    // cross-type admission bound.
+    const maxTotal = typeof p.max_total === 'number'
+      ? (Number.isFinite(p.max_total) ? Math.max(0, Math.floor(p.max_total)) : 0)
+      : undefined;
     const updated_after = typeof p.since === 'string' ? p.since : undefined;
     const dryRun = p.dry_run === true;
     const scope = sourceScopeOpts(ctx);
@@ -260,35 +272,54 @@ const chronicle_backfill: Operation = {
       ...CHRONICLE_RESCUE_SLUG_PREFIXES.map((slugPrefix) => ({ slugPrefix })),
     ];
     const seen = new Set<string>();
+    const candidates: Page[] = [];
     for (const scan of scans) {
       const pages = await ctx.engine.listPages({ ...scan, updated_after, limit, ...scope });
       for (const page of pages) {
         const pageKey = `${page.source_id}\u0000${page.slug}`;
         if (seen.has(pageKey)) continue;
         seen.add(pageKey);
-        scanned++;
-        const frontmatter = page.frontmatter as Record<string, unknown> | undefined;
-        const dreamGenerated = frontmatter?.dream_generated === true;
-        const elig = isChronicleEligible({
-          type: page.type,
-          slug: page.slug,
-          body: page.compiled_truth,
-          dreamGenerated,
-          messageCount: frontmatter?.message_count,
-        });
-        if (!elig.ok) continue;
-        eligible++;
-        if (dryRun || !queue) continue;
-        try {
-          await queue.add('chronicle_extract', { slug: page.slug, sourceId: page.source_id });
-          enqueued++;
-        } catch (e) {
-          // Never swallow — surface per-page failures (the #2057 no-swallow pattern).
-          errors.push({ slug: page.slug, error: e instanceof Error ? e.message : String(e) });
-        }
+        candidates.push(page);
       }
     }
-    return { scanned, eligible, enqueued, dry_run: dryRun, errors };
+    // A bounded canary must be hot-first globally, not biased by the order of
+    // the per-type scans above. Stable source/slug ties keep selection
+    // reproducible when pages share an updated_at timestamp.
+    candidates.sort((a, b) =>
+      b.updated_at.getTime() - a.updated_at.getTime()
+      || a.source_id.localeCompare(b.source_id)
+      || a.slug.localeCompare(b.slug));
+    for (const page of candidates) {
+      if (maxTotal !== undefined && eligible >= maxTotal) break;
+      scanned++;
+      const frontmatter = page.frontmatter as Record<string, unknown> | undefined;
+      const dreamGenerated = frontmatter?.dream_generated === true;
+      const elig = isChronicleEligible({
+        type: page.type,
+        slug: page.slug,
+        body: page.compiled_truth,
+        dreamGenerated,
+        messageCount: frontmatter?.message_count,
+      });
+      if (!elig.ok) continue;
+      eligible++;
+      if (dryRun || !queue) continue;
+      try {
+        await queue.add('chronicle_extract', { slug: page.slug, sourceId: page.source_id });
+        enqueued++;
+      } catch (e) {
+        // Never swallow — surface per-page failures (the #2057 no-swallow pattern).
+        errors.push({ slug: page.slug, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return {
+      scanned,
+      eligible,
+      enqueued,
+      dry_run: dryRun,
+      limit_reached: maxTotal !== undefined && eligible >= maxTotal,
+      errors,
+    };
   },
   cliHints: { name: 'chronicle-backfill' },
 };

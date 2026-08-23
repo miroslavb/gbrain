@@ -120,4 +120,38 @@ describe('chronicle_backfill op', () => {
       'meetings/tiny',
     ]);
   });
+
+  test('max_total is a hot-first global cap across page types', async () => {
+    await engine.putPage('meetings/old', {
+      type: 'meeting', title: 'old meeting', compiled_truth: LONG,
+    });
+    await engine.putPage('conversations/new', {
+      type: 'conversation', title: 'new conversation', compiled_truth: LONG,
+      frontmatter: { message_count: 100 },
+    });
+    await engine.putPage('calendar/middle', {
+      type: 'calendar-event', title: 'middle calendar event', compiled_truth: LONG,
+    });
+    await engine.executeRaw(`UPDATE pages SET updated_at = '2026-01-01T00:00:00Z' WHERE slug = 'meetings/old'`);
+    await engine.executeRaw(`UPDATE pages SET updated_at = '2026-01-02T00:00:00Z' WHERE slug = 'calendar/middle'`);
+    await engine.executeRaw(`UPDATE pages SET updated_at = '2026-01-03T00:00:00Z' WHERE slug = 'conversations/new'`);
+
+    const preview = await operationsByName.chronicle_backfill.handler(mkCtx(), {
+      dry_run: true, limit: 1, max_total: 2,
+    }) as { scanned: number; eligible: number; enqueued: number; limit_reached: boolean };
+    expect(preview).toMatchObject({ scanned: 2, eligible: 2, enqueued: 0, limit_reached: true });
+
+    const applied = await operationsByName.chronicle_backfill.handler(mkCtx(), {
+      limit: 1, max_total: 2,
+    }) as { scanned: number; eligible: number; enqueued: number; limit_reached: boolean; errors: unknown[] };
+    expect(applied).toMatchObject({ scanned: 2, eligible: 2, enqueued: 2, limit_reached: true });
+    expect(applied.errors).toHaveLength(0);
+    const jobs = await engine.executeRaw<{ data: { slug: string } }>(
+      `SELECT data FROM minion_jobs WHERE name='chronicle_extract'`,
+    );
+    expect(jobs.map((j) => j.data.slug).sort()).toEqual([
+      'calendar/middle',
+      'conversations/new',
+    ]);
+  });
 });

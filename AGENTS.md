@@ -76,7 +76,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Chronicle yield gate:** explicit conversation `message_count < 100` is
   ineligible, including note-typed `conversations/` rescue pages. Meetings and
   calendar events are unaffected; missing metadata keeps legacy eligibility.
-  Backstop, backfill, and advisor must call the same predicate.
+  Backstop, backfill, and advisor must call the same predicate. Bounded
+  backfill canaries must set `--max-total`; it is a hard cross-type admission
+  cap and selects newest eligible pages globally after per-type discovery.
 - **Drain containment:** `cycle.propose_takes.enabled` is default-off; only an
   explicit true value or trusted one-shot `--once` runs it. Keep atom auto-drain
   and conversation-facts bulk drain disabled until bounded quality canaries pass.
