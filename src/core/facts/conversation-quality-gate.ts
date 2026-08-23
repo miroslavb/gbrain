@@ -198,8 +198,15 @@ function safeRouteValue(value: unknown): string | undefined {
 function parseSemanticPayload(payload: unknown): SemanticDecision[] | null {
   let value = payload;
   if (typeof value === 'string') {
+    // Models intermittently wrap strict-JSON replies in markdown code fences
+    // (```json ... ```) despite "no prose or code fences". Strip a leading /
+    // trailing fence before parsing; the schema check below stays strict.
+    const stripped = (payload as string).replace(
+      /^\uFEFF?\s*```(?:json|JSON)?\s*\n?/,
+      '',
+    ).replace(/\n?\s*```\s*$/, '').trim();
     try {
-      value = JSON.parse(value);
+      value = JSON.parse(stripped);
     } catch {
       return null;
     }
@@ -387,7 +394,12 @@ function qualityStopReasons(
   semanticFailures: number,
 ): string[] {
   const reasons: string[] = [];
-  const rejectedRatio = receipt.candidate_count > 0
+  // Ratio-based stops are meaningless on tiny batches: a single borderline
+  // candidate in a 1-2 candidate page yields ratio 1.0 and halts the sweep.
+  // Require a minimum sample before the ratio can trip; absolute stops
+  // (sensitive_count, semantic_failures) stay sample-size independent.
+  const MIN_RATIO_SAMPLE = 5;
+  const rejectedRatio = receipt.candidate_count >= MIN_RATIO_SAMPLE
     ? receipt.rejected_count / receipt.candidate_count
     : 0;
   if (rejectedRatio > config.stopMaxRejectedRatio) reasons.push('rejected_ratio');

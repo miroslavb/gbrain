@@ -197,6 +197,39 @@ describe('conversation fact semantic quality gate', () => {
     expect(invalidJson.receipt.reason_counts.semantic_invalid_json).toBe(1);
     expect(invalidJson.receipt.actual_model).toBe('provider:model-that-answered');
     expect(invalidJson.receipt.actual_route).toEqual(['primary:model', 'provider:model-that-answered']);
+
+    // Models intermittently wrap the strict JSON in markdown fences despite
+    // "no prose or code fences". The fence wrapper must be tolerated; the
+    // schema check stays strict.
+    const fencedJson = await runConversationFactQualityGate({
+      sourceText: 'source',
+      candidates: [candidate('Alice joined Acme.')],
+      existingFacts: [],
+      config: { ...DEFAULT_CONVERSATION_QUALITY_CONFIG, stopMaxRejectedRatio: 1 },
+      semanticValidator: async () => ({
+        payload: [
+          '```json',
+          JSON.stringify({
+            decisions: [validDecision('c0')].map(({ id, ...rest }) => ({
+              id,
+              action: rest.action,
+              fully_supported: true,
+              exactly_one_proposition: true,
+              self_contained: true,
+              correct_entity_attribution: true,
+              no_hidden_causation: true,
+              no_overgeneralization: true,
+              no_sensitive_content: true,
+            })),
+          }),
+          '```',
+        ].join('\n'),
+        actualModel: 'together:glm-5.2',
+        actualRoute: ['together:glm-5.2'],
+      }),
+    });
+    expect(fencedJson.accepted).toHaveLength(1);
+    expect(fencedJson.receipt.stop_triggered).toBe(false);
   });
 
   test('classifies exact, typed-value, and near duplicates plus metric supersession', async () => {

@@ -1635,7 +1635,17 @@ export async function runExtractConversationFactsCore(
           const qualityStop = poolResult.failures.find((failure) =>
             failure.error instanceof ConversationFactQualityStopError,
           );
-          if (qualityStop) throw qualityStop.error;
+          if (qualityStop) {
+            // Surface WHICH page tripped the gate before the pool aborts —
+            // otherwise operators only see an unlabeled "Failed N page(s)".
+            const stopMsg = qualityStop.error instanceof Error
+              ? qualityStop.error.message
+              : String(qualityStop.error);
+            process.stderr.write(
+              `[extract-conversation-facts] ${qualityStop.label} failed: ${stopMsg}\n`,
+            );
+            throw qualityStop.error;
+          }
           if (signal?.aborted) {
             if (signal.reason instanceof Error) throw signal.reason;
             throw Object.assign(new Error('caller cancelled'), {
