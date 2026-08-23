@@ -18,7 +18,7 @@ describe('mergedProviderEnv', () => {
     const env = mergedProviderEnv(cfg({
       openai_api_key: 'sk-o', anthropic_api_key: 'sk-a', voyage_api_key: 'pa-v',
       zeroentropy_api_key: 'ze', openrouter_api_key: 'or', dashscope_api_key: 'ds',
-      google_api_key: 'gg',
+      google_api_key: 'gg', together_api_key: 'tc-t',
       azure_openai_api_key: 'az-secret',
       azure_openai_endpoint: 'https://x.openai.azure.com',
       azure_openai_deployment: 'gpt-5',
@@ -29,6 +29,7 @@ describe('mergedProviderEnv', () => {
     expect(env.VOYAGE_API_KEY).toBe('pa-v');
     expect(env.ZEROENTROPY_API_KEY).toBe('ze');
     expect(env.OPENROUTER_API_KEY).toBe('or');
+    expect(env.TOGETHER_API_KEY).toBe('tc-t');
     expect(env.DASHSCOPE_API_KEY).toBe('ds');
     expect(env.GOOGLE_GENERATIVE_AI_API_KEY).toBe('gg');
     // #4031: the key was the only member of the Azure group left unfolded —
@@ -50,6 +51,18 @@ describe('mergedProviderEnv', () => {
       mergedProviderEnv(cfg({ azure_openai_api_key: 'az-config' }), { AZURE_OPENAI_API_KEY: '' })
         .AZURE_OPENAI_API_KEY,
     ).toBe('az-config');
+  });
+
+  test('process-env TOGETHER_API_KEY still wins over config; empty env drops (#1249)', () => {
+    expect(
+      mergedProviderEnv(cfg({ together_api_key: 'tc-config' }), { TOGETHER_API_KEY: 'tc-env' })
+        .TOGETHER_API_KEY,
+    ).toBe('tc-env');
+    // Launcher-injected '' must not clobber a valid config.json key.
+    expect(
+      mergedProviderEnv(cfg({ together_api_key: 'tc-config' }), { TOGETHER_API_KEY: '' })
+        .TOGETHER_API_KEY,
+    ).toBe('tc-config');
   });
 
   test('env wins over config ONLY for real values; empty strings dropped (#1249)', () => {

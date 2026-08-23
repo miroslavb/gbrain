@@ -37,6 +37,11 @@ export function mergedProviderEnv(
   if (cfg?.anthropic_api_key) fromConfig.ANTHROPIC_API_KEY = cfg.anthropic_api_key;
   if (cfg?.zeroentropy_api_key) fromConfig.ZEROENTROPY_API_KEY = cfg.zeroentropy_api_key;
   if (cfg?.openrouter_api_key) fromConfig.OPENROUTER_API_KEY = cfg.openrouter_api_key;
+  // Together AI (Ollama Cloud alias on this install): fold the file-plane key
+  // so keyless shells resolve together:* routes the same way they resolve
+  // openai/openrouter keys. The together recipe reads TOGETHER_API_KEY from
+  // env only — without this fold a config.json key was dead weight.
+  if (cfg?.together_api_key) fromConfig.TOGETHER_API_KEY = cfg.together_api_key;
   if (cfg?.voyage_api_key) fromConfig.VOYAGE_API_KEY = cfg.voyage_api_key;
   if (cfg?.dashscope_api_key) fromConfig.DASHSCOPE_API_KEY = cfg.dashscope_api_key;
   if (cfg?.google_api_key) fromConfig.GOOGLE_GENERATIVE_AI_API_KEY = cfg.google_api_key;

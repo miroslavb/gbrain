@@ -38,6 +38,7 @@ export const DB_MERGED_PROVIDER_KEY_FIELDS = [
   'anthropic_api_key',
   'zeroentropy_api_key',
   'openrouter_api_key',
+  'together_api_key',
   'voyage_api_key',
   'dashscope_api_key',
   'google_api_key',

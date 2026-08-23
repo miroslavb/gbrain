@@ -54,6 +54,16 @@ export interface GBrainConfig {
    */
   openrouter_api_key?: string;
   /**
+   * Together AI API key. File-plane slot folded into the gateway env as
+   * TOGETHER_API_KEY (the name the together recipe reads), same pattern as
+   * voyage_api_key/openrouter_api_key above. Before this slot existed,
+   * `together_api_key` in config.json was read by nothing: the recipe only
+   * consulted process-env, so keyless shells (CLI, MCP, cron) silently lost
+   * every together:* route to provider fallback while `config show` looked
+   * complete.
+   */
+  together_api_key?: string;
+  /**
    * Voyage AI API key (#2662). File-plane slot so `~/.gbrain/config.json`'s
    * `voyage_api_key` reaches the voyage recipe the same way
    * zeroentropy_api_key/openrouter_api_key do: file plane →
@@ -667,6 +677,7 @@ export function loadConfig(): GBrainConfig | null {
     ...(process.env.ANTHROPIC_API_KEY ? { anthropic_api_key: process.env.ANTHROPIC_API_KEY } : {}),
     ...(process.env.ZEROENTROPY_API_KEY ? { zeroentropy_api_key: process.env.ZEROENTROPY_API_KEY } : {}),
     ...(process.env.OPENROUTER_API_KEY ? { openrouter_api_key: process.env.OPENROUTER_API_KEY } : {}),
+    ...(process.env.TOGETHER_API_KEY ? { together_api_key: process.env.TOGETHER_API_KEY } : {}),
     ...(process.env.GBRAIN_EMBEDDING_MODEL ? { embedding_model: process.env.GBRAIN_EMBEDDING_MODEL } : {}),
     ...(process.env.GBRAIN_EMBEDDING_DIMENSIONS ? { embedding_dimensions: parseInt(process.env.GBRAIN_EMBEDDING_DIMENSIONS, 10) } : {}),
     ...(process.env.GBRAIN_EXPANSION_MODEL ? { expansion_model: process.env.GBRAIN_EXPANSION_MODEL } : {}),
@@ -1077,6 +1088,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'anthropic_api_key',
   'zeroentropy_api_key',
   'openrouter_api_key',
+  'together_api_key',
   'voyage_api_key',
   'dashscope_api_key',
   'google_api_key',
