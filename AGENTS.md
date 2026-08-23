@@ -73,6 +73,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,
   stable reason codes, and actual route/model only—never source or candidate text.
+  Atom budget accounting must load `pricing.overrides` for both the extractor
+  and semantic-validator routes; preserve typed `BudgetExhausted` stops instead
+  of folding them into semantic rejection counts.
+  Exact-quote atoms also fail closed on multilingual compound/list evidence
+  (including spaced slashes and parenthetical enumerations) and vague/deictic
+  fragments before the semantic batch.
 - **Chronicle yield gate:** explicit conversation `message_count < 100` is
   ineligible, including note-typed `conversations/` rescue pages. Meetings and
   calendar events are unaffected; missing metadata keeps legacy eligibility.

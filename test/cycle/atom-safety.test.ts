@@ -12,6 +12,7 @@ import {
 import { runPhaseExtractAtoms } from '../../src/core/cycle/extract-atoms.ts';
 import { resetPgliteState } from '../helpers/reset-pglite.ts';
 import type { ChatOpts, ChatResult } from '../../src/core/ai/gateway.ts';
+import { BudgetExhausted } from '../../src/core/budget/budget-tracker.ts';
 
 const PASS_SCORES = {
   source_support: 1,
@@ -158,6 +159,20 @@ describe('gateway semantic validator seam', () => {
       candidates: [{ title: 'A', body: 'A.', source_quote: 'A.' }],
     })).rejects.toMatchObject({ code: 'invalid_json' });
   });
+
+  test('preserves BudgetExhausted for the phase-level budget stop path', async () => {
+    const exhausted = new BudgetExhausted('validator is unpriced', {
+      reason: 'no_pricing', spent: 0, cap: 0.3, modelId: 'together:validator',
+    });
+    const validator = createGatewayAtomSemanticValidator({
+      model: 'together:validator',
+      chat: async () => { throw exhausted; },
+    });
+    await expect(validator({
+      sourceText: 'source',
+      candidates: [{ title: 'A', body: 'A.', source_quote: 'A.' }],
+    })).rejects.toBe(exhausted);
+  });
 });
 
 describe('extract_atoms pre-write safety and semantic gate', () => {
@@ -279,6 +294,40 @@ describe('extract_atoms pre-write safety and semantic gate', () => {
     expect(receipts[0].frontmatter.model_route).toBe('openai');
     expect(receipts[0].compiled_truth).not.toContain(quoteA);
     expect(receipts[0].compiled_truth).not.toContain(quoteB);
+  });
+
+  test('multilingual structural fence drops slash, parenthetical-list, and vague-fragment atoms', async () => {
+    const quotes = [
+      'sensitive_count / semantic_failures stops remain absolute.',
+      'Deep tiers (dream.synthesize, think) intentionally remain on flagships.',
+      'значения не логировать',
+    ];
+    let extractCall = 0;
+    let semanticCalls = 0;
+    const result = await runPhaseExtractAtoms(engine, {
+      _transcripts: quotes.map((quote, index) => ({
+        filePath: `/structural-${index}.md`,
+        content: substantiveSource(quote),
+        contentHash: `structural-fence-${index}`,
+      })),
+      _pages: [],
+      _chat: async () => {
+        const quote = quotes[extractCall++]!;
+        return chatResult(atomJson(`Candidate ${extractCall}`, quote));
+      },
+      _semanticValidator: async (input) => {
+        semanticCalls++;
+        return passAll(input);
+      },
+    });
+
+    expect(semanticCalls).toBe(0);
+    expect(result.details?.candidates).toBe(0);
+    expect(result.details?.accepted).toBe(0);
+    const atoms = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM pages WHERE type = 'atom'`,
+    );
+    expect(atoms[0].n).toBe(0);
   });
 
   test('validator invalid JSON fails closed for its batch without deleting atoms accepted earlier', async () => {

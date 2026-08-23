@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { isModelPriceable } from '../src/core/budget/budget-tracker.ts';
+import { resolveExtractAtomsBudgetPricingPolicy } from '../src/core/cycle/extract-atoms.ts';
 
 // Regression: extract_atoms applied its DEFAULT cost cap unconditionally.
 // BudgetTracker.reserve() hard-fails with BudgetExhausted(reason:'no_pricing')
@@ -31,5 +32,34 @@ describe('isModelPriceable', () => {
   test('is a pure predicate — no throw on unusual model ids', () => {
     expect(() => isModelPriceable('', 'chat')).not.toThrow();
     expect(() => isModelPriceable('provider-with-no-colon', 'chat')).not.toThrow();
+  });
+});
+
+describe('extract_atoms shared extractor/validator budget policy', () => {
+  test('operator pricing.overrides keeps the cap enforceable for the validator route', async () => {
+    const engine = {
+      getConfig: async (key: string) => key === 'pricing.overrides'
+        ? '{"together:glm-5.2":{"input":0.6,"output":2.2}}'
+        : null,
+    };
+    const policy = await resolveExtractAtomsBudgetPricingPolicy(
+      engine as never,
+      'openai:gpt-5.6-terra',
+      'together:glm-5.2',
+    );
+    expect(policy.enforceCostCap).toBe(true);
+    expect(policy.unpricedModels).toEqual([]);
+    expect(policy.pricingOverrides?.['together:glm-5.2']).toEqual({ input: 0.6, output: 2.2 });
+  });
+
+  test('an unpriced validator disables the default cap instead of failing mid-phase', async () => {
+    const engine = { getConfig: async () => null };
+    const policy = await resolveExtractAtomsBudgetPricingPolicy(
+      engine as never,
+      'openai:gpt-5.6-terra',
+      'together:unknown-validator',
+    );
+    expect(policy.enforceCostCap).toBe(false);
+    expect(policy.unpricedModels).toEqual(['together:unknown-validator']);
   });
 });

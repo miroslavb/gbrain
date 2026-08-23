@@ -57,7 +57,13 @@ import { chat as gatewayChat, withBudgetTracker, isAvailable } from '../ai/gatew
 import { createGlobalLlmHaltTracker, haltedClassOf, type GlobalLlmErrorClass } from '../ai/errors.ts';
 import { importFromContent } from '../import-file.ts';
 import { serializeMarkdown } from '../markdown.ts';
-import { BudgetExhausted, BudgetTracker, isModelPriceable } from '../budget/budget-tracker.ts';
+import {
+  BudgetExhausted,
+  BudgetTracker,
+  isModelPriceable,
+  loadPricingOverrides,
+  type PricingOverrides,
+} from '../budget/budget-tracker.ts';
 import { writeReceipt } from '../extract/receipt-writer.ts';
 import { upsertExtractRollup } from '../extract/rollup-writer.ts';
 import { createHash, randomUUID } from 'crypto';
@@ -225,6 +231,32 @@ export interface ExtractAtomsOpts {
   progress?: ProgressReporter;
 }
 
+export interface ExtractAtomsBudgetPricingPolicy {
+  pricingOverrides?: PricingOverrides;
+  unpricedModels: string[];
+  enforceCostCap: boolean;
+}
+
+/**
+ * Resolve one shared budget policy for BOTH LLM calls in the phase: extractor
+ * and semantic validator. Operator pricing.overrides must price either route
+ * before a cap is enforceable.
+ */
+export async function resolveExtractAtomsBudgetPricingPolicy(
+  engine: Pick<BrainEngine, 'getConfig'>,
+  extractModel: string,
+  validatorModel: string,
+): Promise<ExtractAtomsBudgetPricingPolicy> {
+  const pricingOverrides = await loadPricingOverrides(engine);
+  const unpricedModels = [...new Set([extractModel, validatorModel])]
+    .filter((model) => !isModelPriceable(model, 'chat', pricingOverrides));
+  return {
+    pricingOverrides,
+    unpricedModels,
+    enforceCostCap: unpricedModels.length === 0,
+  };
+}
+
 interface ExtractedAtom {
   title: string;
   atom_type: typeof ATOM_TYPES[number];
@@ -245,8 +277,10 @@ interface ExtractedAtom {
 /** kebab-case validator for concept labels ("captive-portal", "channel-pricing"). */
 const CONCEPT_LABEL_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_GROUNDED_BODY_CHARS = 280;
-const COMPOUND_CLAIM_JOIN_RE = /\b(?:and|but|while|whereas|therefore|so)\b/i;
+const COMPOUND_CLAIM_JOIN_RE = /(?:\b(?:and|but|while|whereas|therefore|so)\b|(?:^|[\s,])(?:и|но|а также|тогда как|поэтому)(?=$|[\s,]))/iu;
 const DEICTIC_START_RE = /^(?:this|that|it|they|these|those|such)\b/i;
+const RU_DEICTIC_OR_VAGUE_START_RE = /^(?:это|этот|эта|эти|он|она|оно|они|такой|такая|такие|значение|значения|параметр|параметры|данные)(?=$|[\s,:;.!?-])/iu;
+const INLINE_ENUMERATION_RE = /(?:\s\/\s|\([^)]*(?:,|\/|\b(?:including|included|incl\.?)\b|(?:включая|в\s+т\.?\s*ч\.?)(?=$|[\s,]))[^)]*\))/iu;
 
 function isSingleAtomicSentence(value: string, maxChars: number): boolean {
   const text = value.trim();
@@ -258,7 +292,10 @@ function isSingleAtomicSentence(value: string, maxChars: number): boolean {
 
 function isSelfContainedAtomicEvidence(value: string): boolean {
   const text = value.trim();
-  return !COMPOUND_CLAIM_JOIN_RE.test(text) && !DEICTIC_START_RE.test(text);
+  return !COMPOUND_CLAIM_JOIN_RE.test(text)
+    && !DEICTIC_START_RE.test(text)
+    && !RU_DEICTIC_OR_VAGUE_START_RE.test(text)
+    && !INLINE_ENUMERATION_RE.test(text);
 }
 
 const EXTRACT_PROMPT = `You extract atomic content nuggets from a transcript.
@@ -269,8 +306,9 @@ An atom is a single-source, self-contained idea containing exactly one independe
   - Be supported by source_quote, an exact contiguous substring of the source (required, ≤200 chars)
   - body MUST be exactly one sentence (≤200 chars) and body MUST equal source_quote exactly
   - source_quote must name its specific subject; never begin with This, That, It, They, These, Those, or Such
+  - source_quote must be a complete standalone sentence, not a fragment such as "values are not logged" or "the override was unrelated"
   - lesson MUST be omitted; it would create a second claim surface
-  - Never join independent claims with "and", "but", "while", a semicolon, or a list; split them into separate atoms
+  - Never join independent claims with "and", "but", "while", "и", "но", a slash, a semicolon, parentheses, or a list; split them into separate atoms
   - Do not infer causation, generalize beyond the source, or invent quantities
 
 If the source does not support at least one such atom, Return [] exactly.
@@ -710,22 +748,28 @@ export async function runPhaseExtractAtoms(
   } catch {
     // Keep safe defaults: Haiku + $0.30.
   }
-  // A cost cap is only meaningful for a model the tracker can price.
+  // A cost cap is only meaningful when BOTH calls the tracker covers can be
+  // priced. #4312 operator overrides are part of that decision and are also
+  // passed into the tracker for reserve/record calculations.
   // BudgetTracker.reserve() hard-fails with BudgetExhausted(reason:'no_pricing')
-  // when the model is absent from the pricing maps AND a cap is set; with no cap
-  // it warns once and proceeds. Because this phase always set a cap, every
-  // non-Anthropic model tripped that hard-fail on the first item, latched
-  // `budgetExhausted`, and skipped the entire workload while reporting ok.
-  const priceable = isModelPriceable(extractModel, 'chat');
-  if (!priceable) {
+  // when either model is absent from pricing AND a cap is set; with no cap it
+  // warns once and proceeds.
+  const budgetPricing = await resolveExtractAtomsBudgetPricingPolicy(
+    engine,
+    extractModel,
+    validatorModel,
+  );
+  if (!budgetPricing.enforceCostCap) {
     console.error(
-      `[extract_atoms] model "${extractModel}" is not in the pricing maps; ` +
+      `[extract_atoms] model(s) ${budgetPricing.unpricedModels.map((m) => `"${m}"`).join(', ')} ` +
+        `are not in the pricing maps; ` +
         `running without a cost gate (a cap cannot be enforced on an unpriced model).`,
     );
   }
   const budgetTracker = new BudgetTracker({
-    maxCostUsd: priceable ? budgetCap : undefined,
+    maxCostUsd: budgetPricing.enforceCostCap ? budgetCap : undefined,
     label: 'cycle.extract_atoms',
+    pricingOverrides: budgetPricing.pricingOverrides,
   });
   const semanticTimeoutMs = opts._semanticTimeoutMs ?? DEFAULT_ATOM_VALIDATOR_TIMEOUT_MS;
   const injectedChatPassThrough: AtomSemanticValidator | undefined = opts._chat && !opts._semanticValidator

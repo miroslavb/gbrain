@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import type { ChatOpts, ChatResult } from '../ai/gateway.ts';
+import { BudgetExhausted } from '../budget/budget-tracker.ts';
 
 export const ATOM_SAFETY_REASONS = [
   'ip_address',
@@ -270,8 +271,8 @@ export function parseAtomSemanticResponse(raw: string, candidateCount: number): 
 const SEMANTIC_VALIDATOR_SYSTEM = `You are a fail-closed atom quality gate.
 Score every candidate independently with binary 0 or 1 on all five dimensions:
 - source_support: the exact source supports the claim without inference.
-- exactly_one_claim: exactly one independently checkable claim is present.
-- self_contained: names and context are sufficient without surrounding text.
+- exactly_one_claim: exactly one independently checkable claim is present. Score 0 for slash-separated subjects, parenthetical/list enumerations, "including" clauses, or multiple named settings/models/tests even when they share one predicate.
+- self_contained: the BODY and source_quote themselves name the specific subject and are a complete standalone sentence without surrounding text. The title cannot repair an incomplete, deictic, vague, or context-dependent body; score 0 for fragments such as "values are not logged" or "the override was unrelated".
 - no_hidden_causation_or_overgeneralization: no unsupported cause, quantity, or generalization.
 - no_sensitive_content: title, body, and source_quote contain no private or sensitive content.
 Return exactly {"verdicts":[{"index":0,"scores":{"source_support":1,"exactly_one_claim":1,"self_contained":1,"no_hidden_causation_or_overgeneralization":1,"no_sensitive_content":1}}]}.
@@ -307,6 +308,11 @@ export function createGatewayAtomSemanticValidator(
         abortSignal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
+      // The caller's shared BudgetTracker owns phase-level budget policy.
+      // Preserve its typed stop signal so extract_atoms marks the budget
+      // exhausted and skips the remainder instead of misclassifying every
+      // candidate as a semantic-validator failure.
+      if (error instanceof BudgetExhausted) throw error;
       if (error instanceof AtomSemanticValidationError) throw error;
       const name = error instanceof Error ? error.name : '';
       throw new AtomSemanticValidationError(name === 'TimeoutError' || name === 'AbortError'

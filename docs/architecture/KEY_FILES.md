@@ -8,6 +8,7 @@ lives in `CHANGELOG.md` + `git log` / `git blame`, NOT here. Do not append
 per-release `**vX.Y.Z:**` narration — CI enforces this
 (`scripts/check-key-files-current-state.sh`).
 
+- `src/core/cycle/atom-safety.ts` + `src/core/cycle/extract-atoms.ts` — pre-write atom safety and shared phase budget policy. The extractor and semantic-validator routes are priced together, including operator `pricing.overrides`; a cap is enforced only when both routes are priceable. `BudgetExhausted` remains a typed phase stop instead of being rewritten as a semantic rejection. Before the semantic batch, exact-quote atoms fail closed on multilingual compound joins, spaced slashes, parenthetical/list enumerations, and vague/deictic fragments; the semantic rubric treats the body itself (not a reparative title) as the standalone claim surface. Pinned by `test/cycle/atom-safety.test.ts` and `test/extract-atoms-unpriced-model.test.ts`.
 - `docs/operations/conversation-parser-llm-fallback.md` — operator and maintainer contract for the default-off LLM parse fallback: exact config key, deterministic-first dispatch boundary, sampled data surface, untrusted-content prompt handling, page-date/cache-key coupling, timestamp validation, cache/checkpoint behavior, observability, limitations, and focused test commands.
 
 
