@@ -22,7 +22,7 @@ let engine: PGLiteEngine;
 let repo: string;
 
 const SLUG = 'companies/drain-example';
-const CLAIM = 'Drain-example doubles revenue within 12 months';
+const CLAIM = 'drain-example doubles revenue within 12 months';
 
 function ctx(): OperationContext {
   return {
@@ -55,7 +55,7 @@ beforeAll(async () => {
   await engine.setConfig('sync.repo_path', repo);
   await engine.setConfig('cycle.propose_takes.enabled', 'true');
   await engine.putPage(SLUG, {
-    type: 'company',
+    type: 'concept',
     title: 'Drain Example',
     compiled_truth: 'I bet drain-example doubles revenue within 12 months. They ship fast.',
   });
@@ -123,7 +123,11 @@ describe('propose_takes → takes propose drain (#4102)', () => {
       expect((gated.details as Record<string, unknown>).reason).toBe('disabled');
       expect(calls).toBe(0);
 
-      const once = await runPhaseProposeTakes(ctx(), { extractor, once: true });
+      const once = await runPhaseProposeTakes(ctx(), {
+        extractor,
+        once: true,
+        promptVersion: 'test-once-bypass',
+      });
       expect(once.status).not.toBe('skipped');
       expect(calls).toBeGreaterThan(0);
     } finally {

@@ -23,6 +23,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import {
   listPendingProposals,
@@ -46,21 +47,46 @@ async function insertProposal(opts: {
   weight?: number;
   status?: string;
 }): Promise<number> {
+  const sourceId = opts.sourceId ?? 'default';
+  const pageBody = `about ${opts.slug}\n${opts.claim}`;
+  await engine.putPage(
+    opts.slug,
+    { type: 'company', title: opts.slug, compiled_truth: pageBody },
+    { sourceId },
+  );
+  if (sourceId === 'default') {
+    mkdirSync(join(repo, 'companies'), { recursive: true });
+    writeFileSync(join(repo, `${opts.slug}.md`), `# ${opts.slug}\n\n${pageBody}\n`, 'utf-8');
+  }
+  const evidenceSpan = opts.claim;
+  const sourceHash = createHash('sha256').update(pageBody).digest('hex');
+  const proposalRunId = `run-test-${createHash('sha256').update(`${sourceId}|${opts.slug}|${opts.claim}`).digest('hex').slice(0, 12)}`;
   const rows = await engine.executeRaw<{ id: number }>(
     `INSERT INTO take_proposals
-       (source_id, page_slug, content_hash, prompt_version, proposal_run_id,
-        claim_text, kind, holder, weight, domain, model_id, status)
-     VALUES ($1, $2, md5($6), 'test-v1', 'run-test', $6, $3, $4, $5, NULL, 'test-model', $7)
+       (source_id, page_slug, content_hash, source_hash, prompt_version, proposal_run_id,
+        claim_text, kind, holder, weight, domain, model_id, status, evidence_span)
+     VALUES ($1, $2, $6, $6, 'test-v2-grounded', $7, $8, $3, $4, $5, NULL, 'test-model', $9, $10)
      RETURNING id`,
     [
-      opts.sourceId ?? 'default',
+      sourceId,
       opts.slug,
       opts.kind ?? 'bet',
       opts.holder ?? 'world',
       opts.weight ?? 0.7,
+      sourceHash,
+      proposalRunId,
       opts.claim,
       opts.status ?? 'pending',
+      evidenceSpan,
     ],
+  );
+  await engine.executeRaw(
+    `INSERT INTO proposal_page_runs
+       (source_id,page_slug,source_hash,prompt_version,proposal_run_id,model_id,
+        status,proposal_count,evidence_span_count)
+     VALUES ($1,$2,$3,'test-v2-grounded',$4,'test-model','completed',1,1)
+     ON CONFLICT DO NOTHING`,
+    [sourceId, opts.slug, sourceHash, proposalRunId],
   );
   return rows[0].id;
 }
@@ -109,7 +135,7 @@ describe('listPendingProposals', () => {
   test('lists pending rows only, excluding acted rows and other sources', async () => {
     const pendingId = await insertProposal({ slug: 'companies/acme-example', claim: 'list: pending claim' });
     const rejectedId = await insertProposal({
-      slug: 'companies/acme-example', claim: 'list: already rejected', status: 'rejected',
+      slug: 'companies/widget-co', claim: 'list: already rejected', status: 'rejected',
     });
     const otherSourceId = await insertProposal({
       slug: 'companies/acme-example', claim: 'list: other-source claim', sourceId: 'other',
@@ -192,8 +218,8 @@ describe('acceptProposal', () => {
 
 describe('rejectProposal', () => {
   test('stamps rejected + acted_by without touching the fence', async () => {
-    const before = readFileSync(join(repo, 'companies/widget-co.md'), 'utf-8');
     const id = await insertProposal({ slug: 'companies/widget-co', claim: 'reject: never promoted' });
+    const before = readFileSync(join(repo, 'companies/widget-co.md'), 'utf-8');
     const proposal = await rejectProposal({ engine, sourceId: 'default', actedBy: 'people/tester' }, id);
     expect(proposal.claim_text).toBe('reject: never promoted');
     const row = await proposalRow(id);
@@ -201,8 +227,7 @@ describe('rejectProposal', () => {
     expect(row.acted_by).toBe('people/tester');
     // No markdown write happened (reject is DB-only).
     const after = readFileSync(join(repo, 'companies/widget-co.md'), 'utf-8');
-    expect(after.includes('reject: never promoted')).toBe(false);
-    expect(after.length >= before.length).toBe(true);
+    expect(after).toBe(before);
   });
 
   test('rejecting an acted row refuses with not_pending', async () => {

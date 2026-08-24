@@ -69,7 +69,7 @@ function chatResult(text: string, stopReason: ChatResult['stopReason']): ChatRes
   } as ChatResult;
 }
 
-const GOOD_JSON = '[{"claim_text":"Acme doubles ARR by Q4","kind":"bet","holder":"brain","weight":0.7}]';
+const GOOD_JSON = '[{"claim_text":"Acme doubles ARR by Q4","kind":"bet","holder":"brain","weight":0.7,"evidence_span":"I bet Acme doubles ARR by Q4."}]';
 
 // ─── defaultExtractor truncation retry ──────────────────────────────
 
@@ -90,6 +90,7 @@ describe('defaultExtractor truncation retry (#3763)', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]!.maxTokens).toBe(PROPOSE_TAKES_MAX_TOKENS);
     expect(takes).toHaveLength(1);
+    expect(takes.modelId).toBe('anthropic:claude-sonnet-4-6');
   });
 
   test("stopReason 'length' retries ONCE at 4096 and recovers the takes", async () => {
@@ -126,6 +127,17 @@ describe('defaultExtractor truncation retry (#3763)', () => {
       expect(msg).not.toContain('transient — retry');
     }
     expect(calls).toBe(2); // bounded at one retry
+  });
+
+  test('clean non-empty output whose rows all violate the strict contract is quality-rejected, not memoized empty', async () => {
+    __setChatTransportForTests(async () => chatResult(
+      '[{"claim_text":"Acme was founded in 2020","kind":"fact","evidence_span":"I bet Acme doubles ARR by Q4."}]',
+      'end',
+    ));
+    const takes = await defaultExtractor(input);
+    expect(takes).toHaveLength(0);
+    expect(takes.qualityRejected).toBe(true);
+    expect(takes.modelId).toBe('anthropic:claude-sonnet-4-6');
   });
 });
 
@@ -204,7 +216,7 @@ describe('extractor failure-streak halt (#3763)', () => {
     const extractor: ProposeTakesExtractor = async ({ pageBody }) => {
       calls++;
       if (calls === 1) {
-        return [{ claim_text: 'one good claim', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
+        return [{ claim_text: 'bold claim', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
       }
       throw new Error('per-page failure');
     };

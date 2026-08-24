@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
-import { runPhaseProposeTakes, contentHash, type ProposeTakesExtractor } from '../src/core/cycle/propose-takes.ts';
+import {
+  runPhaseProposeTakes,
+  contentHash,
+  PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
+  type ProposeTakesExtraction,
+  type ProposeTakesExtractor,
+} from '../src/core/cycle/propose-takes.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import type { OperationContext } from '../src/core/operations.ts';
 
@@ -22,13 +28,13 @@ beforeEach(async () => {
   await engine.setConfig('cycle.propose_takes.enabled', 'true');
 });
 
-const ctx = (): OperationContext => ({
+const ctx = (dryRun = false): OperationContext => ({
   engine, config: {} as never, logger: { info() {}, warn() {}, error() {} } as never,
-  dryRun: false, remote: false, sourceId: 'default',
+  dryRun, remote: false, sourceId: 'default',
 });
 
-async function putPage(slug: string, body: string): Promise<void> {
-  await engine.putPage(slug, { type: 'analysis', title: slug, compiled_truth: body, frontmatter: {} });
+async function putPage(slug: string, body: string, type = 'concept'): Promise<void> {
+  await engine.putPage(slug, { type: type as never, title: slug, compiled_truth: body, frontmatter: {} });
 }
 
 describe('grounded take proposal publication', () => {
@@ -36,7 +42,7 @@ describe('grounded take proposal publication', () => {
     const body = 'I bet the launch reaches 100 customers by September.';
     await putPage('analysis/launch', body);
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'Launch reaches 100 customers by September', kind: 'bet', holder: 'brain', weight: 0.7, evidence_span: body },
+      { claim_text: 'launch reaches 100 customers by September', kind: 'bet', holder: 'brain', weight: 0.7, evidence_span: body },
       { claim_text: 'Launch reaches 1,000 customers tomorrow', kind: 'bet', holder: 'brain', weight: 0.9, evidence_span: 'This sentence is not in the page.' },
     ];
 
@@ -73,8 +79,8 @@ describe('grounded take proposal publication', () => {
     const body = 'I think claim one and claim two will both hold.';
     await putPage('analysis/atomic', body);
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'Claim one holds', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: body },
-      { claim_text: 'Claim two holds', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: body },
+      { claim_text: 'claim one', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: body },
+      { claim_text: 'claim two', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: body },
     ];
     const original = engine.transaction.bind(engine);
     (engine as unknown as { transaction: BrainEngine['transaction'] }).transaction = async (fn) =>
@@ -115,5 +121,66 @@ describe('grounded take proposal publication', () => {
     const result = await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 2 });
     expect(result.details).toMatchObject({ pages_scanned: 2, page_receipts_empty: 2 });
     expect(await engine.executeRaw(`SELECT id FROM proposal_page_runs`)).toHaveLength(2);
+  });
+
+  test('SQL allowlist runs before LIMIT so a newer conversation cannot starve durable prose', async () => {
+    await putPage('concepts/eligible', 'I predict durable markets will consolidate.');
+    await putPage('conversations/newer', 'I predict this session note will be skipped.', 'conversation');
+    let seen = '';
+    const extractor: ProposeTakesExtractor = async ({ pagePath, pageBody }) => {
+      seen = pagePath;
+      return [{ claim_text: 'durable markets will consolidate', kind: 'bet', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
+    };
+
+    await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    expect(seen).toBe('concepts/eligible');
+    expect(PROPOSE_TAKES_ALLOWED_PAGE_TYPES).not.toContain('conversation' as never);
+  });
+
+  test('dry-run performs extraction but writes no proposals, receipts, or rollup', async () => {
+    const body = 'I predict dry-run markets will consolidate.';
+    await putPage('concepts/dry-run', body);
+    const extractor: ProposeTakesExtractor = async () => [
+      { claim_text: 'dry-run markets will consolidate', kind: 'bet', holder: 'brain', weight: 0.6, evidence_span: body },
+    ];
+
+    const result = await runPhaseProposeTakes(ctx(true), { extractor, pageLimit: 1 });
+    expect(result.details).toMatchObject({ pages_scanned: 1, proposals_inserted: 0 });
+    expect(await engine.executeRaw(`SELECT id FROM take_proposals`)).toHaveLength(0);
+    expect(await engine.executeRaw(`SELECT id FROM proposal_page_runs`)).toHaveLength(0);
+    expect(await engine.executeRaw(`SELECT kind FROM extract_rollup_7d WHERE kind='takes.proposed'`)).toHaveLength(0);
+  });
+
+  test('stores the provider/model that actually answered, not the requested route', async () => {
+    const body = 'I predict fallback markets will consolidate.';
+    await putPage('concepts/model-provenance', body);
+    const extraction = [{
+      claim_text: 'fallback markets will consolidate', kind: 'bet' as const,
+      holder: 'brain', weight: 0.6, evidence_span: body,
+    }] as ProposeTakesExtraction;
+    Object.defineProperty(extraction, 'modelId', { value: 'together:deepseek-v4-flash:0731' });
+
+    await runPhaseProposeTakes(ctx(), {
+      extractor: async () => extraction,
+      model: 'claude-cli:claude-sonnet-5',
+      pageLimit: 1,
+    });
+    expect(await engine.executeRaw<{ model_id: string }>(`SELECT model_id FROM take_proposals`))
+      .toEqual([{ model_id: 'together:deepseek-v4-flash:0731' }]);
+    expect(await engine.executeRaw<{ model_id: string }>(`SELECT model_id FROM proposal_page_runs`))
+      .toEqual([{ model_id: 'together:deepseek-v4-flash:0731' }]);
+  });
+
+  test('strict-parser rejection writes a retryable quality receipt, never an empty cache marker', async () => {
+    await putPage('concepts/invalid-contract', 'Acme was founded in 2020.');
+    const extraction = [] as ProposeTakesExtraction;
+    Object.defineProperty(extraction, 'qualityRejected', { value: true });
+    Object.defineProperty(extraction, 'modelId', { value: 'test:strict-parser' });
+
+    const result = await runPhaseProposeTakes(ctx(), { extractor: async () => extraction, pageLimit: 1 });
+    expect(result.details).toMatchObject({ page_receipts_quality_rejected: 1, page_receipts_empty: 0 });
+    expect(await engine.executeRaw<{ status: string; error_code: string }>(
+      `SELECT status, error_code FROM proposal_page_runs`,
+    )).toEqual([{ status: 'quality_rejected', error_code: 'invalid_claim_contract' }]);
   });
 });

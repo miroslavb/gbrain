@@ -100,7 +100,15 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   their per-page terminal receipt publish in one transaction. Migration 142
   must also converge the briefly shipped v127 `outcome`/four-column-PK layout;
   its sequential handler makes each ALTER visible before dependent SQL because
-  `CREATE TABLE IF NOT EXISTS` alone is not a schema migration.
+  `CREATE TABLE IF NOT EXISTS` alone is not a schema migration. Producer
+  selection is restricted in SQL (before `LIMIT`) to durable concept/atom/lore/
+  briefing/writing/originals pages; conversations, sessions, projects, companies,
+  and operational pages are out of scope. The production parser accepts only
+  prediction/judgment/bet outputs whose claim text is itself an exact contiguous
+  substring of the evidence span, and records the
+  provider/model that actually answered after fallback. Empty outcomes live only
+  in `proposal_page_runs`, dry-run writes nothing, and pending-list reads hide
+  proposals whose source snapshot or evidence is no longer current.
 - **Extraction quality gates:** conversation facts and atoms must pass the
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,

@@ -24,7 +24,7 @@ import {
   extractExistingTakesForDedup,
   isWellFormedEmptyExtraction,
   PROPOSE_TAKES_PROMPT_VERSION,
-  EMPTY_EXTRACTION_TOMBSTONE_TEXT,
+  PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
   resolveProposeTakesDeadlineMs,
   PROPOSE_TAKES_FALLBACK_DEADLINE_MS,
   MIN_PROPOSE_TAKES_BUDGET_MS,
@@ -212,6 +212,23 @@ describe('parseExtractorOutput', () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.claim_text).toBe('Z');
   });
+
+  test('production grounding rejects facts, unknown kinds, long claims, and non-verbatim evidence', () => {
+    const pageBody = 'I predict widget markets will consolidate. I bet pricing falls next year.';
+    const out = parseExtractorOutput(JSON.stringify([
+      { claim_text: 'widget markets will consolidate', kind: 'prediction', evidence_span: 'I predict widget markets will consolidate.' },
+      { claim_text: 'pricing falls next year', kind: 'bet', evidence_span: 'I bet pricing falls next year.' },
+      { claim_text: 'Pure fact', kind: 'fact', evidence_span: 'I bet pricing falls next year.' },
+      { claim_text: 'Unknown', kind: 'take', evidence_span: 'I bet pricing falls next year.' },
+      { claim_text: 'x'.repeat(201), kind: 'judgment', evidence_span: 'I bet pricing falls next year.' },
+      { claim_text: 'Fabricated', kind: 'judgment', evidence_span: 'This quote is not present.' },
+    ]), pageBody);
+
+    expect(out.map((row) => [row.claim_text, row.kind])).toEqual([
+      ['widget markets will consolidate', 'take'],
+      ['pricing falls next year', 'bet'],
+    ]);
+  });
 });
 
 // ─── isWellFormedEmptyExtraction ────────────────────────────────────
@@ -347,7 +364,7 @@ describe('runPhaseProposeTakes — phase integration', () => {
     const pages = [buildPage({ slug: 'wiki/concepts/network-effects', body: 'Marketplaces with cold-start liquidity always win.' })];
     const { engine, captured } = buildMockEngine({ pages });
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'Marketplaces with cold-start liquidity win', kind: 'bet', holder: 'brain', weight: 0.7, domain: 'market', evidence_span: 'Marketplaces with cold-start liquidity always win.' },
+      { claim_text: 'Marketplaces with cold-start liquidity always win', kind: 'bet', holder: 'brain', weight: 0.7, domain: 'market', evidence_span: 'Marketplaces with cold-start liquidity always win.' },
     ];
     const result = await runPhaseProposeTakes(buildCtx(engine), { extractor });
 
@@ -360,17 +377,17 @@ describe('runPhaseProposeTakes — phase integration', () => {
 
     const inserts = captured.filter(c => c.sql.includes('INSERT INTO take_proposals'));
     expect(inserts).toHaveLength(1);
-    expect(inserts[0]!.params[5]).toBe('Marketplaces with cold-start liquidity win'); // claim_text
+    expect(inserts[0]!.params[5]).toBe('Marketplaces with cold-start liquidity always win'); // claim_text
     expect(inserts[0]!.params[6]).toBe('bet'); // kind
     expect(inserts[0]!.params[9]).toBe('market'); // domain
   });
 
   test('#2138: multi-claim page inserts every claim with a per-claim conflict target', async () => {
-    const pages = [buildPage({ slug: 'wiki/essays/thesis', body: 'Two strong claims live here.' })];
+    const pages = [buildPage({ slug: 'wiki/essays/thesis', body: 'Claim one and Claim two live here.' })];
     const { engine, captured } = buildMockEngine({ pages });
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: 'Two strong claims live here.' },
-      { claim_text: 'Claim two', kind: 'bet', holder: 'brain', weight: 0.8, evidence_span: 'Two strong claims live here.' },
+      { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: 'Claim one and Claim two live here.' },
+      { claim_text: 'Claim two', kind: 'bet', holder: 'brain', weight: 0.8, evidence_span: 'Claim one and Claim two live here.' },
     ];
     const result = await runPhaseProposeTakes(buildCtx(engine), { extractor });
 
@@ -436,7 +453,7 @@ New prose appended here.`;
     const extractor: ProposeTakesExtractor = async () => {
       callCount++;
       if (callCount === 1) throw new Error('LLM timeout');
-      return [{ claim_text: 'second page claim', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'page B prose' }];
+      return [{ claim_text: 'page B prose', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'page B prose' }];
     };
     const result = await runPhaseProposeTakes(buildCtx(engine), { extractor });
 
@@ -497,7 +514,7 @@ New prose appended here.`;
     const extractor: ProposeTakesExtractor = async ({ pageBody }) => {
       extractorCalls++;
       await new Promise((r) => setTimeout(r, 10));
-      return [{ claim_text: 'x', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: pageBody }];
+      return [{ claim_text: pageBody, kind: 'take', holder: 'brain', weight: 0.5, evidence_span: pageBody }];
     };
     // 5ms deadline: page 1 processes (elapsed 0 at check), the 10ms extractor
     // call pushes elapsed past the cap, page 2 is never scanned.
@@ -537,7 +554,7 @@ New prose appended here.`;
     ];
     const { engine, captured } = buildMockEngine({ pages });
     const extractor: ProposeTakesExtractor = async ({ pageBody }) => [
-      { claim_text: 'x', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: pageBody },
+      { claim_text: pageBody, kind: 'take', holder: 'brain', weight: 0.5, evidence_span: pageBody },
     ];
     await runPhaseProposeTakes(buildCtx(engine), { extractor });
     const inserts = captured.filter(c => c.sql.includes('INSERT INTO take_proposals'));
@@ -648,7 +665,8 @@ New prose appended here.`;
     expect(pageSelect!.sql).toContain('SELECT slug, source_id, compiled_truth');
     expect(pageSelect!.sql).not.toContain('*');
     // Scalar sourceId scope from ctx binds as a plain equality param.
-    expect(pageSelect!.params[0]).toBe('default');
+    expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
+    expect(pageSelect!.params[1]).toBe('default');
   });
 
   test('narrow projection: federated sourceIds beat scalar sourceId', async () => {
@@ -663,7 +681,8 @@ New prose appended here.`;
     const pageSelect = captured.find(c => c.sql.includes('FROM pages'));
     expect(pageSelect).toBeDefined();
     expect(pageSelect!.sql).toContain('source_id = ANY(');
-    expect(pageSelect!.params[0]).toEqual(['team-a', 'team-b']);
+    expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
+    expect(pageSelect!.params[1]).toEqual(['team-a', 'team-b']);
   });
 });
 
@@ -673,7 +692,7 @@ New prose appended here.`;
 // prose. Regression guard for the "empty result never memoized" bug.
 
 describe('runPhaseProposeTakes — empty extraction memoization', () => {
-  test('zero-claim page writes a tombstone row (proposals_inserted stays 0)', async () => {
+  test('zero-claim page writes only an empty receipt (proposals_inserted stays 0)', async () => {
     const pages = [buildPage({ slug: 'test/embed-probe', body: '# probe\njust a test, nothing to grade.' })];
     const { engine, captured } = buildMockEngine({ pages });
     const extractor: ProposeTakesExtractor = async () => [];
@@ -682,13 +701,12 @@ describe('runPhaseProposeTakes — empty extraction memoization', () => {
     const details = result.details as Record<string, unknown>;
     expect(details.cache_misses).toBe(1);
     expect(details.proposals_inserted).toBe(0);
-    expect(details.tombstones_written).toBe(1);
+    expect(details.tombstones_written).toBe(0);
+    expect(details.empty_runs_written).toBe(1);
 
     const inserts = captured.filter(c => c.sql.includes('INSERT INTO take_proposals'));
-    expect(inserts).toHaveLength(1);
-    // Tombstone carries the sentinel claim_text and an out-of-queue status.
-    expect(inserts[0]!.params[5]).toBe(EMPTY_EXTRACTION_TOMBSTONE_TEXT); // claim_text
-    expect(inserts[0]!.sql).toContain("'rejected'");
+    expect(inserts).toHaveLength(0);
+    expect(captured.filter(c => c.sql.includes('INSERT INTO proposal_page_runs'))).toHaveLength(1);
   });
 
   test('unchanged zero-claim page is a cache hit next cycle (no repeat LLM call)', async () => {
@@ -700,11 +718,12 @@ describe('runPhaseProposeTakes — empty extraction memoization', () => {
       return [];
     };
 
-    // Cycle 1: cache miss → LLM call → tombstone written.
+    // Cycle 1: cache miss → LLM call → empty terminal receipt written.
     const r1 = await runPhaseProposeTakes(buildCtx(engine), { extractor });
     expect(extractorCalls).toBe(1);
     expect((r1.details as Record<string, unknown>).cache_misses).toBe(1);
-    expect((r1.details as Record<string, unknown>).tombstones_written).toBe(1);
+    expect((r1.details as Record<string, unknown>).tombstones_written).toBe(0);
+    expect((r1.details as Record<string, unknown>).empty_runs_written).toBe(1);
 
     // Cycle 2: same unchanged page → cache hit → extractor NOT called again.
     const r2 = await runPhaseProposeTakes(buildCtx(engine), { extractor });
@@ -947,7 +966,7 @@ describe('runPhaseProposeTakes — global-error halt (#3044)', () => {
     const extractor: ProposeTakesExtractor = async () => {
       extractorCalls++;
       if (extractorCalls === 1) {
-        return [{ claim_text: 'first page worked', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'page a prose' }];
+        return [{ claim_text: 'page a prose', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'page a prose' }];
       }
       throw Object.assign(new Error('invalid x-api-key'), { status: 401 });
     };

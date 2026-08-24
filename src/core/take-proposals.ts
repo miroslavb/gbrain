@@ -92,17 +92,41 @@ export async function listPendingProposals(
   const params: unknown[] = [];
   if (opts.sourceId) {
     params.push(opts.sourceId);
-    where.push(`source_id = $${params.length}`);
+    where.push(`tp.source_id = $${params.length}`);
   }
-  params.push(limit);
-  return engine.executeRaw<TakeProposalRow>(
-    `SELECT ${PROPOSAL_COLUMNS.split(', ').map((column) => `tp.${column}`).join(', ')}
-       FROM take_proposals tp
-      WHERE ${where.join(' AND ')}
-      ORDER BY tp.proposed_at DESC, tp.id DESC
-      LIMIT $${params.length}`,
-    params,
-  );
+  type CandidateRow = TakeProposalRow & { current_compiled_truth: string };
+  const visible: TakeProposalRow[] = [];
+  const batchSize = 500;
+  let offset = 0;
+  while (visible.length < limit) {
+    const batchParams = [...params, batchSize, offset];
+    const candidates = await engine.executeRaw<CandidateRow>(
+      `SELECT ${PROPOSAL_COLUMNS.split(', ').map((column) => `tp.${column}`).join(', ')},
+              p.compiled_truth AS current_compiled_truth
+         FROM take_proposals tp
+         JOIN pages p
+           ON p.source_id = tp.source_id AND p.slug = tp.page_slug
+          AND p.deleted_at IS NULL AND p.compiled_truth IS NOT NULL
+        WHERE ${where.join(' AND ')}
+        ORDER BY tp.proposed_at DESC, tp.id DESC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      batchParams,
+    );
+    for (const candidate of candidates) {
+      if (
+        createHash('sha256').update(candidate.current_compiled_truth).digest('hex') !== candidate.source_hash ||
+        !candidate.current_compiled_truth.includes(candidate.evidence_span!) ||
+        !candidate.evidence_span!.includes(candidate.claim_text)
+      ) continue;
+      const proposal = { ...candidate };
+      delete (proposal as Partial<CandidateRow>).current_compiled_truth;
+      visible.push(proposal);
+      if (visible.length === limit) break;
+    }
+    offset += candidates.length;
+    if (candidates.length < batchSize) break;
+  }
+  return visible;
 }
 
 async function loadProposal(
@@ -165,7 +189,11 @@ async function assertProposalSnapshotCurrent(
   const currentHash = typeof body === 'string'
     ? createHash('sha256').update(body).digest('hex')
     : null;
-  if (currentHash !== proposal.source_hash || !body?.includes(proposal.evidence_span!)) {
+  if (
+    currentHash !== proposal.source_hash ||
+    !body?.includes(proposal.evidence_span!) ||
+    !proposal.evidence_span!.includes(proposal.claim_text)
+  ) {
     throw new TakeProposalError(
       'unverified',
       `Proposal #${proposal.id} no longer matches the current source snapshot and must be regenerated.`,

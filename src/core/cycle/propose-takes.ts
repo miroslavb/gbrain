@@ -56,22 +56,26 @@ import type { PhaseStatus, CyclePhase } from '../cycle.ts';
  * verdicts in `take_proposals` (composite key includes prompt_version) stay
  * valid as audit history; new runs re-spend LLM tokens on every page.
  */
-export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.1-grounded-receipts';
+export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.2-contained-grounded-receipts';
 
 /**
- * Sentinel claim_text for the tombstone row written when a page extracts
- * ZERO gradeable claims. Without a tombstone the idempotency tuple is never
- * recorded, so every cycle re-spends an LLM call on unchanged zero-claim
- * prose — the "unchanged page never re-spends tokens" contract only held
- * for pages that produced >=1 claim. The tombstone is inserted with
- * status='rejected' so no pending-review query surfaces it as a live
- * proposal; its only job is to make the next cycle a cache hit.
+ * Containment allowlist. Apply this predicate in SQL before ORDER/LIMIT so a
+ * stream of newer conversations, sessions, projects, or operational pages
+ * cannot starve the durable long-form pages eligible for take extraction.
+ */
+export const PROPOSE_TAKES_ALLOWED_PAGE_TYPES = [
+  'concept', 'atom', 'lore', 'briefing', 'writing', 'originals',
+] as const;
+
+/**
+ * @deprecated Empty extraction memoization now lives only in
+ * `proposal_page_runs`; no synthetic proposal row is written.
  */
 export const EMPTY_EXTRACTION_TOMBSTONE_TEXT = '(no gradeable claims)';
 
 /**
- * Tuned extractor prompt, validated against the hand-labeled synthetic
- * corpus at test/fixtures/calibration/. Measured F1 on first live run
+ * Historical tuned baseline, validated against the hand-labeled synthetic
+ * corpus at test/fixtures/calibration/. The baseline measured F1 on its first live run
  * via gbrain-evals cat15 (claude-sonnet-4-6 extractor, claude-haiku-4-5
  * matcher judge):
  *
@@ -93,9 +97,10 @@ export const EMPTY_EXTRACTION_TOMBSTONE_TEXT = '(no gradeable claims)';
  *   - kind enum kept narrow ('prediction'|'judgment'|'bet') — the v1
  *     stub's 4-tag enum bled into noise classification.
  *
- * Replaces the v0.36.1.0-stub. If you re-tune, run cat15 against the
- * fixtures before bumping PROPOSE_TAKES_PROMPT_VERSION; the train-holdout
- * gap should stay < 0.10 (overfitting threshold).
+ * The current v0.46.28.2 prompt adds production containment learned from the
+ * first grounded canary. Those stricter rules are not represented by the
+ * historical score above; re-run cat15 before enabling automatic production
+ * work. The train-holdout gap should stay < 0.10 (overfitting threshold).
  */
 export const EXTRACT_TAKES_PROMPT = `Extract gradeable claims from the prose below.
 
@@ -110,18 +115,22 @@ NOT gradeable (do NOT extract these):
 - Pure facts ("X was founded in 2020")
 - Direct quotes from others without endorsement
 - Restatements of an earlier claim in the same page
+- Operational instructions, checklists, status updates, ETAs, and incident tactics
+- A heading or fragment that merely names a topic (for example "MFA on OWA")
+  cannot support an inferred absence, failure, cause, consequence, or polarity
 
 For each gradeable claim, output a JSON object with:
-- claim_text   (string, <=200 chars, paraphrase or near-verbatim from prose)
-- kind         ('bet' for predictions, 'take' for judgments/recommendations,
-                'hunch' for explicitly weak guesses, or 'fact' only when the
-                claim is a gradeable factual assertion)
+- claim_text   (one exact contiguous quote copied byte-for-byte from PAGE PROSE,
+                <=200 chars; never paraphrase, add, or remove polarity, cause,
+                or consequence)
+- kind         ('prediction' | 'judgment' | 'bet')
 - holder       ('world' | 'people/<slug>' | 'companies/<slug>' | 'brain' — default 'brain' when author asserts the claim)
 - weight       (number 0..1 inferred from hedging language: 'I bet'/'strong conviction'=0.7-0.85,
                 'I think'/'moderate conviction'=0.5-0.7, 'maybe'/'I'd guess'=0.3-0.5)
 - domain       (short tag — e.g. 'tactics', 'macro', 'hiring', 'geography', 'pricing')
-- evidence_span (an exact, verbatim substring from PAGE PROSE that directly
-                 supports the claim; <=500 chars; never paraphrase this field)
+- evidence_span (one exact contiguous substring copied byte-for-byte from PAGE
+                 PROSE that directly supports the whole claim; <=500 chars;
+                 never paraphrase or combine non-contiguous fragments)
 
 Output ONLY a JSON array of these objects. No prose. No commentary. If no
 gradeable claims, return [].
@@ -143,13 +152,20 @@ export interface ProposedTake {
   evidence_span?: string;
 }
 
+/** Array result with non-enumerable production provenance attached by the gateway extractor. */
+export type ProposeTakesExtraction = ProposedTake[] & {
+  modelId?: string;
+  /** Clean JSON array was returned, but every row failed the strict contract. */
+  qualityRejected?: boolean;
+};
+
 /** Extractor function signature — injected for tests; production calls gateway. */
 export type ProposeTakesExtractor = (input: {
   pagePath: string;
   pageBody: string;
   existingTakes: Array<{ claim: string; kind: string; holder: string; weight: number }>;
   modelHint?: string;
-}) => Promise<ProposedTake[]>;
+}) => Promise<ProposeTakesExtraction>;
 
 export interface ProposeTakesOpts extends BasePhaseOpts {
   /** Brain repo root for fs-source page walking. Optional — defaults to engine pages. */
@@ -180,8 +196,10 @@ export interface ProposeTakesResult {
   cache_misses: number;
   proposals_inserted: number;
   proposals_rejected_ungrounded: number;
-  /** Idempotency rows written for pages that extracted zero claims. */
+  /** @deprecated Always 0; empty memoization lives in proposal_page_runs. */
   tombstones_written: number;
+  /** Terminal empty page-run receipts written (without synthetic proposals). */
+  empty_runs_written: number;
   budget_exhausted: boolean;
   /** True when the phase deadline fired before the page loop completed (partial result). */
   deadline_hit?: boolean;
@@ -209,6 +227,8 @@ export interface ProposeTakesResult {
   page_receipts_empty: number;
   page_receipts_quality_rejected: number;
   page_receipts_failed: number;
+  /** Provider/model ids that actually answered successful production calls. */
+  models_used: string[];
   warnings: string[];
 }
 
@@ -234,8 +254,13 @@ async function listCandidatePages(
   scope: ScopedReadOpts,
   limit: number,
 ): Promise<ProposeTakesPageRow[]> {
-  const where = ["deleted_at IS NULL", "compiled_truth IS NOT NULL", "btrim(compiled_truth) <> ''"];
-  const params: unknown[] = [];
+  const where = [
+    'deleted_at IS NULL',
+    'type = ANY($1::text[])',
+    'compiled_truth IS NOT NULL',
+    "btrim(compiled_truth) <> ''",
+  ];
+  const params: unknown[] = [PROPOSE_TAKES_ALLOWED_PAGE_TYPES];
   if (scope.sourceIds && scope.sourceIds.length > 0) {
     params.push(scope.sourceIds);
     where.push(`source_id = ANY($${params.length}::text[])`);
@@ -344,7 +369,7 @@ export const EXTRACTOR_FAILURE_HALT_STREAK = 5;
  */
 export async function defaultExtractor(
   input: Parameters<ProposeTakesExtractor>[0],
-): Promise<ProposedTake[]> {
+): Promise<ProposeTakesExtraction> {
   const prompt = EXTRACT_TAKES_PROMPT
     .replace('{EXISTING_TAKES_JSON}', JSON.stringify(input.existingTakes, null, 2))
     .replace('{PAGE_BODY}', input.pageBody);
@@ -383,7 +408,7 @@ export async function defaultExtractor(
   }
 
   // ChatResult.text is already the concatenated text content.
-  const takes = parseExtractorOutput(result.text);
+  const takes = parseExtractorOutput(result.text, input.pageBody) as ProposeTakesExtraction;
   // A parse-level `[]` is AMBIGUOUS: it means either "the model genuinely
   // found no gradeable claims" OR "the model returned malformed/prose/
   // truncated output we couldn't parse." The caller memoizes empty
@@ -392,9 +417,22 @@ export async function defaultExtractor(
   // parsed empty array is a real "no claims" result worth memoizing; treat
   // anything else as a transient error and throw, so the phase's catch
   // retries the page next cycle (writing no tombstone).
-  if (takes.length === 0 && !isWellFormedEmptyExtraction(result.text)) {
-    throw new Error('propose_takes extractor: no parseable takes JSON (transient — retry)');
+  if (takes.length === 0) {
+    const cleanRows = parseCleanExtractionArray(result.text);
+    if (cleanRows === null) {
+      throw new Error('propose_takes extractor: no parseable takes JSON (transient — retry)');
+    }
+    if (cleanRows.length > 0) {
+      Object.defineProperty(takes, 'qualityRejected', {
+        value: true,
+        enumerable: false,
+      });
+    }
   }
+  Object.defineProperty(takes, 'modelId', {
+    value: result.model,
+    enumerable: false,
+  });
   return takes;
 }
 
@@ -408,7 +446,12 @@ export async function defaultExtractor(
  * "the model returned []" means.
  */
 export function isWellFormedEmptyExtraction(raw: string): boolean {
-  if (!raw || raw.trim().length === 0) return false;
+  return parseCleanExtractionArray(raw)?.length === 0;
+}
+
+/** Parse the prompt-mandated top-level array without accepting malformed prose. */
+function parseCleanExtractionArray(raw: string): unknown[] | null {
+  if (!raw || raw.trim().length === 0) return null;
   let text = raw.trim();
   // Strip <think>...</think> reasoning tags (MiniMax-M3, DeepSeek-R1, etc.),
   // same as parseExtractorOutput (#2559).
@@ -416,12 +459,12 @@ export function isWellFormedEmptyExtraction(raw: string): boolean {
   const fenced = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
   if (fenced) text = (fenced[1] ?? '').trim();
   const arrStart = text.indexOf('[');
-  if (arrStart === -1) return false;
+  if (arrStart === -1) return null;
   try {
     const parsed = JSON.parse(text.slice(arrStart));
-    return Array.isArray(parsed) && parsed.length === 0;
+    return Array.isArray(parsed) ? parsed : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -431,7 +474,7 @@ export function isWellFormedEmptyExtraction(raw: string): boolean {
  * instead of array). Returns [] on any unrecoverable parse error rather
  * than throwing.
  */
-export function parseExtractorOutput(raw: string): ProposedTake[] {
+export function parseExtractorOutput(raw: string, pageBody?: string): ProposedTake[] {
   if (!raw || raw.trim().length === 0) return [];
   let text = raw.trim();
   // Strip <think>...</think> reasoning tags (MiniMax-M3, DeepSeek-R1, etc.).
@@ -470,10 +513,19 @@ export function parseExtractorOutput(raw: string): ProposedTake[] {
     if (typeof raw !== 'object' || raw === null) continue;
     const r = raw as Record<string, unknown>;
     const claim_text = typeof r.claim_text === 'string' ? r.claim_text.trim() : '';
-    if (!claim_text || claim_text.length > 500) continue;
-    const kind = ['fact', 'take', 'bet', 'hunch'].includes(r.kind as string)
-      ? (r.kind as ProposedTake['kind'])
-      : 'take';
+    const strictGrounding = typeof pageBody === 'string';
+    if (!claim_text || claim_text.length > (strictGrounding ? 200 : 500)) continue;
+    const rawKind = typeof r.kind === 'string' ? r.kind : '';
+    const kind: ProposedTake['kind'] | null = strictGrounding
+      ? (rawKind === 'prediction' || rawKind === 'judgment'
+          ? 'take'
+          : rawKind === 'bet'
+            ? 'bet'
+            : null)
+      : (['fact', 'take', 'bet', 'hunch'].includes(rawKind)
+          ? rawKind as ProposedTake['kind']
+          : 'take');
+    if (kind === null) continue;
     const holder = typeof r.holder === 'string' && r.holder.length > 0 ? r.holder : 'brain';
     const weightRaw = typeof r.weight === 'number' ? r.weight : 0.5;
     const weight = Math.max(0, Math.min(1, weightRaw));
@@ -481,6 +533,12 @@ export function parseExtractorOutput(raw: string): ProposedTake[] {
     const evidence_span = typeof r.evidence_span === 'string' && r.evidence_span.trim().length > 0
       ? r.evidence_span.trim()
       : undefined;
+    if (
+      strictGrounding &&
+      (!evidence_span || evidence_span.length > 500 || !pageBody.includes(evidence_span) || !evidence_span.includes(claim_text))
+    ) {
+      continue;
+    }
     out.push({ claim_text, kind, holder, weight, domain, evidence_span });
   }
   return out;
@@ -489,7 +547,8 @@ export function parseExtractorOutput(raw: string): ProposedTake[] {
 /** A grounded proposal must quote its source page exactly, never paraphrase evidence. */
 export function hasVerbatimEvidence(proposal: ProposedTake, pageBody: string): boolean {
   const span = proposal.evidence_span?.trim();
-  return !!span && span.length <= 500 && pageBody.includes(span);
+  const claim = proposal.claim_text.trim();
+  return !!span && !!claim && span.length <= 500 && pageBody.includes(span) && span.includes(claim);
 }
 
 type ProposalPageRunStatus = 'completed' | 'empty' | 'quality_rejected' | 'failed';
@@ -595,7 +654,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
   protected async process(
     engine: BrainEngine,
     scope: ScopedReadOpts,
-    _ctx: OperationContext,
+    ctx: OperationContext,
     opts: ProposeTakesOpts,
   ): Promise<{ summary: string; details: Record<string, unknown>; status?: PhaseStatus }> {
     // Downstream containment: fail closed. Unset/read-error/falsy all skip;
@@ -641,6 +700,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
     const resolvedDeadlineMs =
       opts.deadlineMs ?? resolveProposeTakesDeadlineMs(opts.deadlineAtMs, Date.now());
     const phaseStartMs = Date.now();
+    const dryRun = ctx.dryRun || opts.dryRun === true;
     const proposalRunId = `propose-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}-${randomUUID().slice(0, 8)}`;
 
     const modelId = opts.model ?? getChatModel();
@@ -711,6 +771,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       proposals_inserted: 0,
       proposals_rejected_ungrounded: 0,
       tombstones_written: 0,
+      empty_runs_written: 0,
       budget_exhausted: false,
       llm_calls_succeeded: 0,
       llm_calls_failed: 0,
@@ -718,6 +779,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       page_receipts_empty: 0,
       page_receipts_quality_rejected: 0,
       page_receipts_failed: 0,
+      models_used: [],
       warnings: [],
       deadline_hit: false,
     };
@@ -817,17 +879,19 @@ class ProposeTakesPhase extends BaseCyclePhase {
         });
       } catch (err) {
         result.llm_calls_failed += 1;
-        try {
-          await writeProposalPageRun(engine, {
-            sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
-            proposalRunId, modelId, status: 'failed', proposalCount: 0,
-            evidenceSpanCount: 0, errorCode: 'extractor_error',
-          });
-          result.page_receipts_failed += 1;
-        } catch (receiptErr) {
-          result.warnings.push(
-            `failed receipt write on ${page.slug}: ${receiptErr instanceof Error ? receiptErr.message : String(receiptErr)}`,
-          );
+        if (!dryRun) {
+          try {
+            await writeProposalPageRun(engine, {
+              sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+              proposalRunId, modelId, status: 'failed', proposalCount: 0,
+              evidenceSpanCount: 0, errorCode: 'extractor_error',
+            });
+            result.page_receipts_failed += 1;
+          } catch (receiptErr) {
+            result.warnings.push(
+              `failed receipt write on ${page.slug}: ${receiptErr instanceof Error ? receiptErr.message : String(receiptErr)}`,
+            );
+          }
         }
         const msg = err instanceof Error ? err.message : String(err);
         const detail = `extractor failed on ${page.slug}: ${msg}`;
@@ -862,7 +926,36 @@ class ProposeTakesPhase extends BaseCyclePhase {
       result.llm_calls_succeeded += 1;
       llmHalt.reset();
 
-      const grounded = proposals.filter((proposal) => hasVerbatimEvidence(proposal, body));
+      const actualModelId = (proposals as ProposeTakesExtraction).modelId ?? modelId;
+      if (!result.models_used.includes(actualModelId)) result.models_used.push(actualModelId);
+
+      if ((proposals as ProposeTakesExtraction).qualityRejected === true) {
+        result.warnings.push(
+          `${page.slug}: extractor returned a clean JSON array but every row failed the strict claim/evidence contract`,
+        );
+        if (!dryRun) {
+          await writeProposalPageRun(engine, {
+            sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+            proposalRunId, modelId: actualModelId, status: 'quality_rejected', proposalCount: 0,
+            evidenceSpanCount: 0, errorCode: 'invalid_claim_contract',
+          });
+          result.page_receipts_quality_rejected += 1;
+        }
+        continue;
+      }
+
+      const groundedByClaim = new Map<string, ProposedTake>();
+      for (const proposal of proposals) {
+        if (
+          proposal.claim_text.length > 0 &&
+          proposal.claim_text.length <= 200 &&
+          (proposal.kind === 'take' || proposal.kind === 'bet') &&
+          hasVerbatimEvidence(proposal, body)
+        ) {
+          groundedByClaim.set(proposal.claim_text, proposal);
+        }
+      }
+      const grounded = [...groundedByClaim.values()];
       const rejectedUngrounded = proposals.length - grounded.length;
       result.proposals_rejected_ungrounded += rejectedUngrounded;
       if (rejectedUngrounded > 0) {
@@ -871,14 +964,20 @@ class ProposeTakesPhase extends BaseCyclePhase {
         );
       }
       if (proposals.length > 0 && grounded.length === 0) {
-        await writeProposalPageRun(engine, {
-          sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
-          proposalRunId, modelId, status: 'quality_rejected', proposalCount: 0,
-          evidenceSpanCount: 0, errorCode: 'ungrounded_evidence',
-        });
-        result.page_receipts_quality_rejected += 1;
+        if (!dryRun) {
+          await writeProposalPageRun(engine, {
+            sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+            proposalRunId, modelId: actualModelId, status: 'quality_rejected', proposalCount: 0,
+            evidenceSpanCount: 0, errorCode: 'ungrounded_evidence',
+          });
+          result.page_receipts_quality_rejected += 1;
+        }
         continue;
       }
+
+      // Dry-run performs selection, extraction, and validation, but writes no
+      // proposals, page receipts, aggregate receipts, or rollup rows.
+      if (dryRun) continue;
 
       // Publish every page atomically: either all grounded proposal rows and
       // the successful terminal receipt commit, or neither does.
@@ -896,28 +995,14 @@ class ProposeTakesPhase extends BaseCyclePhase {
                RETURNING id`,
               [sourceId, page.slug, ch, promptVersion, proposalRunId, p.claim_text,
                 p.kind, p.holder, p.weight, p.domain ?? null, p.evidence_span!.trim(),
-                JSON.stringify(existingTakes), modelId],
+                JSON.stringify(existingTakes), actualModelId],
             );
             insertedForPage += inserted.length;
           }
 
-          if (proposals.length === 0) {
-            await tx.executeRaw(
-              `INSERT INTO take_proposals
-                 (source_id, page_slug, content_hash, source_hash, prompt_version, proposal_run_id,
-                  claim_text, kind, holder, weight, domain, evidence_span,
-                  dedup_against_fence_rows, model_id, status)
-               VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,NULL,$11,$12,'rejected')
-               ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING`,
-              [sourceId, page.slug, ch, promptVersion, proposalRunId,
-                EMPTY_EXTRACTION_TOMBSTONE_TEXT, 'fact', 'brain', 0, null,
-                JSON.stringify(existingTakes), modelId],
-            );
-          }
-
           await writeProposalPageRun(tx, {
             sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
-            proposalRunId, modelId, status: proposals.length === 0 ? 'empty' : 'completed',
+            proposalRunId, modelId: actualModelId, status: proposals.length === 0 ? 'empty' : 'completed',
             proposalCount: insertedForPage, evidenceSpanCount: grounded.length,
           });
         });
@@ -937,7 +1022,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       }
       result.proposals_inserted += insertedForPage;
       if (proposals.length === 0) {
-        result.tombstones_written += 1;
+        result.empty_runs_written += 1;
         result.page_receipts_empty += 1;
       } else {
         result.page_receipts_completed += 1;
@@ -949,7 +1034,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
     // v0.42 Wave B3: receipt + rollup for propose_takes. Source-scoped
     // via the read scope. Receipt only when proposals actually written.
     const sourceIdForReceipt = scope.sourceId ?? 'default';
-    if (result.proposals_inserted > 0) {
+    if (!dryRun && result.proposals_inserted > 0) {
       try {
         await writeReceipt(engine, {
           kind: 'takes.proposed',
@@ -975,12 +1060,14 @@ class ProposeTakesPhase extends BaseCyclePhase {
       result.deadline_hit === true ||
       result.aborted_global_error !== undefined ||
       result.aborted_failure_streak === true;
-    await upsertExtractRollup(engine, {
-      kind: 'takes.proposed',
-      source_id: sourceIdForReceipt,
-      round_completed_delta: halted ? 0 : 1,
-      halt_delta: halted ? 1 : 0,
-    });
+    if (!dryRun) {
+      await upsertExtractRollup(engine, {
+        kind: 'takes.proposed',
+        source_id: sourceIdForReceipt,
+        round_completed_delta: halted ? 0 : 1,
+        halt_delta: halted ? 1 : 0,
+      });
+    }
 
     // Status folds warnings in (the extract_facts precedent from #1928): a
     // run with swallowed per-page failures must not read as a clean 'ok'.
@@ -998,7 +1085,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
     return {
       summary:
         `propose_takes: scanned ${result.pages_scanned} pages, ${result.cache_hits} cached, ${result.proposals_inserted} grounded proposals, ` +
-        `${result.proposals_rejected_ungrounded} ungrounded rejected, ${result.tombstones_written} empty (run ${proposalRunId})` +
+        `${result.proposals_rejected_ungrounded} ungrounded rejected, ${result.empty_runs_written} empty (run ${proposalRunId})` +
         (result.aborted_global_error
           ? `; aborted on ${result.aborted_global_error} error after ${result.pages_scanned} page(s)`
           : '') +
