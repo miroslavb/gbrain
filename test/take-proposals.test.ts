@@ -191,6 +191,42 @@ describe('acceptProposal', () => {
     }
   });
 
+  test('fault after canonical write leaves proposal pending and retry converges without a duplicate take', async () => {
+    const claim = 'Acme keeps the synthetic fault-test commitment through Q4';
+    const id = await insertProposal({
+      slug: 'companies/acme-example', claim, kind: 'bet', weight: 0.75,
+    });
+
+    await expect(acceptProposal(
+      {
+        engine,
+        brainDir: repo,
+        sourceId: 'default',
+        actedBy: 'test:fault-injection',
+        afterCanonicalWrite: async () => { throw new Error('synthetic crash after canonical write'); },
+      },
+      id,
+    )).rejects.toThrow('synthetic crash after canonical write');
+
+    // The canonical write is durable, but the queue row was not falsely
+    // acknowledged. A restarted consumer therefore sees it as retryable.
+    expect((await proposalRow(id)).status).toBe('pending');
+    let takes = await engine.listTakes({ page_slug: 'companies/acme-example', active: true });
+    expect(takes.filter((take) => take.claim === claim)).toHaveLength(1);
+
+    const retry = await acceptProposal(
+      { engine, brainDir: repo, sourceId: 'default', actedBy: 'test:retry' },
+      id,
+    );
+    expect((await proposalRow(id))).toMatchObject({
+      status: 'accepted',
+      promoted_row_num: retry.rowNum,
+      acted_by: 'test:retry',
+    });
+    takes = await engine.listTakes({ page_slug: 'companies/acme-example', active: true });
+    expect(takes.filter((take) => take.claim === claim)).toHaveLength(1);
+  });
+
   test('source scope: accepting an out-of-scope proposal reads as not_found', async () => {
     const id = await insertProposal({
       slug: 'companies/acme-example', claim: 'scope: other-source only', sourceId: 'other',

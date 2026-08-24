@@ -148,6 +148,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   provider/model that actually answered after fallback. Empty outcomes live only
   in `proposal_page_runs`, dry-run writes nothing, and pending-list reads hide
   proposals whose source snapshot or evidence is no longer current.
+  Acceptance is crash-retryable across the markdown-canonical write and queue
+  acknowledgement: an injected failure after the canonical write must leave the
+  proposal pending, and retry must converge on the existing exact take without
+  adding a duplicate. Keep acceptance tests synthetic; production legacy and
+  canary proposals remain unaccepted unless the operator explicitly changes
+  that decision.
 - **Extraction quality gates:** conversation facts and atoms must pass the
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,
