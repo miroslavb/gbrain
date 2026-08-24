@@ -210,7 +210,7 @@ describe('grounded take proposal publication', () => {
       pages_rejected_sensitive: 1,
       page_receipts_quality_rejected: 1,
     });
-    expect(result.details.warnings.join('\n')).not.toContain('fake-canary-token');
+    expect(String(result.details.warnings)).not.toContain('fake-canary-token');
     expect(await engine.executeRaw(`SELECT id FROM take_proposals`)).toHaveLength(0);
     expect(await engine.executeRaw<{ status: string; error_code: string; model_id: string }>(
       `SELECT status, error_code, model_id FROM proposal_page_runs`,
