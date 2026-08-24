@@ -25,6 +25,8 @@ import {
   isWellFormedEmptyExtraction,
   PROPOSE_TAKES_PROMPT_VERSION,
   PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
+  PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS,
+  hasGradeableClaimSignal,
   resolveProposeTakesDeadlineMs,
   PROPOSE_TAKES_FALLBACK_DEADLINE_MS,
   MIN_PROPOSE_TAKES_BUDGET_MS,
@@ -227,6 +229,42 @@ describe('parseExtractorOutput', () => {
     expect(out.map((row) => [row.claim_text, row.kind])).toEqual([
       ['widget markets will consolidate', 'take'],
       ['pricing falls next year', 'bet'],
+    ]);
+  });
+
+  test('production grounding requires a kind-specific semantic signal in the exact claim', () => {
+    const rows = [
+      ['The company will miss its target next year.', 'prediction', true],
+      ['I think the sequential design is better.', 'judgment', true],
+      ['Правильное решение — не создавать веер соединений.', 'judgment', true],
+      ['Вероятно рынок сократится к 2027.', 'prediction', true],
+      ['Analytics accuracy ≥99%', 'judgment', false],
+      ['Vendoring is deprecated.', 'judgment', false],
+      ['Потолок железа: 0.95 чанка/с', 'judgment', false],
+      ['оценка сроков была занижена', 'judgment', false],
+    ] as const;
+    for (const [claim, kind, expected] of rows) {
+      expect(hasGradeableClaimSignal(claim, kind)).toBe(expected);
+    }
+  });
+
+  test('second-canary semantic regressions are filtered while explicit judgments survive', () => {
+    const pageBody = [
+      'The "200 IQ autistic developer" second opinion.',
+      'Analytics accuracy ≥99%',
+      'все 38 803 чанка -> ~11.3 ч',
+      'Правильное решение — не ограничивать веер, а не создавать его.',
+      'Для русского реальных токенов почти вдвое больше.',
+    ].join('\n');
+    const raw = JSON.stringify([
+      { claim_text: 'The "200 IQ autistic developer" second opinion.', kind: 'judgment', evidence_span: 'The "200 IQ autistic developer" second opinion.' },
+      { claim_text: 'Analytics accuracy ≥99%', kind: 'judgment', evidence_span: 'Analytics accuracy ≥99%' },
+      { claim_text: 'все 38 803 чанка -> ~11.3 ч', kind: 'prediction', evidence_span: 'все 38 803 чанка -> ~11.3 ч' },
+      { claim_text: 'Правильное решение — не ограничивать веер, а не создавать его', kind: 'judgment', evidence_span: 'Правильное решение — не ограничивать веер, а не создавать его.' },
+      { claim_text: 'Для русского реальных токенов почти вдвое больше.', kind: 'judgment', evidence_span: 'Для русского реальных токенов почти вдвое больше.' },
+    ]);
+    expect(parseExtractorOutput(raw, pageBody).map(row => row.claim_text)).toEqual([
+      'Правильное решение — не ограничивать веер, а не создавать его',
     ]);
   });
 });
@@ -666,7 +704,8 @@ New prose appended here.`;
     expect(pageSelect!.sql).not.toContain('*');
     // Scalar sourceId scope from ctx binds as a plain equality param.
     expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
-    expect(pageSelect!.params[1]).toBe('default');
+    expect(pageSelect!.params[1]).toEqual(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS);
+    expect(pageSelect!.params[2]).toBe('default');
   });
 
   test('narrow projection: federated sourceIds beat scalar sourceId', async () => {
@@ -682,7 +721,8 @@ New prose appended here.`;
     expect(pageSelect).toBeDefined();
     expect(pageSelect!.sql).toContain('source_id = ANY(');
     expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
-    expect(pageSelect!.params[1]).toEqual(['team-a', 'team-b']);
+    expect(pageSelect!.params[1]).toEqual(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS);
+    expect(pageSelect!.params[2]).toEqual(['team-a', 'team-b']);
   });
 });
 

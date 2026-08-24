@@ -137,6 +137,7 @@ describe('defaultExtractor truncation retry (#3763)', () => {
     const takes = await defaultExtractor(input);
     expect(takes).toHaveLength(0);
     expect(takes.qualityRejected).toBe(true);
+    expect(takes.contractRejectedCount).toBe(1);
     expect(takes.modelId).toBe('anthropic:claude-sonnet-4-6');
   });
 });

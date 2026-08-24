@@ -5,6 +5,7 @@ import {
   runPhaseProposeTakes,
   contentHash,
   PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
+  PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS,
   type ProposeTakesExtraction,
   type ProposeTakesExtractor,
 } from '../src/core/cycle/propose-takes.ts';
@@ -135,6 +136,23 @@ describe('grounded take proposal publication', () => {
     await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
     expect(seen).toBe('concepts/eligible');
     expect(PROPOSE_TAKES_ALLOWED_PAGE_TYPES).not.toContain('conversation' as never);
+  });
+
+  test('SQL slug denylist runs before LIMIT when operational pages are mislabeled as concepts', async () => {
+    await putPage('concepts/eligible-judgment', 'I think a sequential design is better.');
+    await putPage('projects/newer-project', 'I think this project status is better.');
+    await putPage('infra/newer-benchmark', 'I think this benchmark is better.');
+    await putPage('codex/skill', 'I think this generated skill is better.');
+    let seen = '';
+    const extractor: ProposeTakesExtractor = async ({ pagePath, pageBody }) => {
+      seen = pagePath;
+      return [{ claim_text: 'I think a sequential design is better.', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
+    };
+
+    await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    expect(seen).toBe('concepts/eligible-judgment');
+    expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('projects/%');
+    expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('%/skill');
   });
 
   test('dry-run performs extraction but writes no proposals, receipts, or rollup', async () => {

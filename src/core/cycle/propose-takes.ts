@@ -56,7 +56,7 @@ import type { PhaseStatus, CyclePhase } from '../cycle.ts';
  * verdicts in `take_proposals` (composite key includes prompt_version) stay
  * valid as audit history; new runs re-spend LLM tokens on every page.
  */
-export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.2-contained-grounded-receipts';
+export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.3-semantic-signal-grounded-receipts';
 
 /**
  * Containment allowlist. Apply this predicate in SQL before ORDER/LIMIT so a
@@ -65,6 +65,24 @@ export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.2-contained-grounded-recei
  */
 export const PROPOSE_TAKES_ALLOWED_PAGE_TYPES = [
   'concept', 'atom', 'lore', 'briefing', 'writing', 'originals',
+] as const;
+
+/**
+ * Type metadata is advisory: production contains project, feature, infra and
+ * generated skill pages mislabeled as `concept`. Deny those operational slug
+ * contours in SQL before LIMIT so they neither consume canary slots nor rely
+ * on the LLM to notice that they are out of scope.
+ */
+export const PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS = [
+  'conversations/%',
+  'sessions/%',
+  'projects/%',
+  'companies/%',
+  'infra/%',
+  'infrastructure/%',
+  'features/%',
+  '%/skill',
+  '%/skills/%',
 ] as const;
 
 /**
@@ -97,10 +115,12 @@ export const EMPTY_EXTRACTION_TOMBSTONE_TEXT = '(no gradeable claims)';
  *   - kind enum kept narrow ('prediction'|'judgment'|'bet') — the v1
  *     stub's 4-tag enum bled into noise classification.
  *
- * The current v0.46.28.2 prompt adds production containment learned from the
- * first grounded canary. Those stricter rules are not represented by the
- * historical score above; re-run cat15 before enabling automatic production
- * work. The train-holdout gap should stay < 0.10 (overfitting threshold).
+ * The current v0.46.28.3 prompt adds production containment learned from two
+ * grounded canaries: exact evidence alone does not distinguish a gradeable
+ * judgment from a KPI, historical measurement, ETA, procedural fact, or
+ * heading fragment. Those stricter rules are not represented by the historical
+ * score above; re-run cat15 before enabling automatic production work. The
+ * train-holdout gap should stay < 0.10 (overfitting threshold).
  */
 export const EXTRACT_TAKES_PROMPT = `Extract gradeable claims from the prose below.
 
@@ -118,6 +138,15 @@ NOT gradeable (do NOT extract these):
 - Operational instructions, checklists, status updates, ETAs, and incident tactics
 - A heading or fragment that merely names a topic (for example "MFA on OWA")
   cannot support an inferred absence, failure, cause, consequence, or polarity
+
+The exact claim_text quote must contain its own gradeability signal:
+- prediction/bet: an explicit forward-looking or uncertainty cue such as
+  "will", "likely", "next year", "будет", "вероятно", or "ожидаю"
+- judgment: an explicit opinion, evaluation, or recommendation cue such as
+  "should", "better", "harmful", "I think", "следует", "лучше", or
+  "правильное решение"
+- claim_text must contain at least three lexical words; a bare metric, label,
+  heading, or ETA is invalid even when quoted exactly
 
 For each gradeable claim, output a JSON object with:
 - claim_text   (one exact contiguous quote copied byte-for-byte from PAGE PROSE,
@@ -157,6 +186,8 @@ export type ProposeTakesExtraction = ProposedTake[] & {
   modelId?: string;
   /** Clean JSON array was returned, but every row failed the strict contract. */
   qualityRejected?: boolean;
+  /** Rows removed by the strict grounding/kind/signal contract. */
+  contractRejectedCount?: number;
 };
 
 /** Extractor function signature — injected for tests; production calls gateway. */
@@ -257,10 +288,11 @@ async function listCandidatePages(
   const where = [
     'deleted_at IS NULL',
     'type = ANY($1::text[])',
+    'NOT (slug LIKE ANY($2::text[]))',
     'compiled_truth IS NOT NULL',
     "btrim(compiled_truth) <> ''",
   ];
-  const params: unknown[] = [PROPOSE_TAKES_ALLOWED_PAGE_TYPES];
+  const params: unknown[] = [PROPOSE_TAKES_ALLOWED_PAGE_TYPES, PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS];
   if (scope.sourceIds && scope.sourceIds.length > 0) {
     params.push(scope.sourceIds);
     where.push(`source_id = ANY($${params.length}::text[])`);
@@ -409,6 +441,7 @@ export async function defaultExtractor(
 
   // ChatResult.text is already the concatenated text content.
   const takes = parseExtractorOutput(result.text, input.pageBody) as ProposeTakesExtraction;
+  const cleanRows = parseCleanExtractionArray(result.text);
   // A parse-level `[]` is AMBIGUOUS: it means either "the model genuinely
   // found no gradeable claims" OR "the model returned malformed/prose/
   // truncated output we couldn't parse." The caller memoizes empty
@@ -417,11 +450,17 @@ export async function defaultExtractor(
   // parsed empty array is a real "no claims" result worth memoizing; treat
   // anything else as a transient error and throw, so the phase's catch
   // retries the page next cycle (writing no tombstone).
+  if (cleanRows === null) {
+    throw new Error('propose_takes extractor: no parseable takes JSON array (transient — retry)');
+  }
+  const contractRejectedCount = Math.max(0, cleanRows.length - takes.length);
+  if (contractRejectedCount > 0) {
+    Object.defineProperty(takes, 'contractRejectedCount', {
+      value: contractRejectedCount,
+      enumerable: false,
+    });
+  }
   if (takes.length === 0) {
-    const cleanRows = parseCleanExtractionArray(result.text);
-    if (cleanRows === null) {
-      throw new Error('propose_takes extractor: no parseable takes JSON (transient — retry)');
-    }
     if (cleanRows.length > 0) {
       Object.defineProperty(takes, 'qualityRejected', {
         value: true,
@@ -466,6 +505,23 @@ function parseCleanExtractionArray(raw: string): unknown[] | null {
   } catch {
     return null;
   }
+}
+
+const PREDICTION_SIGNAL_RE = /\b(?:will|won't|would|likely|unlikely|expect(?:s|ed|ing)?|predict(?:s|ed|ing)?|forecast(?:s|ed|ing)?|probab(?:le|ly|ility)|chance|risk|may|might|could|next\s+(?:week|month|quarter|year)|by\s+(?:q[1-4]|\d{4}))\b|(?:будет|будут|буду|вероятн\p{L}*|ожида\p{L}*|прогноз\p{L}*|предска\p{L}*|шанс\p{L}*|риск\p{L}*|может|могут|в\s+следующ\p{L}*|к\s+\d{4})/iu;
+const JUDGMENT_SIGNAL_RE = /\b(?:should|must|ought|need(?:s)?\s+to|better|worse|best|worst|right|wrong|correct|incorrect|prefer(?:s|red|ring)?|recommend(?:s|ed|ing)?|worth|valuable|harmful|beneficial|dangerous|safe|safer|unsafe|good|bad|ideal|effective|ineffective|important|critical|reasonable|unreasonable|i\s+think|i\s+believe)\b|(?:следует|нужно|необходимо|долж(?:ен|на|ны|но)|лучше|хуже|правильн\p{L}*|неправильн\p{L}*|рекоменд\p{L}*|предпочт\p{L}*|не\s+стоит|стоит|важн\p{L}*|критичн\p{L}*|опасн\p{L}*|безопасн\p{L}*|губительн\p{L}*|полезн\p{L}*|эффективн\p{L}*|неэффективн\p{L}*|оптимальн\p{L}*|счита\p{L}*|дума\p{L}*|полага\p{L}*)/iu;
+
+/**
+ * Exact quotation proves provenance, not semantic gradeability. Require the
+ * quote itself (not surrounding evidence) to carry a kind-specific signal so
+ * model-mislabeled facts, KPIs, ETAs and headings fail closed deterministically.
+ */
+export function hasGradeableClaimSignal(claimText: string, rawKind: string): boolean {
+  const normalized = claimText.normalize('NFKC').trim();
+  const lexicalWords = normalized.match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (lexicalWords.length < 3) return false;
+  if (rawKind === 'prediction' || rawKind === 'bet') return PREDICTION_SIGNAL_RE.test(normalized);
+  if (rawKind === 'judgment') return JUDGMENT_SIGNAL_RE.test(normalized);
+  return false;
 }
 
 /**
@@ -526,6 +582,7 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposedTa
           ? rawKind as ProposedTake['kind']
           : 'take');
     if (kind === null) continue;
+    if (strictGrounding && !hasGradeableClaimSignal(claim_text, rawKind)) continue;
     const holder = typeof r.holder === 'string' && r.holder.length > 0 ? r.holder : 'brain';
     const weightRaw = typeof r.weight === 'number' ? r.weight : 0.5;
     const weight = Math.max(0, Math.min(1, weightRaw));
@@ -929,9 +986,17 @@ class ProposeTakesPhase extends BaseCyclePhase {
       const actualModelId = (proposals as ProposeTakesExtraction).modelId ?? modelId;
       if (!result.models_used.includes(actualModelId)) result.models_used.push(actualModelId);
 
+      const strictContractRejected = (proposals as ProposeTakesExtraction).contractRejectedCount ?? 0;
+      result.proposals_rejected_ungrounded += strictContractRejected;
+      if (strictContractRejected > 0) {
+        result.warnings.push(
+          `${page.slug}: rejected ${strictContractRejected} row(s) without strict grounding/kind/semantic signal`,
+        );
+      }
+
       if ((proposals as ProposeTakesExtraction).qualityRejected === true) {
         result.warnings.push(
-          `${page.slug}: extractor returned a clean JSON array but every row failed the strict claim/evidence contract`,
+          `${page.slug}: extractor returned a clean JSON array but every row failed the strict claim/evidence/kind/semantic contract`,
         );
         if (!dryRun) {
           await writeProposalPageRun(engine, {

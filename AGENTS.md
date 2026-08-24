@@ -102,10 +102,16 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   its sequential handler makes each ALTER visible before dependent SQL because
   `CREATE TABLE IF NOT EXISTS` alone is not a schema migration. Producer
   selection is restricted in SQL (before `LIMIT`) to durable concept/atom/lore/
-  briefing/writing/originals pages; conversations, sessions, projects, companies,
-  and operational pages are out of scope. The production parser accepts only
-  prediction/judgment/bet outputs whose claim text is itself an exact contiguous
-  substring of the evidence span, and records the
+  briefing/writing/originals pages and also denies operational slug contours
+  (`projects/`, `infra/`, `infrastructure/`, `features/`, generated `*/skill`)
+  because production type metadata is not authoritative. Conversations,
+  sessions, projects, companies, and operational pages are out of scope. The
+  production parser accepts only prediction/judgment/bet outputs whose claim
+  text is itself an exact contiguous substring of the evidence span and carries
+  a deterministic multilingual kind signal (forward/uncertainty for predictions
+  and bets; opinion/evaluation/recommendation for judgments). Bare KPIs, ETAs,
+  historical measurements, procedural facts and headings fail closed even when
+  quoted exactly. Receipts record the
   provider/model that actually answered after fallback. Empty outcomes live only
   in `proposal_page_runs`, dry-run writes nothing, and pending-list reads hide
   proposals whose source snapshot or evidence is no longer current.
