@@ -1,8 +1,25 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { summarizeGraphHealthScope, type GraphHealthRow } from '../src/core/graph-health-scope.ts';
 import { buildGraphScopeChecks } from '../src/commands/doctor/checks/graph-scope.ts';
 import type { BrainHealth } from '../src/core/types.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { resetPgliteState } from './helpers/reset-pglite.ts';
+
+let engine: PGLiteEngine;
+
+beforeAll(async () => {
+  engine = new PGLiteEngine();
+  await engine.connect({});
+  await engine.initSchema();
+}, 60_000);
+
+afterAll(async () => {
+  await engine.disconnect();
+});
+
+beforeEach(async () => {
+  await resetPgliteState(engine);
+});
 
 const row = (slug: string, type: string, overrides: Partial<GraphHealthRow> = {}): GraphHealthRow => ({
   slug, type, link_count: 0, has_inbound: false, has_timeline: false,
@@ -50,22 +67,15 @@ describe('curated graph health scope', () => {
   });
 
   test('engine counts a parent-session link to a project as a curated entity link', async () => {
-    const engine = new PGLiteEngine();
-    await engine.connect({});
-    try {
-      await engine.initSchema();
-      await engine.putPage('sessions/claude/parent', {
-        type: 'conversation', title: 'session', compiled_truth: 'session', frontmatter: {},
-      });
-      await engine.putPage('projects/gbrain', {
-        type: 'project', title: 'GBrain', compiled_truth: 'project', frontmatter: {},
-      });
-      await engine.addLink('sessions/claude/parent', 'projects/gbrain', '', 'mentions');
+    await engine.putPage('sessions/claude/parent', {
+      type: 'conversation', title: 'session', compiled_truth: 'session', frontmatter: {},
+    });
+    await engine.putPage('projects/gbrain', {
+      type: 'project', title: 'GBrain', compiled_truth: 'project', frontmatter: {},
+    });
+    await engine.addLink('sessions/claude/parent', 'projects/gbrain', '', 'mentions');
 
-      const health = await engine.getHealth();
-      expect(health.graph_scope?.session_parents_entity_linked).toBe(1);
-    } finally {
-      await engine.disconnect();
-    }
+    const health = await engine.getHealth();
+    expect(health.graph_scope?.session_parents_entity_linked).toBe(1);
   }, 60_000);
 });
