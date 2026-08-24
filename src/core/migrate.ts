@@ -6241,6 +6241,10 @@ export const MIGRATIONS: Migration[] = [
     // while new producer runs publish proposals and a terminal page receipt
     // atomically. Successful receipts become the hardened idempotency and
     // acceptance authority; failed/quality-rejected attempts remain retryable.
+    // Some production brains briefly shipped a v127 prototype with `outcome`,
+    // a four-column primary key, and no surrogate id. Converge that shape
+    // additively before creating indexes; CREATE IF NOT EXISTS does not alter
+    // a table that already exists.
     // Keep in sync with schema.sql, pglite-schema.ts, and embedded schema.
     idempotent: true,
     sql: `
@@ -6263,6 +6267,35 @@ export const MIGRATIONS: Migration[] = [
         completed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
         UNIQUE (source_id, page_slug, source_hash, prompt_version, proposal_run_id)
       );
+      ALTER TABLE proposal_page_runs ADD COLUMN IF NOT EXISTS id BIGSERIAL;
+      ALTER TABLE proposal_page_runs ADD COLUMN IF NOT EXISTS status TEXT;
+      ALTER TABLE proposal_page_runs ADD COLUMN IF NOT EXISTS outcome TEXT;
+      ALTER TABLE proposal_page_runs ADD COLUMN IF NOT EXISTS evidence_span_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE proposal_page_runs ADD COLUMN IF NOT EXISTS error_code TEXT;
+      UPDATE proposal_page_runs
+         SET status = COALESCE(status, outcome),
+             evidence_span_count = CASE
+               WHEN COALESCE(status, outcome) = 'completed' THEN proposal_count
+               ELSE evidence_span_count
+             END
+       WHERE status IS NULL;
+      ALTER TABLE proposal_page_runs ALTER COLUMN status SET NOT NULL;
+      ALTER TABLE proposal_page_runs DROP COLUMN IF EXISTS outcome;
+      ALTER TABLE proposal_page_runs DROP CONSTRAINT IF EXISTS proposal_page_runs_pkey;
+      ALTER TABLE proposal_page_runs ADD CONSTRAINT proposal_page_runs_pkey PRIMARY KEY (id);
+      CREATE UNIQUE INDEX IF NOT EXISTS proposal_page_runs_identity_idx
+        ON proposal_page_runs (source_id, page_slug, source_hash, prompt_version, proposal_run_id);
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+           WHERE conrelid = 'proposal_page_runs'::regclass
+             AND conname = 'proposal_page_runs_status_check'
+        ) THEN
+          ALTER TABLE proposal_page_runs ADD CONSTRAINT proposal_page_runs_status_check
+            CHECK (status IN ('completed','empty','quality_rejected','failed'));
+        END IF;
+      END$$;
       CREATE INDEX IF NOT EXISTS proposal_page_runs_cache_idx
         ON proposal_page_runs (source_id, page_slug, source_hash, prompt_version)
         WHERE status IN ('completed','empty');

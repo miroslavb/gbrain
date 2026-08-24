@@ -97,7 +97,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Take proposals:** legacy rows without exact evidence, source hashes, and a
   matching successful `proposal_page_runs` receipt are audit history, never an
   acceptance queue. New producer canaries stay page-bounded; proposal rows and
-  their per-page terminal receipt publish in one transaction.
+  their per-page terminal receipt publish in one transaction. Migration 142
+  must also converge the briefly shipped v127 `outcome`/four-column-PK layout;
+  `CREATE TABLE IF NOT EXISTS` alone is not a schema migration.
 - **Extraction quality gates:** conversation facts and atoms must pass the
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,
