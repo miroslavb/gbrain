@@ -643,7 +643,7 @@ export async function loadConversationFactExisting(
   entitySlugs: readonly string[],
 ): Promise<ConversationFactExisting[]> {
   const entities = Array.from(new Set(entitySlugs.filter(Boolean)));
-  return engine.executeRaw<ConversationFactExisting>(
+  const rows = await engine.executeRaw<Omit<ConversationFactExisting, 'id'> & { id: number | bigint | string }>(
     `SELECT id, fact, entity_slug, source_markdown_slug,
             claim_metric, claim_value, claim_unit, claim_period
        FROM facts
@@ -660,6 +660,13 @@ export async function loadConversationFactExisting(
       LIMIT 500`,
     [sourceId, pageSlug, entities],
   );
+  return rows.map((row) => {
+    const id = Number(row.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new Error(`conversation fact existing id is outside the safe integer range: ${String(row.id)}`);
+    }
+    return { ...row, id };
+  });
 }
 
 const SEMANTIC_SYSTEM = [

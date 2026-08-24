@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { ExtractedFact } from '../src/core/facts/extract.ts';
+import type { BrainEngine } from '../src/core/engine.ts';
 import {
   DEFAULT_CONVERSATION_QUALITY_CONFIG,
+  loadConversationFactExisting,
   redactConversationFactSensitive,
   runConversationFactQualityGate,
   scanConversationFactSensitive,
@@ -10,6 +12,19 @@ import {
   type ConversationFactSemanticValidator,
   type SemanticDecision,
 } from '../src/core/facts/conversation-quality-gate.ts';
+
+test('existing fact ids normalize the Postgres BIGINT transport before supersession', async () => {
+  const engine = {
+    executeRaw: async () => [{
+      id: 92016n, fact: 'old', entity_slug: 'people/alice-example',
+      source_markdown_slug: 'sessions/prior', claim_metric: null,
+      claim_value: null, claim_unit: null, claim_period: null,
+    }],
+  } as unknown as BrainEngine;
+  const rows = await loadConversationFactExisting(engine, 'default', 'sessions/current', ['people/alice-example']);
+  expect(rows[0].id).toBe(92016);
+  expect(typeof rows[0].id).toBe('number');
+});
 
 const candidate = (fact: string, overrides: Partial<ExtractedFact> = {}): ExtractedFact => ({
   fact,
