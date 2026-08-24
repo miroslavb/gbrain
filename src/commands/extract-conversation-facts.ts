@@ -1636,14 +1636,8 @@ export async function runExtractConversationFactsCore(
             failure.error instanceof ConversationFactQualityStopError,
           );
           if (qualityStop) {
-            // Surface WHICH page tripped the gate before the pool aborts —
-            // otherwise operators only see an unlabeled "Failed N page(s)".
-            const stopMsg = qualityStop.error instanceof Error
-              ? qualityStop.error.message
-              : String(qualityStop.error);
-            process.stderr.write(
-              `[extract-conversation-facts] ${qualityStop.label} failed: ${stopMsg}\n`,
-            );
+            const stopMsg = qualityStop.error instanceof Error ? qualityStop.error.message : String(qualityStop.error);
+            process.stderr.write(`[extract-conversation-facts] ${qualityStop.label} failed: ${stopMsg}\n`);
             throw qualityStop.error;
           }
           if (signal?.aborted) {
@@ -1654,12 +1648,8 @@ export async function runExtractConversationFactsCore(
           }
           result.pages_failed += poolResult.errored;
           for (const failure of poolResult.failures) {
-            const message = failure.error instanceof Error
-              ? failure.error.message
-              : String(failure.error);
-            process.stderr.write(
-              `[extract-conversation-facts] ${failure.label} failed: ${message}\n`,
-            );
+            const message = failure.error instanceof Error ? failure.error.message : String(failure.error);
+            process.stderr.write(`[extract-conversation-facts] ${failure.label} failed: ${message}\n`);
           }
 
           processedPagesCount += claimable.length;

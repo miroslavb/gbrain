@@ -46,22 +46,10 @@ export interface GBrainConfig {
    * merge → buildGatewayConfig env dict → recipe reads ZEROENTROPY_API_KEY.
    */
   zeroentropy_api_key?: string;
-  /**
-   * OpenRouter API key. File-plane slot so `gbrain config set
-   * openrouter_api_key X` (or config.json) reaches the openrouter recipe:
-   * file plane → loadConfig env merge → buildGatewayConfig env dict → recipe
-   * reads OPENROUTER_API_KEY.
-   */
+  /** File-plane OpenRouter key, folded into OPENROUTER_API_KEY for the provider recipe. */
   openrouter_api_key?: string;
-  /**
-   * Together AI API key. File-plane slot folded into the gateway env as
-   * TOGETHER_API_KEY (the name the together recipe reads), same pattern as
-   * voyage_api_key/openrouter_api_key above. Before this slot existed,
-   * `together_api_key` in config.json was read by nothing: the recipe only
-   * consulted process-env, so keyless shells (CLI, MCP, cron) silently lost
-   * every together:* route to provider fallback while `config show` looked
-   * complete.
-   */
+  /** File-plane Together AI key, folded into TOGETHER_API_KEY for the provider
+   * recipe; prevents keyless CLI/MCP/cron from silently falling back. */
   together_api_key?: string;
   /**
    * Voyage AI API key (#2662). File-plane slot so `~/.gbrain/config.json`'s

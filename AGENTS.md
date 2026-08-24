@@ -64,6 +64,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Common tasks
 
+- **Verification hygiene:** generated skill/plugin gates describe the committed
+  tree. Do not make them green by staging or deleting unrelated local reference
+  packs; reproduce branch health in a clean clone. Pay module-size ratchets down
+  by compacting or peeling code instead of silently raising their ceilings.
 - **Conversation-facts epoch safety:** stage every page in bounded memory and
   publish extractor-owned rows plus the terminal marker in one reconcile
   transaction. Lock/recheck page identity; for `raw_transcript`, use the
