@@ -31,7 +31,7 @@ import { EMBED_SKIP_KEY, buildEmbedSkipMarker } from '../src/core/embed-skip.ts'
 import { QUARANTINE_KEY, buildQuarantineMarker } from '../src/core/quarantine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { AITransientError } from '../src/core/ai/errors.ts';
-import { PROVIDER_FAILURE_HALT_STREAK } from '../src/core/embed-provider-circuit.ts';
+import { EmbedProviderFailureCircuit, PROVIDER_FAILURE_HALT_STREAK, isProviderWideEmbedFailure } from '../src/core/embed-provider-circuit.ts';
 
 const DIMS = 1536;
 let engine: PGLiteEngine;
@@ -93,6 +93,15 @@ describe('countChunklessPagesWithContent / listChunklessPagesWithContent', () =>
     await engine.putPage('empty/page', { type: 'note', title: 'Empty', compiled_truth: '' });
 
     expect(await engine.countChunklessPagesWithContent()).toBe(0);
+  });
+
+  test('excludes whitespace-only pages that the chunker cannot materialize', async () => {
+    await engine.putPage('whitespace/page', {
+      type: 'note', title: 'Whitespace', compiled_truth: '\n', timeline: ' \t ',
+    });
+
+    expect(await engine.countChunklessPagesWithContent()).toBe(0);
+    expect(await engine.listChunklessPagesWithContent()).toEqual([]);
   });
 
   test('detects a timeline-only page (empty compiled_truth, non-empty timeline)', async () => {
@@ -339,5 +348,17 @@ describe('embed --stale chunkless-page safety net (end-to-end)', () => {
         usage: { tokens: values.length * 4 },
       } as never));
     }
+  });
+
+  test('physical-batch HTTP 500 is content-shaped and never opens the provider circuit', () => {
+    const error = new AITransientError(
+      'input (4217 tokens) is too large to process. increase the physical batch size (current batch size: 4096)',
+      { status: 500 },
+    );
+    const circuit = new EmbedProviderFailureCircuit(new AbortController().signal);
+
+    expect(isProviderWideEmbedFailure(error)).toBe(false);
+    for (let i = 0; i < PROVIDER_FAILURE_HALT_STREAK + 1; i++) circuit.recordFailure(error);
+    expect(circuit.opened).toBe(false);
   });
 });

@@ -30,7 +30,7 @@ import {
   isTransientNetworkEmbedError,
   type EmbedBatchWithBackoffOpts,
 } from '../core/embed-retry.ts';
-import { EmbedProviderFailureCircuit } from '../core/embed-provider-circuit.ts';
+import { EmbedProviderFailureCircuit, isPhysicalBatchInputTooLargeError } from '../core/embed-provider-circuit.ts';
 
 // Peeled to src/core/embed-retry.ts (core→commands layering fix: core modules
 // import-file.ts / embed-stale.ts consume these, and a commands module in
@@ -1871,7 +1871,7 @@ async function embedPageTexts(
     if (texts.length <= 1) throw e; // nothing to isolate
     // #3374 — network-transient exhaustion isn't chunk-specific either:
     // fanning out during an outage multiplies failing calls per page.
-    if (isEmbedRetriableError(e) || isTransientNetworkEmbedError(e) || e instanceof AITransientError) throw e;
+    if (!isPhysicalBatchInputTooLargeError(e) && (isEmbedRetriableError(e) || isTransientNetworkEmbedError(e) || e instanceof AITransientError)) throw e;
     const status = statusFromCause(e);
     if (status === 401 || status === 403) throw e;
 

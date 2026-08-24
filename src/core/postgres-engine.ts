@@ -3341,7 +3341,7 @@ export class PostgresEngine implements BrainEngine {
       // healChunklessPages chunks BOTH compiled_truth and timeline (mirrors
       // embedPage) — a timeline-only page (rare but schema-legal) has
       // something to heal even with compiled_truth = ''.
-      `(p.compiled_truth <> '' OR p.timeline <> '')`,
+      `(p.compiled_truth ~ '[^[:space:]]' OR p.timeline ~ '[^[:space:]]')`,
       EMBED_SKIP_FILTER_FRAGMENT,
       QUARANTINE_FILTER_FRAGMENT,
       'NOT EXISTS (SELECT 1 FROM content_chunks cc WHERE cc.page_id = p.id)',

@@ -231,9 +231,15 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   whole-provider circuit after three consecutive provider-wide failures; a
   dead backend must never become one error per remaining page. Preserve the
   resumable checkpoint and keep content-shaped 400/413/422 failures isolated
-  per page. Migration progress is page-based with an unknown total unless an
+  per page. llama.cpp physical-batch overflow is content-shaped even when its
+  HTTP surface reports 500; classify its stable message before generic
+  transient handling so it neither opens the provider circuit nor darkens all
+  sibling chunks. Migration progress is page-based with an unknown total unless an
   exact stale-page census exists; never synthesize a chunk/page denominator
   that can render above 100%.
+- **Chunkless-page census parity:** count/list/heal only pages with
+  non-whitespace compiled truth or timeline. A newline-only code stub cannot
+  produce chunks and must not keep migrations permanently "chunkless".
 - **Bounded stale extraction:** link/timeline backlog canaries must set
   `extract --stale --max-pages N`; the exact cross-batch cap wins over
   `--catch-up`. Validate page freshness plus link/timeline graph integrity after

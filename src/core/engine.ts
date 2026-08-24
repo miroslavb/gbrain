@@ -1192,7 +1192,7 @@ export interface BrainEngine {
   }): Promise<StaleChunkRow[]>;
   /**
    * Pre-flight count for the chunkless-page safety net: pages with
-   * non-empty `compiled_truth` AND/OR non-empty `timeline` — both are
+   * non-whitespace `compiled_truth` AND/OR non-whitespace `timeline` — both are
    * chunked independently by the healer — and ZERO `content_chunks` rows.
    * `embed --stale` only scans `content_chunks` (embedding IS NULL) — a
    * page written directly via `putPage` that never got chunked has no
@@ -1204,7 +1204,7 @@ export interface BrainEngine {
    */
   countChunklessPagesWithContent(opts?: { sourceId?: string }): Promise<number>;
   /**
-   * List pages with non-empty `compiled_truth` and/or `timeline` and zero
+   * List pages with non-whitespace `compiled_truth` and/or `timeline` and zero
    * `content_chunks` rows (sibling of `countChunklessPagesWithContent`;
    * same predicate). Keyset-paginated on `id` (mirrors
    * `listStalePagesForExtraction`) — pass the last row's `id` as

@@ -7,6 +7,19 @@ import { isEmbedRetriableError, isTransientNetworkEmbedError } from './embed-ret
 
 export const PROVIDER_FAILURE_HALT_STREAK = 3;
 
+const PHYSICAL_BATCH_INPUT_TOO_LARGE_RE =
+  /input \(\d+ tokens\) is too large to process|increase the physical batch size|current batch size:\s*\d+/i;
+
+export function isPhysicalBatchInputTooLargeError(e: unknown): boolean {
+  let cur: unknown = e;
+  for (let depth = 0; depth < 5 && cur !== undefined && cur !== null; depth++) {
+    const obj = cur as { message?: unknown; cause?: unknown };
+    if (typeof obj.message === 'string' && PHYSICAL_BATCH_INPUT_TOO_LARGE_RE.test(obj.message)) return true;
+    cur = obj.cause;
+  }
+  return false;
+}
+
 function statusFromCause(e: unknown): number | undefined {
   let cur: unknown = e;
   for (let depth = 0; depth < 5 && cur !== undefined && cur !== null; depth++) {
@@ -19,6 +32,7 @@ function statusFromCause(e: unknown): number | undefined {
 }
 
 export function isProviderWideEmbedFailure(e: unknown): boolean {
+  if (isPhysicalBatchInputTooLargeError(e)) return false;
   const status = statusFromCause(e);
   return e instanceof AITransientError
     || isEmbedRetriableError(e)

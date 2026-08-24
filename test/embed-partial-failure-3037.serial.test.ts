@@ -70,6 +70,13 @@ function permanentBatchError(): Error {
   return err;
 }
 
+function physicalBatchOverflow(): AITransientError {
+  return new AITransientError(
+    '[embed(llama-server:bge-m3)] input (4465 tokens) is too large to process. increase the physical batch size (current batch size: 4096)',
+    { status: 500 },
+  );
+}
+
 beforeEach(() => {
   embedCalls = [];
   embedBatchBehavior = null;
@@ -146,6 +153,31 @@ describe('#3037 — one bad chunk no longer darkens its page', () => {
     expect(result.failures).toBe(1);
     const stamps = (engine as any)._calls.filter((c: any) => c.method === 'setPageEmbeddingSignature');
     expect(stamps).toHaveLength(0);
+  });
+
+  test('llama.cpp physical-batch HTTP 500 still isolates the oversized chunk', async () => {
+    embedBatchBehavior = async (texts: string[]) => {
+      if (texts.length > 1 || texts[0] === 'BAD') throw physicalBatchOverflow();
+      return texts.map(() => new Float32Array(1536));
+    };
+    const stale = THREE_CHUNKS.map(c => ({
+      slug: 'llama-physical-batch-page', chunk_index: c.chunk_index, chunk_text: c.chunk_text,
+      chunk_source: c.chunk_source, model: null, token_count: 1, source_id: 'default', page_id: 1,
+    }));
+    const upsertCalls: Array<{ slug: string; chunks: any[] }> = [];
+    const engine = mockEngine({
+      countStaleChunks: async () => 3,
+      listStaleChunks: async () => stale,
+      getChunks: async () => THREE_CHUNKS,
+      upsertChunks: async (slug: string, chunks: any[]) => { upsertCalls.push({ slug, chunks }); },
+    });
+
+    const result = await runEmbedCore(engine, { stale: true });
+
+    expect(embedCalls.map(call => call.length)).toEqual([3, 1, 1, 1]);
+    expect(upsertCalls).toHaveLength(1);
+    expect(result.embedded).toBe(2);
+    expect(result.failures).toBe(1);
   });
 
   test('--stale x #3507: fan-out retries the WRAPPED texts and a partially-failed page is not restamped', async () => {
