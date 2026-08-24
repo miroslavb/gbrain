@@ -121,7 +121,12 @@ export async function expireFact(deps: PgFactsDeps, id: number, opts?: { superse
 
 export async function insertFacts(
   deps: PgFactsDeps,
-    rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number }>,
+    rows: Array<NewFact & {
+      row_num: number;
+      source_markdown_slug: string;
+      superseded_by_row?: number;
+      supersedes_fact_id?: number;
+    }>,
     ctx: { source_id: string },
     opts?: FactBatchInsertOpts,
   ): Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number }> {
@@ -301,6 +306,29 @@ export async function insertFacts(
         if (warning) warnings.push(warning);
         if (superseded_by !== null) {
           await tx`UPDATE facts SET superseded_by = ${superseded_by} WHERE id = ${rowIds[i]}`;
+        }
+      }
+      // Conversation-quality lineage points in the opposite direction from
+      // a struck fence row: the pre-existing OLD fact points at the newly
+      // inserted replacement. Keep both mutations in this transaction.
+      for (let i = 0; i < rows.length; i++) {
+        const oldId = rows[i].supersedes_fact_id;
+        const newId = rowIds[i];
+        if (oldId === undefined || newId === null) continue;
+        if (!Number.isSafeInteger(oldId) || oldId <= 0 || oldId === newId) {
+          throw new Error(`insertFacts: invalid supersedes_fact_id ${oldId}`);
+        }
+        const updated = await tx<Array<{ id: number }>>`
+          UPDATE facts
+             SET expired_at = now(), superseded_by = ${newId}
+           WHERE id = ${oldId}
+             AND source_id = ${ctx.source_id}
+             AND entity_slug IS NOT DISTINCT FROM ${rows[i].entity_slug ?? null}
+             AND expired_at IS NULL
+           RETURNING id
+        `;
+        if (!updated[0]) {
+          throw new Error(`insertFacts: supersession target ${oldId} is missing, foreign, or inactive`);
         }
       }
       if (opts?.postCommitCheck) await opts.postCommitCheck();

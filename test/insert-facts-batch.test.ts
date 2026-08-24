@@ -32,6 +32,35 @@ beforeAll(async () => {
   );
 });
 
+describe('engine.insertFacts — conversation-quality supersession lineage', () => {
+  test('atomically expires an existing active fact and points it at the new row', async () => {
+    const old = await engine.insertFacts([
+      fixtureFact(1, { fact: 'Alice uses the old plan', source_markdown_slug: 'notes/prior' }),
+    ], { source_id: 'default' });
+    const current = await engine.insertFacts([
+      fixtureFact(1, { fact: 'Alice uses the new plan', supersedes_fact_id: old.ids[0] }),
+    ], { source_id: 'default' });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lineage = await (engine as any).db.query(
+      'SELECT expired_at, superseded_by FROM facts WHERE id=$1', [old.ids[0]],
+    );
+    expect(lineage.rows[0].expired_at).not.toBeNull();
+    expect(Number(lineage.rows[0].superseded_by)).toBe(Number(current.ids[0]));
+    const active = await engine.listFactsByEntity('default', 'people/alice');
+    expect(active.map((fact) => fact.id)).toContain(Number(current.ids[0]));
+    expect(active.map((fact) => fact.id)).not.toContain(Number(old.ids[0]));
+  });
+
+  test('missing target fails closed and rolls back the replacement', async () => {
+    await expect(engine.insertFacts([
+      fixtureFact(1, { fact: 'must roll back', supersedes_fact_id: 999_999_999 }),
+    ], { source_id: 'default' })).rejects.toThrow('missing, foreign, or inactive');
+    const rows = await engine.listFactsByEntity('default', 'people/alice');
+    expect(rows).toHaveLength(0);
+  });
+});
+
 afterAll(async () => {
   await engine.disconnect();
 });
@@ -43,7 +72,12 @@ beforeEach(async () => {
   await (engine as any).db.query('DELETE FROM facts');
 });
 
-type BatchFact = NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number };
+type BatchFact = NewFact & {
+  row_num: number;
+  source_markdown_slug: string;
+  superseded_by_row?: number;
+  supersedes_fact_id?: number;
+};
 
 const fixtureFact = (rowNum: number, overrides: Partial<BatchFact> = {}): BatchFact => ({
   fact: `Claim ${rowNum}`,

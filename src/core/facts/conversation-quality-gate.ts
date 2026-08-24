@@ -531,6 +531,13 @@ export async function runConversationFactQualityGate(input: {
       continue;
     }
     if (duplicate?.decision === 'supersession') {
+      // Negative ids are synthetic candidates accepted earlier in this same
+      // batch, not durable facts. Do not emit an unusable DB pointer or two
+      // mutually superseding claims from one source window.
+      if (duplicate.id <= 0) {
+        receipt.duplicate_count++;
+        continue;
+      }
       receipt.supersession_count++;
       accepted.push({ fact, supersedes_id: duplicate.id });
     } else {

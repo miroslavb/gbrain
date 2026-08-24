@@ -5076,7 +5076,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async insertFacts(
-    rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number }>,
+    rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; supersedes_fact_id?: number }>,
     ctx: { source_id: string },
     opts?: import('./facts/reconcile.ts').FactBatchInsertOpts,
   ): Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number }> {

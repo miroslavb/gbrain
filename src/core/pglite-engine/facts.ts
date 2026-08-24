@@ -125,7 +125,12 @@ export async function expireFact(deps: PgliteFactsDeps, id: number, opts?: { sup
 
 export async function insertFacts(
   deps: PgliteFactsDeps,
-    rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number }>,
+    rows: Array<NewFact & {
+      row_num: number;
+      source_markdown_slug: string;
+      superseded_by_row?: number;
+      supersedes_fact_id?: number;
+    }>,
     ctx: { source_id: string },
     opts?: FactBatchInsertOpts,
   ): Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number }> {
@@ -323,6 +328,26 @@ export async function insertFacts(
         if (warning) warnings.push(warning);
         if (superseded_by !== null) {
           await tx.query(`UPDATE facts SET superseded_by = $1 WHERE id = $2`, [superseded_by, rowIds[i]]);
+        }
+      }
+      for (let i = 0; i < rows.length; i++) {
+        const oldId = rows[i].supersedes_fact_id;
+        const newId = rowIds[i];
+        if (oldId === undefined || newId === null) continue;
+        if (!Number.isSafeInteger(oldId) || oldId <= 0 || oldId === newId) {
+          throw new Error(`insertFacts: invalid supersedes_fact_id ${oldId}`);
+        }
+        const updated = await tx.query<{ id: number }>(
+          `UPDATE facts
+              SET expired_at = now(), superseded_by = $1
+            WHERE id = $2 AND source_id = $3
+              AND entity_slug IS NOT DISTINCT FROM $4
+              AND expired_at IS NULL
+            RETURNING id`,
+          [newId, oldId, ctx.source_id, rows[i].entity_slug ?? null],
+        );
+        if (!updated.rows[0]) {
+          throw new Error(`insertFacts: supersession target ${oldId} is missing, foreign, or inactive`);
         }
       }
       if (opts?.postCommitCheck) await opts.postCommitCheck();

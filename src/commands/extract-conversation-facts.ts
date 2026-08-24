@@ -1099,10 +1099,7 @@ async function processPage(
   // Stage every segment in memory. The page's previous completed epoch stays
   // visible until all extraction and snapshot checks succeed; one final
   // insertFacts transaction swaps the owned rows and terminal marker together.
-  const stagedRows: Array<NewFact & {
-    row_num: number;
-    source_markdown_slug: string;
-  }> = [];
+  const stagedRows: Array<NewFact & { row_num: number; source_markdown_slug: string; supersedes_fact_id?: number }> = [];
   let rowNum = await peekRowNumStart(
     state.engine,
     state.sourceId,
@@ -1163,6 +1160,7 @@ async function processPage(
     segmentsThisPage++;
     state.result.facts_extracted += extracted.length;
 
+    let acceptedFacts: Array<{ fact: ExtractedFact; supersedes_id?: number }> = extracted.map((fact) => ({ fact }));
     if (extracted.length > 0) {
       const existingFacts = await loadConversationFactExisting(
         state.engine,
@@ -1184,14 +1182,15 @@ async function processPage(
       if (quality.receipt.stop_triggered) {
         throw new ConversationFactQualityStopError(quality.receipt.stop_reasons);
       }
-      extracted = quality.accepted.map((entry) => entry.fact);
+      acceptedFacts = quality.accepted; extracted = acceptedFacts.map((entry) => entry.fact);
     }
 
     if (extracted.length > 0) {
       // Page-global row_num. All rows stay staged until the complete page and
       // its terminal marker can be committed in one atomic reconcile.
-      const rows = extracted.map((fact, i) => ({
+      const rows = acceptedFacts.map(({ fact, supersedes_id }, i) => ({
         ...fact,
+        ...(supersedes_id !== undefined ? { supersedes_fact_id: supersedes_id } : {}),
         row_num: rowNum + i,
         source_markdown_slug: page.slug,
         source: PER_SEGMENT_SOURCE_PREFIX,

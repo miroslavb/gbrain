@@ -87,6 +87,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   transaction. Lock/recheck page identity; for `raw_transcript`, use the
   symlink-safe bounded reader and run the sidecar digest check both before and
   after row mutations. Any failure preserves the previous completed epoch.
+  Preserve quality-gate `supersedes_id` through staging: the same reconcile
+  transaction must insert the replacement and set the old active fact's
+  `expired_at` plus `superseded_by=new.id`. Missing, foreign-source,
+  wrong-entity, or already-expired targets roll back the whole page.
 - **Interrupted transcript quarantine:** the exact Hermes
   `Operation interrupted: waiting for model response (...)` transport status
   is not conversation content. Drop it before conversation-facts segmentation,

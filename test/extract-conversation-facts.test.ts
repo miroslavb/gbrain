@@ -484,6 +484,9 @@ describe('runExtractConversationFactsCore', () => {
     _resetLlmCacheForTests();
     // Clean state per test. Use executeRaw because PGLite uses different
     // truncation semantics than the canonical reset helper.
+    // Supersession lineage is a self-FK. Break test-only chains before the
+    // broad fixture cleanup so PGlite does not reject deletion of a target.
+    await engine.executeRaw(`UPDATE facts SET superseded_by = NULL WHERE superseded_by IS NOT NULL`);
     await engine.executeRaw(`DELETE FROM facts WHERE source LIKE 'cli:extract-conversation-facts%'`);
     await engine.executeRaw(`DELETE FROM op_checkpoints WHERE op = 'extract-conversation-facts'`);
     await engine.executeRaw(`DELETE FROM extract_rollup_7d`);
@@ -650,6 +653,52 @@ describe('runExtractConversationFactsCore', () => {
     expect(semanticText).not.toContain('10.24.8.9');
     expect(extractorText).toContain('sensitive value removed');
     expect(semanticText).toContain('sensitive value removed');
+  });
+
+  test('publishes quality-gate supersession lineage in the same page reconcile', async () => {
+    const slug = 'conversations/supersession-example';
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'Supersession example', timeline: '', frontmatter: {},
+      compiled_truth: [
+        '**User** (2026-08-24 9:00 AM): Alice now uses plan version 2.',
+        '**Assistant** (2026-08-24 9:01 AM): Confirmed, version 2 replaced version 1.',
+      ].join('\n'),
+    });
+    const old = await engine.insertFact({
+      fact: 'Alice uses plan version 1.', kind: 'fact', entity_slug: 'people/alice-example',
+      visibility: 'world', notability: 'medium', source: 'manual:test', confidence: 1,
+      embedding: null, claim_metric: 'plan_version', claim_value: 1,
+      claim_unit: 'version', claim_period: 'current',
+    }, { source_id: 'default' });
+
+    const result = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, sleepMs: 0,
+      extractor: async () => [{
+        fact: 'Alice now uses plan version 2.', kind: 'fact',
+        entity_slug: 'people/alice-example', source: PER_SEGMENT_SOURCE_PREFIX,
+        confidence: 1, notability: 'medium', embedding: null,
+        claim_metric: 'plan_version', claim_value: 2,
+        claim_unit: 'version', claim_period: 'current',
+      }],
+      _qualitySemanticValidator: async () => ({ payload: { decisions: [{
+        id: 'c0', action: 'accept', fully_supported: true,
+        exactly_one_proposition: true, self_contained: true,
+        correct_entity_attribution: true, no_hidden_causation: true,
+        no_overgeneralization: true, no_sensitive_content: true,
+      }] } }),
+    });
+    expect(result.quality_supersessions).toBe(1);
+    const lineage = await engine.executeRaw<{
+      expired_at: string | null; superseded_by: number | null; replacement_slug: string | null;
+    }>(`
+      SELECT old.expired_at, old.superseded_by,
+             replacement.source_markdown_slug AS replacement_slug
+        FROM facts old LEFT JOIN facts replacement ON replacement.id=old.superseded_by
+       WHERE old.id=$1
+    `, [old.id]);
+    expect(lineage[0].expired_at).not.toBeNull();
+    expect(lineage[0].superseded_by).not.toBeNull();
+    expect(lineage[0].replacement_slug).toBe(slug);
   });
 
   test('dry-run reports segmentation without writing facts', async () => {
