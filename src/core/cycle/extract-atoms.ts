@@ -87,8 +87,10 @@ const MAX_DRY_RUN_WORK_ITEMS = 10;
 
 /**
  * gbrain#4148: consecutive same-content failures of a content-deterministic
- * class (malformed model output) before the page is tombstoned so the
- * backlog floor can clear. A content edit resets the streak.
+ * class (malformed model output or an all-quality-rejected candidate batch)
+ * before the page is tombstoned so the backlog floor can clear. A content
+ * edit resets the streak. Provider/validator operational failures never
+ * consume this retry allowance.
  */
 export const MAX_DETERMINISTIC_FAILURES = 3;
 
@@ -821,6 +823,7 @@ export async function runPhaseExtractAtoms(
   // ── gbrain#4148 helpers ────────────────────────────────────────────
   let malformedOutputs = 0;
   const tombstonedForFailures: string[] = [];
+  const tombstonedForQualityRejections: string[] = [];
   // #3044 adoption: shared halt policy — auth/billing halt on the first hit,
   // a rate_limit streak halts after 3 consecutive failures, a successful
   // chat call resets the streak.
@@ -866,6 +869,39 @@ export async function runPhaseExtractAtoms(
     }
   }
 
+  /**
+   * Count a completed extraction whose candidates all failed deterministic or
+   * semantic QUALITY gates. This is deliberately separate from malformed
+   * output and provider/validator operational failures: quality rejects get
+   * bounded retries on unchanged content, while operational failures remain
+   * retryable. Only stable aggregate reason codes are persisted.
+   */
+  async function recordPageQualityRejectionCount(
+    item: { kind: string; slug?: string; contentHash: string },
+    reasons: Record<string, number>,
+  ): Promise<number | null> {
+    if (item.kind !== 'page' || !item.slug || opts.dryRun) return null;
+    try {
+      const rows = await engine.executeRaw<{ cnt: number | string }>(
+        `UPDATE pages
+            SET frontmatter = frontmatter
+              || jsonb_build_object('atoms_reject_hash', $1::text)
+              || jsonb_build_object('atoms_reject_count',
+                   CASE WHEN COALESCE(frontmatter->>'atoms_reject_hash', '') = $1::text
+                        THEN COALESCE((frontmatter->>'atoms_reject_count')::int, 0) + 1
+                        ELSE 1 END)
+              || jsonb_build_object('atoms_reject_last_reasons', $4::jsonb)
+          WHERE source_id = $2 AND slug = $3 AND deleted_at IS NULL
+          RETURNING (frontmatter->>'atoms_reject_count')::int AS cnt`,
+        [item.contentHash.slice(0, 16), sourceId, item.slug, JSON.stringify(reasons)],
+      );
+      const cnt = rows[0]?.cnt;
+      return cnt == null ? null : Number(cnt);
+    } catch {
+      return null;
+    }
+  }
+
   await withBudgetTracker(budgetTracker, async () => {
   for (const item of boundedWork) {
     await maybeYield();
@@ -876,6 +912,8 @@ export async function runPhaseExtractAtoms(
     }
 
     const originLabel = item.kind === 'transcript' ? item.filePath : item.slug;
+    const itemRejectedByReason: Record<string, number> = {};
+    let itemGateOperationalFailure = false;
     try {
       const result = await chat({
         model: extractModel,
@@ -943,11 +981,21 @@ export async function runPhaseExtractAtoms(
 
       const deterministicSurvivors: ExtractedAtom[] = [];
       if (sensitivePatternConfig.invalid) {
-        for (const _atom of atoms) rejectCandidate(['sensitive_pattern_config_invalid']);
+        itemGateOperationalFailure = true;
+        for (const _atom of atoms) {
+          rejectCandidate(['sensitive_pattern_config_invalid']);
+          itemRejectedByReason.sensitive_pattern_config_invalid =
+            (itemRejectedByReason.sensitive_pattern_config_invalid ?? 0) + 1;
+        }
       } else {
         for (const atom of atoms) {
           const reasons = scanAtomCandidate(atom, sensitivePatternConfig.patterns);
-          if (reasons.length > 0) rejectCandidate(reasons);
+          if (reasons.length > 0) {
+            rejectCandidate(reasons);
+            for (const reason of reasons) {
+              itemRejectedByReason[reason] = (itemRejectedByReason[reason] ?? 0) + 1;
+            }
+          }
           else deterministicSurvivors.push(atom);
         }
       }
@@ -968,7 +1016,12 @@ export async function runPhaseExtractAtoms(
           if (semanticResult.route) validatorActualRoutes.add(semanticResult.route);
           for (let i = 0; i < deterministicSurvivors.length; i++) {
             const reasons = semanticRejectionReasons(verdicts[i].scores);
-            if (reasons.length > 0) rejectCandidate(reasons);
+            if (reasons.length > 0) {
+              rejectCandidate(reasons);
+              for (const reason of reasons) {
+                itemRejectedByReason[reason] = (itemRejectedByReason[reason] ?? 0) + 1;
+              }
+            }
             else {
               acceptedAtoms.push(deterministicSurvivors[i]);
               acceptedCount++;
@@ -976,18 +1029,36 @@ export async function runPhaseExtractAtoms(
           }
         } catch (err) {
           if (err instanceof BudgetExhausted) throw err;
+          itemGateOperationalFailure = true;
           const code = err instanceof AtomSemanticValidationError ? err.code : 'validator_failure';
           const reason = code === 'invalid_json'
             ? 'semantic_validator_invalid_json'
             : code === 'timeout'
               ? 'semantic_validator_timeout'
               : 'semantic_validator_failure';
-          for (const _atom of deterministicSurvivors) rejectCandidate([reason]);
+          for (const _atom of deterministicSurvivors) {
+            rejectCandidate([reason]);
+            itemRejectedByReason[reason] = (itemRejectedByReason[reason] ?? 0) + 1;
+          }
           failures.push({ source: 'semantic_validator', error: reason });
         }
       }
 
       if (acceptedAtoms.length === 0) {
+        // Candidates that all failed QUALITY gates get a bounded retry
+        // allowance. Validator/config operational failures are never charged.
+        if (
+          atoms.length > 0 &&
+          !itemGateOperationalFailure &&
+          !opts.dryRun &&
+          item.kind === 'page'
+        ) {
+          const rejectCount = await recordPageQualityRejectionCount(item, itemRejectedByReason);
+          if (rejectCount != null && rejectCount >= MAX_DETERMINISTIC_FAILURES) {
+            await stampAtomsScanHash(item);
+            tombstonedForQualityRejections.push(item.slug);
+          }
+        }
         if (item.kind === 'transcript') transcriptsProcessed++;
         else pagesProcessed++;
         opts.progress?.tick(1, `${totalAtomsExtracted} atoms / ${duplicatesSkipped} skipped`);
@@ -1211,6 +1282,7 @@ export async function runPhaseExtractAtoms(
       ...(abortedGlobalError ? { aborted_global_error: abortedGlobalError } : {}),
       malformed_outputs: malformedOutputs,
       tombstoned_for_failures: tombstonedForFailures,
+      tombstoned_for_quality_rejections: tombstonedForQualityRejections,
       estimated_spend_usd: estimatedSpendUsd,
       budget_usd: budgetCap,
       model: extractModel,

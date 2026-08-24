@@ -23,6 +23,7 @@ import {
 } from '../src/core/cycle/extract-atoms.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import type { ChatResult, ChatOpts } from '../src/core/ai/gateway.ts';
+import type { AtomSemanticValidator } from '../src/core/cycle/atom-safety.ts';
 
 let engine: PGLiteEngine;
 
@@ -158,6 +159,60 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     expect(failures[0].error).toContain('[transient — retried next run]');
     const fm = await frontmatterOf('note/t1');
     expect(fm.atoms_fail_count).toBeUndefined();
+    expect(fm.atoms_scan_hash).toBeUndefined();
+  });
+
+  test(`all-quality-rejected batches tombstone only after ${MAX_DETERMINISTIC_FAILURES} same-content attempts`, async () => {
+    await seedPage('note/q1');
+    const rejectAtomicity: AtomSemanticValidator = async () => ({
+      verdicts: [{
+        index: 0,
+        scores: {
+          source_support: 1,
+          exactly_one_claim: 0,
+          self_contained: 1,
+          no_hidden_causation_or_overgeneralization: 1,
+          no_sensitive_content: 1,
+        },
+      }],
+    });
+    const opts = {
+      sourceId: 'default',
+      _transcripts: [],
+      _pages: [{ slug: 'note/q1', content: 'prose', contentHash: HASH_A }],
+      _chat: async (_o: ChatOpts) => okChatResult(ATOM_JSON),
+      _semanticValidator: rejectAtomicity,
+    };
+
+    for (let i = 1; i < MAX_DETERMINISTIC_FAILURES; i++) {
+      const result = await runPhaseExtractAtoms(engine, opts);
+      expect(result.details.tombstoned_for_quality_rejections).toEqual([]);
+      const fm = await frontmatterOf('note/q1');
+      expect(Number(fm.atoms_reject_count)).toBe(i);
+      expect(fm.atoms_reject_hash).toBe(HASH_A);
+      expect(fm.atoms_reject_last_reasons).toEqual({ semantic_atomicity: 1 });
+      expect(fm.atoms_scan_hash).toBeUndefined();
+    }
+
+    const final = await runPhaseExtractAtoms(engine, opts);
+    expect(final.details.tombstoned_for_quality_rejections).toEqual(['note/q1']);
+    const fm = await frontmatterOf('note/q1');
+    expect(Number(fm.atoms_reject_count)).toBe(MAX_DETERMINISTIC_FAILURES);
+    expect(fm.atoms_scan_hash).toBe(HASH_A);
+  });
+
+  test('semantic-validator operational failures never consume the quality retry allowance', async () => {
+    await seedPage('note/q2');
+    const result = await runPhaseExtractAtoms(engine, {
+      sourceId: 'default',
+      _transcripts: [],
+      _pages: [{ slug: 'note/q2', content: 'prose', contentHash: HASH_A }],
+      _chat: async (_o: ChatOpts) => okChatResult(ATOM_JSON),
+      _semanticValidator: async () => { throw new Error('validator transport failed'); },
+    });
+    expect(result.details.rejected_by_reason).toEqual({ semantic_validator_failure: 1 });
+    const fm = await frontmatterOf('note/q2');
+    expect(fm.atoms_reject_count).toBeUndefined();
     expect(fm.atoms_scan_hash).toBeUndefined();
   });
 });

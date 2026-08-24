@@ -160,7 +160,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   of folding them into semantic rejection counts.
   Exact-quote atoms also fail closed on multilingual compound/list evidence
   (including spaced slashes and parenthetical enumerations) and vague/deictic
-  fragments before the semantic batch.
+  fragments before the semantic batch. An unchanged page whose candidates all
+  fail deterministic or semantic quality gates receives three bounded attempts;
+  only then may a hash-keyed terminal marker clear it from the atom backlog.
+  Provider failures, validator timeouts/invalid responses, and invalid safety
+  configuration never consume that allowance. Persist only stable aggregate
+  reason counts, never source or candidate text.
 - **Chronicle yield gate:** explicit conversation `message_count < 100` is
   ineligible, including note-typed `conversations/` rescue pages. Meetings and
   calendar events are unaffected; missing metadata keeps legacy eligibility.
