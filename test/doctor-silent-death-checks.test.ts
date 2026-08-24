@@ -164,6 +164,29 @@ describe('content_hash_duplicates (#2250)', () => {
     const c = await checkContentHashDuplicates(engine);
     expect(c.status).toBe('ok');
   });
+
+  test('declared dependency and distribution replicas stay visible without warning', async () => {
+    await addPage('embedding-venv/lib/python/site-packages/pkg/license', { hash: 'license' });
+    await addPage('embedding-venv/lib/python/site-packages/vendor/pkg/license', { hash: 'license' });
+    await addPage('skills/query/skill', { hash: 'skill' });
+    await addPage('plugin/skills/query/skill', { hash: 'skill' });
+    const c = await checkContentHashDuplicates(engine);
+    expect(c.status).toBe('ok');
+    expect((c.details as any).replica_group_count).toBe(2);
+    expect((c.details as any).replica_counts).toEqual({ dependency_tree: 1, skill_distribution: 1 });
+  });
+
+  test('locale, golden, and parallel-backend copies are declared replicas', async () => {
+    await addPage('docs/user-guide/start', { hash: 'locale' });
+    await addPage('docs/ru/user-guide/start', { hash: 'locale' });
+    await addPage('ship/skill', { hash: 'golden' });
+    await addPage('test/fixtures/golden/claude-ship-skill', { hash: 'golden' });
+    await addPage('skills/mlops/inference/gguf/references/troubleshooting', { hash: 'backend' });
+    await addPage('skills/mlops/inference/llama-cpp/references/troubleshooting', { hash: 'backend' });
+    const c = await checkContentHashDuplicates(engine);
+    expect(c.status).toBe('ok');
+    expect((c.details as any).replica_counts).toEqual({ locale_shadow: 1, golden_fixture: 1, parallel_backend_reference: 1 });
+  });
 });
 
 describe('undeclared_db_only_pages (#2784)', () => {

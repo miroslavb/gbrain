@@ -7,6 +7,7 @@
 import { join } from 'path';
 import { existsSync, readdirSync } from 'fs';
 import type { BrainEngine } from '../../../core/engine.ts';
+import { classifyDuplicateReplicaGroup, type DuplicateReplicaClass } from '../content-duplicate-replicas.ts';
 import { probeSourceGitState } from '../../../core/git-head.ts';
 // v0.41.32.0: remote staleness reads the stored newest_content_at column via
 // this pure comparator (no git subprocess on the HTTP MCP doctor path).
@@ -229,8 +230,7 @@ export async function checkContentHashDuplicates(engine: BrainEngine): Promise<C
          FROM pages
         WHERE deleted_at IS NULL AND content_hash IS NOT NULL AND content_hash <> ''
         GROUP BY source_id, content_hash
-       HAVING count(*) > 1
-        LIMIT 50`,
+       HAVING count(*) > 1`,
     );
     if (rows.length === 0) {
       return { name, status: 'ok', message: 'No same-source content-hash duplicate groups' };
@@ -239,8 +239,14 @@ export async function checkContentHashDuplicates(engine: BrainEngine): Promise<C
     const samples: string[] = [];
     let otherGroupCount = 0;
     const otherSamples: string[] = [];
+    const replicaCounts: Partial<Record<DuplicateReplicaClass, number>> = {};
     for (const r of rows) {
       const slugs = String(r.slugs).split('|');
+      const replicaClass = classifyDuplicateReplicaGroup(slugs);
+      if (replicaClass) {
+        replicaCounts[replicaClass] = (replicaCounts[replicaClass] ?? 0) + 1;
+        continue;
+      }
       const bare = slugs.filter(s => !s.includes('/'));
       const prefixed = slugs.filter(s => s.includes('/'));
       if (bare.length > 0 && prefixed.length > 0) {
@@ -269,6 +275,15 @@ export async function checkContentHashDuplicates(engine: BrainEngine): Promise<C
         `no automatic delete hint (either copy may be the one links point at).`,
       );
     }
+    const replicaGroupCount = Object.values(replicaCounts).reduce((sum, count) => sum + (count ?? 0), 0);
+    if (parts.length === 0) {
+      return {
+        name, status: 'ok',
+        message: `No actionable same-source content-hash duplicates (${replicaGroupCount} declared replica group(s) retained).`,
+        details: { pair_count: 0, hash_groups: rows.length, distinct_slug_group_count: 0, replica_group_count: replicaGroupCount, replica_counts: replicaCounts },
+      };
+    }
+    if (replicaGroupCount > 0) parts.push(`${replicaGroupCount} declared replica group(s) retained and reported in details.`);
     return {
       name,
       status: 'warn',
@@ -279,6 +294,8 @@ export async function checkContentHashDuplicates(engine: BrainEngine): Promise<C
         sample_pairs: samples,
         distinct_slug_group_count: otherGroupCount,
         sample_distinct_slug_groups: otherSamples,
+        replica_group_count: replicaGroupCount,
+        replica_counts: replicaCounts,
       },
     };
   } catch (e) {

@@ -91,6 +91,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   transaction must insert the replacement and set the old active fact's
   `expired_at` plus `superseded_by=new.id`. Missing, foreign-source,
   wrong-entity, or already-expired targets roll back the whole page.
+- **Duplicate-content signal:** doctor counts every same-source content-hash
+  group, but dependency trees and exact declared distribution/fixture/locale
+  replicas are non-actionable details. Any other distinct-slug group remains
+  a warning; never add a broad prefix exemption to make the check green.
 - **Interrupted transcript quarantine:** the exact Hermes
   `Operation interrupted: waiting for model response (...)` transport status
   is not conversation content. Drop it before conversation-facts segmentation,
