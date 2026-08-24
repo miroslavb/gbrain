@@ -26,6 +26,7 @@ import {
   PROPOSE_TAKES_PROMPT_VERSION,
   PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
   PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS,
+  PROPOSE_TAKES_MIN_PAGE_CHARS,
   hasGradeableClaimSignal,
   resolveProposeTakesDeadlineMs,
   PROPOSE_TAKES_FALLBACK_DEADLINE_MS,
@@ -238,6 +239,9 @@ describe('parseExtractorOutput', () => {
       ['I think the sequential design is better.', 'judgment', true],
       ['Правильное решение — не создавать веер соединений.', 'judgment', true],
       ['Вероятно рынок сократится к 2027.', 'prediction', true],
+      ['If the P0 fixes land, coverage reaches 71%.', 'prediction', true],
+      ['The remaining gaps correctly require unavailable source data.', 'judgment', true],
+      ['The median-of-medians is a clever workaround.', 'judgment', true],
       ['Analytics accuracy ≥99%', 'judgment', false],
       ['Vendoring is deprecated.', 'judgment', false],
       ['Потолок железа: 0.95 чанка/с', 'judgment', false],
@@ -705,7 +709,8 @@ New prose appended here.`;
     // Scalar sourceId scope from ctx binds as a plain equality param.
     expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
     expect(pageSelect!.params[1]).toEqual(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS);
-    expect(pageSelect!.params[2]).toBe('default');
+    expect(pageSelect!.params[2]).toBe(PROPOSE_TAKES_MIN_PAGE_CHARS);
+    expect(pageSelect!.params[3]).toBe('default');
   });
 
   test('narrow projection: federated sourceIds beat scalar sourceId', async () => {
@@ -722,7 +727,8 @@ New prose appended here.`;
     expect(pageSelect!.sql).toContain('source_id = ANY(');
     expect(pageSelect!.params[0]).toEqual(PROPOSE_TAKES_ALLOWED_PAGE_TYPES);
     expect(pageSelect!.params[1]).toEqual(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS);
-    expect(pageSelect!.params[2]).toEqual(['team-a', 'team-b']);
+    expect(pageSelect!.params[2]).toBe(PROPOSE_TAKES_MIN_PAGE_CHARS);
+    expect(pageSelect!.params[3]).toEqual(['team-a', 'team-b']);
   });
 });
 

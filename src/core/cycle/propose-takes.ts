@@ -47,6 +47,7 @@ import { writeReceipt } from '../extract/receipt-writer.ts';
 import { upsertExtractRollup } from '../extract/rollup-writer.ts';
 import { GBrainError } from '../types.ts';
 import { isConfigTruthy } from '../config.ts';
+import { loadSensitivityConfig, scanSensitive, type SensitivityScanConfig } from '../context/sensitivity-scan.ts';
 import type { OperationContext } from '../operations.ts';
 import type { BrainEngine } from '../engine.ts';
 import type { PhaseStatus, CyclePhase } from '../cycle.ts';
@@ -56,7 +57,7 @@ import type { PhaseStatus, CyclePhase } from '../cycle.ts';
  * verdicts in `take_proposals` (composite key includes prompt_version) stay
  * valid as audit history; new runs re-spend LLM tokens on every page.
  */
-export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.3-semantic-signal-grounded-receipts';
+export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.4-sensitive-longform-grounded-receipts';
 
 /**
  * Containment allowlist. Apply this predicate in SQL before ORDER/LIMIT so a
@@ -84,6 +85,9 @@ export const PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS = [
   '%/skill',
   '%/skills/%',
 ] as const;
+
+/** Production means long-form prose, not newly written factual entity stubs. */
+export const PROPOSE_TAKES_MIN_PAGE_CHARS = 800;
 
 /**
  * @deprecated Empty extraction memoization now lives only in
@@ -115,12 +119,14 @@ export const EMPTY_EXTRACTION_TOMBSTONE_TEXT = '(no gradeable claims)';
  *   - kind enum kept narrow ('prediction'|'judgment'|'bet') — the v1
  *     stub's 4-tag enum bled into noise classification.
  *
- * The current v0.46.28.3 prompt adds production containment learned from two
+ * The current v0.46.28.4 prompt adds production containment learned from three
  * grounded canaries: exact evidence alone does not distinguish a gradeable
  * judgment from a KPI, historical measurement, ETA, procedural fact, or
- * heading fragment. Those stricter rules are not represented by the historical
- * score above; re-run cat15 before enabling automatic production work. The
- * train-holdout gap should stay < 0.10 (overfitting threshold).
+ * heading fragment; type labels alone do not guarantee long-form prose; and a
+ * page can contain credentials or PII that must fail before an external LLM
+ * call. Those stricter rules are not represented by the historical score above;
+ * re-run cat15 before enabling automatic production work. The train-holdout gap
+ * should stay < 0.10 (overfitting threshold).
  */
 export const EXTRACT_TAKES_PROMPT = `Extract gradeable claims from the prose below.
 
@@ -209,6 +215,10 @@ export interface ProposeTakesOpts extends BasePhaseOpts {
   promptVersion?: string;
   /** Override model id (tests + config). */
   model?: string;
+  /** Override the production long-form floor (tests/evals). */
+  minPageChars?: number;
+  /** Inject a deterministic source-sensitivity config (tests). */
+  sensitivityConfig?: SensitivityScanConfig;
   /** Skip pages that already have a complete takes fence. Default: true. */
   skipPagesWithFence?: boolean;
   /** Override the phase wall-clock deadline (tests). Default: 30 min. */
@@ -258,6 +268,8 @@ export interface ProposeTakesResult {
   page_receipts_empty: number;
   page_receipts_quality_rejected: number;
   page_receipts_failed: number;
+  /** Pages stopped by the deterministic full-source scan before any LLM call. */
+  pages_rejected_sensitive: number;
   /** Provider/model ids that actually answered successful production calls. */
   models_used: string[];
   warnings: string[];
@@ -284,15 +296,21 @@ async function listCandidatePages(
   engine: BrainEngine,
   scope: ScopedReadOpts,
   limit: number,
+  minPageChars: number,
 ): Promise<ProposeTakesPageRow[]> {
   const where = [
     'deleted_at IS NULL',
     'type = ANY($1::text[])',
     'NOT (slug LIKE ANY($2::text[]))',
+    'length(compiled_truth) >= $3',
     'compiled_truth IS NOT NULL',
     "btrim(compiled_truth) <> ''",
   ];
-  const params: unknown[] = [PROPOSE_TAKES_ALLOWED_PAGE_TYPES, PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS];
+  const params: unknown[] = [
+    PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
+    PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS,
+    minPageChars,
+  ];
   if (scope.sourceIds && scope.sourceIds.length > 0) {
     params.push(scope.sourceIds);
     where.push(`source_id = ANY($${params.length}::text[])`);
@@ -508,7 +526,8 @@ function parseCleanExtractionArray(raw: string): unknown[] | null {
 }
 
 const PREDICTION_SIGNAL_RE = /\b(?:will|won't|would|likely|unlikely|expect(?:s|ed|ing)?|predict(?:s|ed|ing)?|forecast(?:s|ed|ing)?|probab(?:le|ly|ility)|chance|risk|may|might|could|next\s+(?:week|month|quarter|year)|by\s+(?:q[1-4]|\d{4}))\b|(?:будет|будут|буду|вероятн\p{L}*|ожида\p{L}*|прогноз\p{L}*|предска\p{L}*|шанс\p{L}*|риск\p{L}*|может|могут|в\s+следующ\p{L}*|к\s+\d{4})/iu;
-const JUDGMENT_SIGNAL_RE = /\b(?:should|must|ought|need(?:s)?\s+to|better|worse|best|worst|right|wrong|correct|incorrect|prefer(?:s|red|ring)?|recommend(?:s|ed|ing)?|worth|valuable|harmful|beneficial|dangerous|safe|safer|unsafe|good|bad|ideal|effective|ineffective|important|critical|reasonable|unreasonable|i\s+think|i\s+believe)\b|(?:следует|нужно|необходимо|долж(?:ен|на|ны|но)|лучше|хуже|правильн\p{L}*|неправильн\p{L}*|рекоменд\p{L}*|предпочт\p{L}*|не\s+стоит|стоит|важн\p{L}*|критичн\p{L}*|опасн\p{L}*|безопасн\p{L}*|губительн\p{L}*|полезн\p{L}*|эффективн\p{L}*|неэффективн\p{L}*|оптимальн\p{L}*|счита\p{L}*|дума\p{L}*|полага\p{L}*)/iu;
+const CONDITIONAL_PREDICTION_SIGNAL_RE = /\bif\b[\s\S]{0,160}\b(?:will|would|then|reach(?:es)?|rise|fall|grow|drop|increase|decrease|land)\b|(?:если)[\s\S]{0,160}(?:будет|станет|достигн\p{L}*|выраст\p{L}*|упад\p{L}*|сниз\p{L}*|увелич\p{L}*)/iu;
+const JUDGMENT_SIGNAL_RE = /\b(?:should|must|ought|need(?:s)?\s+to|better|worse|best|worst|right|wrong|correct|correctly|incorrect|prefer(?:s|red|ring)?|recommend(?:s|ed|ing)?|worth|valuable|harmful|beneficial|dangerous|safe|safer|unsafe|good|bad|ideal|effective|ineffective|important|critical|reasonable|unreasonable|clever|sound|flawed|superior|inferior|robust|fragile|i\s+think|i\s+believe)\b|(?:следует|нужно|необходимо|долж(?:ен|на|ны|но)|лучше|хуже|правильн\p{L}*|неправильн\p{L}*|корректн\p{L}*|рекоменд\p{L}*|предпочт\p{L}*|не\s+стоит|стоит|важн\p{L}*|критичн\p{L}*|опасн\p{L}*|безопасн\p{L}*|губительн\p{L}*|полезн\p{L}*|эффективн\p{L}*|неэффективн\p{L}*|оптимальн\p{L}*|разумн\p{L}*|сильн\p{L}*|слаб\p{L}*|над[её]жн\p{L}*|хрупк\p{L}*|счита\p{L}*|дума\p{L}*|полага\p{L}*)/iu;
 
 /**
  * Exact quotation proves provenance, not semantic gradeability. Require the
@@ -519,7 +538,9 @@ export function hasGradeableClaimSignal(claimText: string, rawKind: string): boo
   const normalized = claimText.normalize('NFKC').trim();
   const lexicalWords = normalized.match(/[\p{L}\p{N}]+/gu) ?? [];
   if (lexicalWords.length < 3) return false;
-  if (rawKind === 'prediction' || rawKind === 'bet') return PREDICTION_SIGNAL_RE.test(normalized);
+  if (rawKind === 'prediction' || rawKind === 'bet') {
+    return PREDICTION_SIGNAL_RE.test(normalized) || CONDITIONAL_PREDICTION_SIGNAL_RE.test(normalized);
+  }
   if (rawKind === 'judgment') return JUDGMENT_SIGNAL_RE.test(normalized);
   return false;
 }
@@ -745,6 +766,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
     const extractor = opts.extractor ?? defaultExtractor;
     const promptVersion = opts.promptVersion ?? PROPOSE_TAKES_PROMPT_VERSION;
     const pageLimit = opts.pageLimit ?? 100;
+    const minPageChars = opts.minPageChars ?? PROPOSE_TAKES_MIN_PAGE_CHARS;
     const skipPagesWithFence = opts.skipPagesWithFence ?? false;
     // gbrain#4168: explicit test override wins; otherwise the REAL remaining
     // job budget (when the cycle threads deadlineAtMs) clamped to the derived
@@ -836,6 +858,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       page_receipts_empty: 0,
       page_receipts_quality_rejected: 0,
       page_receipts_failed: 0,
+      pages_rejected_sensitive: 0,
       models_used: [],
       warnings: [],
       deadline_hit: false,
@@ -855,7 +878,13 @@ class ProposeTakesPhase extends BaseCyclePhase {
     }
 
     // Load pages eligible for proposal. Source-scoped per BaseCyclePhase.
-    const pages = await listCandidatePages(engine, scope, pageLimit);
+    const pages = await listCandidatePages(engine, scope, pageLimit, minPageChars);
+    // Load once, before the loop and before any external call. A malformed or
+    // unreadable operator scanner config throws and aborts the whole phase —
+    // fail-closed is safer than sending even the first page unscanned.
+    const sensitivityConfig = opts.sensitivityConfig ?? loadSensitivityConfig({
+      workspaceRoot: opts.repoPath,
+    });
 
     if (opts.reporter) {
       opts.reporter.start('propose_takes.pages' as never, pages.length);
@@ -905,6 +934,27 @@ class ProposeTakesPhase extends BaseCyclePhase {
         continue;
       }
       result.cache_misses += 1;
+
+      // Full-source privacy boundary. Candidate-level scanning after the LLM
+      // is too late: the raw page has already left the host. Findings expose
+      // only stable detector families/fingerprints; receipts persist no match.
+      const sensitivityFindings = scanSensitive(body, sensitivityConfig);
+      if (sensitivityFindings.length > 0) {
+        result.pages_rejected_sensitive += 1;
+        result.warnings.push(
+          `${page.slug}: skipped before LLM by deterministic sensitive-source scanner`,
+        );
+        if (!dryRun) {
+          await writeProposalPageRun(engine, {
+            sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+            proposalRunId, modelId: 'deterministic:sensitivity-scan',
+            status: 'quality_rejected', proposalCount: 0,
+            evidenceSpanCount: 0, errorCode: 'sensitive_source',
+          });
+          result.page_receipts_quality_rejected += 1;
+        }
+        continue;
+      }
 
       // Budget pre-check before the LLM call. Estimate: ~1500 input tokens + 500 output.
       const budget = this.checkBudget({
@@ -1150,7 +1200,8 @@ class ProposeTakesPhase extends BaseCyclePhase {
     return {
       summary:
         `propose_takes: scanned ${result.pages_scanned} pages, ${result.cache_hits} cached, ${result.proposals_inserted} grounded proposals, ` +
-        `${result.proposals_rejected_ungrounded} ungrounded rejected, ${result.empty_runs_written} empty (run ${proposalRunId})` +
+        `${result.proposals_rejected_ungrounded} ungrounded rejected, ${result.pages_rejected_sensitive} sensitive skipped, ` +
+        `${result.empty_runs_written} empty (run ${proposalRunId})` +
         (result.aborted_global_error
           ? `; aborted on ${result.aborted_global_error} error after ${result.pages_scanned} page(s)`
           : '') +

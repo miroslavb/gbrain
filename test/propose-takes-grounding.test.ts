@@ -6,8 +6,10 @@ import {
   contentHash,
   PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
   PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS,
+  PROPOSE_TAKES_MIN_PAGE_CHARS,
   type ProposeTakesExtraction,
   type ProposeTakesExtractor,
+  type ProposeTakesOpts,
 } from '../src/core/cycle/propose-takes.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import type { OperationContext } from '../src/core/operations.ts';
@@ -38,6 +40,20 @@ async function putPage(slug: string, body: string, type = 'concept'): Promise<vo
   await engine.putPage(slug, { type: type as never, title: slug, compiled_truth: body, frontmatter: {} });
 }
 
+const CLEAN_SENSITIVITY_CONFIG = { allowlist: [], blocklistRe: null, patterns: [] };
+
+/** Existing focused fixtures intentionally use short prose; production-floor coverage is separate. */
+async function runShortFixture(
+  operationCtx: OperationContext,
+  opts: ProposeTakesOpts,
+) {
+  return runPhaseProposeTakes(operationCtx, {
+    minPageChars: 0,
+    sensitivityConfig: CLEAN_SENSITIVITY_CONFIG,
+    ...opts,
+  });
+}
+
 describe('grounded take proposal publication', () => {
   test('stores exact evidence/source hash and rejects an ungrounded sibling', async () => {
     const body = 'I bet the launch reaches 100 customers by September.';
@@ -47,7 +63,7 @@ describe('grounded take proposal publication', () => {
       { claim_text: 'Launch reaches 1,000 customers tomorrow', kind: 'bet', holder: 'brain', weight: 0.9, evidence_span: 'This sentence is not in the page.' },
     ];
 
-    const result = await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    const result = await runShortFixture(ctx(), { extractor, pageLimit: 1 });
     expect(result.details).toMatchObject({
       proposals_inserted: 1,
       proposals_rejected_ungrounded: 1,
@@ -68,7 +84,7 @@ describe('grounded take proposal publication', () => {
     const extractor: ProposeTakesExtractor = async () => [
       { claim_text: 'Unsupported forecast', kind: 'bet', holder: 'brain', weight: 0.8, evidence_span: 'fabricated quote' },
     ];
-    const result = await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    const result = await runShortFixture(ctx(), { extractor, pageLimit: 1 });
 
     expect(result.details).toMatchObject({ proposals_inserted: 0, page_receipts_quality_rejected: 1 });
     expect(await engine.executeRaw(`SELECT id FROM take_proposals`)).toHaveLength(0);
@@ -101,7 +117,7 @@ describe('grounded take proposal publication', () => {
         return fn(proxy);
       });
     try {
-      const result = await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+      const result = await runShortFixture(ctx(), { extractor, pageLimit: 1 });
       expect(result.details).toMatchObject({ proposals_inserted: 0, page_receipts_failed: 1 });
     } finally {
       (engine as unknown as { transaction: BrainEngine['transaction'] }).transaction = original;
@@ -119,7 +135,7 @@ describe('grounded take proposal publication', () => {
     await putPage('analysis/cap-c', 'No gradeable claim in C.');
     const extractor: ProposeTakesExtractor = async () => [];
 
-    const result = await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 2 });
+    const result = await runShortFixture(ctx(), { extractor, pageLimit: 2 });
     expect(result.details).toMatchObject({ pages_scanned: 2, page_receipts_empty: 2 });
     expect(await engine.executeRaw(`SELECT id FROM proposal_page_runs`)).toHaveLength(2);
   });
@@ -133,7 +149,7 @@ describe('grounded take proposal publication', () => {
       return [{ claim_text: 'durable markets will consolidate', kind: 'bet', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
     };
 
-    await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    await runShortFixture(ctx(), { extractor, pageLimit: 1 });
     expect(seen).toBe('concepts/eligible');
     expect(PROPOSE_TAKES_ALLOWED_PAGE_TYPES).not.toContain('conversation' as never);
   });
@@ -149,10 +165,60 @@ describe('grounded take proposal publication', () => {
       return [{ claim_text: 'I think a sequential design is better.', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
     };
 
-    await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    await runShortFixture(ctx(), { extractor, pageLimit: 1 });
     expect(seen).toBe('concepts/eligible-judgment');
     expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('projects/%');
     expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('%/skill');
+  });
+
+  test('production long-form floor runs before LIMIT so factual stubs cannot consume canary slots', async () => {
+    const longBody = `I think a sequential design is better. ${'Durable supporting prose. '.repeat(40)}`;
+    await putPage('concepts/long-form', longBody);
+    await putPage('concepts/newer-stub', 'A short factual entity stub.');
+    let seen = '';
+    const extractor: ProposeTakesExtractor = async ({ pagePath, pageBody }) => {
+      seen = pagePath;
+      return [{ claim_text: 'I think a sequential design is better.', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
+    };
+
+    await runPhaseProposeTakes(ctx(), {
+      extractor,
+      pageLimit: 1,
+      sensitivityConfig: CLEAN_SENSITIVITY_CONFIG,
+    });
+    expect(seen).toBe('concepts/long-form');
+    expect(PROPOSE_TAKES_MIN_PAGE_CHARS).toBe(800);
+  });
+
+  test('full-source sensitive scan rejects before extractor and writes no proposal text', async () => {
+    const body = `Authorization: Bearer fake-canary-token-1234567890\nI think a sequential design is better. ${'Padding. '.repeat(100)}`;
+    await putPage('concepts/sensitive-source', body);
+    let calls = 0;
+    const extractor: ProposeTakesExtractor = async () => {
+      calls++;
+      return [{ claim_text: 'I think a sequential design is better.', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: body }];
+    };
+
+    const result = await runPhaseProposeTakes(ctx(), {
+      extractor,
+      pageLimit: 1,
+      sensitivityConfig: CLEAN_SENSITIVITY_CONFIG,
+    });
+    expect(calls).toBe(0);
+    expect(result.details).toMatchObject({
+      proposals_inserted: 0,
+      pages_rejected_sensitive: 1,
+      page_receipts_quality_rejected: 1,
+    });
+    expect(result.details.warnings.join('\n')).not.toContain('fake-canary-token');
+    expect(await engine.executeRaw(`SELECT id FROM take_proposals`)).toHaveLength(0);
+    expect(await engine.executeRaw<{ status: string; error_code: string; model_id: string }>(
+      `SELECT status, error_code, model_id FROM proposal_page_runs`,
+    )).toEqual([{
+      status: 'quality_rejected',
+      error_code: 'sensitive_source',
+      model_id: 'deterministic:sensitivity-scan',
+    }]);
   });
 
   test('dry-run performs extraction but writes no proposals, receipts, or rollup', async () => {
@@ -162,7 +228,7 @@ describe('grounded take proposal publication', () => {
       { claim_text: 'dry-run markets will consolidate', kind: 'bet', holder: 'brain', weight: 0.6, evidence_span: body },
     ];
 
-    const result = await runPhaseProposeTakes(ctx(true), { extractor, pageLimit: 1 });
+    const result = await runShortFixture(ctx(true), { extractor, pageLimit: 1 });
     expect(result.details).toMatchObject({ pages_scanned: 1, proposals_inserted: 0 });
     expect(await engine.executeRaw(`SELECT id FROM take_proposals`)).toHaveLength(0);
     expect(await engine.executeRaw(`SELECT id FROM proposal_page_runs`)).toHaveLength(0);
@@ -178,7 +244,7 @@ describe('grounded take proposal publication', () => {
     }] as ProposeTakesExtraction;
     Object.defineProperty(extraction, 'modelId', { value: 'together:deepseek-v4-flash:0731' });
 
-    await runPhaseProposeTakes(ctx(), {
+    await runShortFixture(ctx(), {
       extractor: async () => extraction,
       model: 'claude-cli:claude-sonnet-5',
       pageLimit: 1,
@@ -195,7 +261,7 @@ describe('grounded take proposal publication', () => {
     Object.defineProperty(extraction, 'qualityRejected', { value: true });
     Object.defineProperty(extraction, 'modelId', { value: 'test:strict-parser' });
 
-    const result = await runPhaseProposeTakes(ctx(), { extractor: async () => extraction, pageLimit: 1 });
+    const result = await runShortFixture(ctx(), { extractor: async () => extraction, pageLimit: 1 });
     expect(result.details).toMatchObject({ page_receipts_quality_rejected: 1, page_receipts_empty: 0 });
     expect(await engine.executeRaw<{ status: string; error_code: string }>(
       `SELECT status, error_code FROM proposal_page_runs`,

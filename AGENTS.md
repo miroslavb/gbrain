@@ -106,6 +106,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   (`projects/`, `infra/`, `infrastructure/`, `features/`, generated `*/skill`)
   because production type metadata is not authoritative. Conversations,
   sessions, projects, companies, and operational pages are out of scope. The
+  production selector also requires at least 800 characters of compiled prose
+  before `LIMIT`; short factual stubs must not consume bounded canary slots.
+  Every selected page passes the shared deterministic full-source sensitivity
+  scanner before any external LLM call. A hit writes only a
+  `quality_rejected/sensitive_source` receipt with deterministic scanner model
+  provenance—never the matched value—and sends no page content externally. The
   production parser accepts only prediction/judgment/bet outputs whose claim
   text is itself an exact contiguous substring of the evidence span and carries
   a deterministic multilingual kind signal (forward/uncertainty for predictions
