@@ -10,10 +10,7 @@ import type { FactsBackstopResult } from '../core/facts/backstop.ts';
 import { ALLOWED_TYPES, type AllowedType } from '../core/facts/conversation-types.ts';
 import { MinionQueue, deriveWedgeSignal } from '../core/minions/queue.ts';
 import { MinionWorker } from '../core/minions/worker.ts';
-import {
-  WORKER_EXIT_RSS_WATCHDOG,
-  JOB_CHILD_EXIT_USAGE,
-} from '../core/minions/worker-exit-codes.ts';
+import { WORKER_EXIT_RSS_WATCHDOG, JOB_CHILD_EXIT_USAGE } from '../core/minions/worker-exit-codes.ts';
 import { CHILD_ENV, resolveChildCliInvocation } from '../core/minions/job-isolation.ts';
 import { withFactsAbsorbHaltCooldown } from '../core/minions/llm-halt-cooldown.ts';
 import { runChildJobEntry } from '../core/minions/run-child.ts';
@@ -23,6 +20,7 @@ import { loadConfig, isThinClient } from '../core/config.ts';
 import { callRemoteTool, unpackToolResult } from '../core/mcp-client.ts';
 import { parseNiceValue, applyNiceness, getEffectiveNiceness, formatNice } from '../core/minions/niceness.ts';
 import { defaultTimeoutMsFor, defaultLockDurationMsFor, clampLockDurationMs } from '../core/minions/handler-timeouts.ts';
+import { createGlobalMaintenanceProgress } from '../core/minions/global-maintenance-progress.ts';
 
 function parseFlag(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
@@ -2555,8 +2553,7 @@ export async function registerBuiltinHandlers(
     // DB-only phases (resolve_symbol_edges, embed, ...) — not silently lint/sync
     // against whatever directory the worker happens to be running in.
     const repoPath: string | null = typeof job.data.repoPath === 'string'
-      ? job.data.repoPath
-      : (await engine.getConfig('sync.repo_path')) ?? null;
+      ? job.data.repoPath : (await engine.getConfig('sync.repo_path')) ?? null;
 
     // v0.38 (codex r1 P1-2 + P1-5): per-source dispatch threading.
     //   - source_id: when set, runCycle uses the per-source lock ID and
@@ -2694,7 +2691,7 @@ export async function registerBuiltinHandlers(
     };
   });
 
-  // Brain-wide maintenance. Runs mixed + global phases ONCE per window instead
+  // Brain-wide maintenance runs mixed + global phases once per window instead
   // of repeating cross-source transcript/reflection reads in every source.
   // No source_id → uses the legacy global cycle lock; stamps autopilot.last_global_at
   // on success so the dispatch gate backs off.
@@ -2712,27 +2709,8 @@ export async function registerBuiltinHandlers(
     const requested = Array.isArray(job.data.phases)
       ? (job.data.phases as string[]).filter((p) => maintenanceSet.has(p))
       : MAINTENANCE_PHASES;
-    // runCycle executes phase blocks in canonical ALL_PHASES order regardless
-    // of payload order. Canonicalize here so persisted progress identifies the
-    // phase that is actually running rather than the next payload entry.
-    const requestedSet = new Set(requested.length > 0 ? requested : MAINTENANCE_PHASES);
-    const phases = MAINTENANCE_PHASES.filter((phase) => requestedSet.has(phase));
-    let completedPhases = 0;
-    const publishProgress = async (currentPhase: string): Promise<void> => {
-      try {
-        await job.updateProgress?.({
-          phase: currentPhase,
-          completed_phases: completedPhases,
-          total_phases: phases.length,
-          last_completed_phase: completedPhases > 0 ? phases[completedPhases - 1] : null,
-        });
-      } catch {
-        // Progress is diagnostic. A transient/fenced update failure must not
-        // turn otherwise successful maintenance into a failed cycle.
-      }
-    };
-    await publishProgress(phases[0] ?? 'complete');
-
+    const progress = createGlobalMaintenanceProgress(job, MAINTENANCE_PHASES, requested);
+    await progress.start();
     const report = await runCycle(engine, {
       brainDir: repoPath,
       pull: false, // brain-wide DB/maintenance work never git-pulls
@@ -2743,11 +2721,10 @@ export async function registerBuiltinHandlers(
       // freshness phases) — without the owner id its private queues would be
       // owner-less and recovery would degrade to lease-expiry only.
       privateQueueOwnerJobId: job.id,
-      phases,
+      phases: progress.phases,
       forceGlobalOrphans: true,
       yieldBetweenPhases: async () => {
-        completedPhases++;
-        await publishProgress(phases[completedPhases] ?? 'complete');
+        await progress.completePhase();
         await new Promise<void>((r) => setImmediate(r));
       },
     });

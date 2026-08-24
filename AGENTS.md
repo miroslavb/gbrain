@@ -88,6 +88,14 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   is not conversation content. Drop it before conversation-facts segmentation,
   so a request with no completed reply becomes a durable non-extractable
   outcome instead of publishing requested work as fact.
+- **Indexed-session parser coverage:** generated Hermes previews use closed-role
+  `**User|Assistant|System|Tool|Human** (YYYY-MM-DD): text` anchors. Keep the
+  date-only parser role-enumerated, continuation-aware, and day-accurate at
+  midnight UTC; arbitrary dated bold labels must not become speakers.
+  Conversation-format coverage and facts extraction must distinguish true parser
+  gaps (canonical session/conversation slugs, transcript metadata, or repeated
+  speaker anchors) from narrative meetings and code/docs accidentally typed as
+  `email`; definitive non-transcripts receive a durable non-extractable outcome.
 - **MDX route slugs:** slash-prefixed `slug:` values in `.mdx` are external
   website routes (for example Docusaurus `slug: /`), not GBrain identities.
   Ignore the route during file import and retain the path-derived DB slug;
@@ -124,7 +132,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   a deterministic multilingual kind signal (forward/uncertainty for predictions
   and bets; opinion/evaluation/recommendation for judgments). Bare KPIs, ETAs,
   historical measurements, procedural facts and headings fail closed even when
-  quoted exactly. Explicit holders must match the prompt's closed
+  quoted exactly. Markdown hard-wrap whitespace may be canonicalized only by an
+  exact non-whitespace-character match; persist the recovered source bytes and
+  never use fuzzy/paraphrase grounding. Explicit holders must match the prompt's closed
   world/brain/people/company forms and explicit weights must be finite in
   `[0,1]`; do not silently normalize malformed model output. Migration 143 adds
   aggregate-only first-failure reason histograms to page receipts. These counts
@@ -137,6 +147,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,
   stable reason codes, and actual route/model only—never source or candidate text.
+  The conversation extractor prompt must also exclude IP/email/phone values,
+  credentials, private paths, and secret-bearing URLs before candidates reach
+  the gate; deterministic rejection remains mandatory defense in depth.
   Atom budget accounting must load `pricing.overrides` for both the extractor
   and semantic-validator routes; preserve typed `BudgetExhausted` stops instead
   of folding them into semantic rejection counts.

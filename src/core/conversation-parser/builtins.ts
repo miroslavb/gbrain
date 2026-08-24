@@ -96,6 +96,45 @@ export const BUILTIN_PATTERNS: readonly PatternEntry[] = [
   },
 
   {
+    // GBrain/Hermes indexed-session previews retain a calendar date per turn
+    // but intentionally omit the wall-clock time:
+    //   **User** (2026-05-01): text
+    // This is not the iMessage shape above (which requires date + time).
+    // The closed role set prevents ordinary bold prose labels from becoming
+    // transcript anchors, while continuation-aware scoring admits the
+    // generated Summary/Dialog-preview preamble only after a real role pair.
+    id: 'bold-paren-date-role',
+    origin: 'builtin',
+    regex: /^\*\*(User|Assistant|System|Tool|Human)\*\*\s*\((\d{4}-\d{2}-\d{2})\)\s*:\s*(.*)$/,
+    captures: {
+      speaker_group: 1,
+      date_group: 2,
+      text_group: 3,
+    },
+    date_source: 'inline',
+    time_format: '24h',
+    timezone_policy: 'inline_utc',
+    multi_line: true,
+    score_continuations_as_body: true,
+    score_continuations_min_distinct_speakers: 2,
+    score_full_body: true,
+    quick_reject: /^\*\*(?:User|Assistant|System|Tool|Human)\*\*/,
+    test_positive: [
+      '**User** (2026-05-01): continue from the last checkpoint',
+      '**Assistant** (2026-05-01): I will inspect the current state.',
+      '**System** (2026-05-02): Background process completed.',
+    ],
+    test_negative: [
+      '**Alice Example** (2026-05-01): arbitrary bold-name prose',
+      '**User** (2026-05-01 09:15 AM): iMessage shape',
+      '**User** (09:15): time-only shape',
+      '**User:** no-date ChatGPT export shape',
+    ],
+    source_doc:
+      'GBrain indexed Hermes session preview: `**User|Assistant** (YYYY-MM-DD): text`',
+  },
+
+  {
     id: 'telegram-bracket',
     origin: 'builtin',
     // PR #1461's BRACKET_TIME_RX, preserved verbatim.

@@ -58,7 +58,7 @@ import type { PhaseStatus, CyclePhase } from '../cycle.ts';
  * (composite key includes prompt_version) stay valid as audit history; new
  * runs re-spend LLM tokens on every page.
  */
-export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.6-strict-contract-rejection-receipts';
+export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.9-calibration-judgments';
 
 /**
  * Containment allowlist. Apply this predicate in SQL before ORDER/LIMIT so a
@@ -153,6 +153,27 @@ NOT gradeable (do NOT extract these):
 - A heading or fragment that merely names a topic (for example "MFA on OWA")
   cannot support an inferred absence, failure, cause, consequence, or polarity
 
+Coverage rules:
+- Scan every paragraph and every bullet. Return every independent author-endorsed
+  gradeable claim once; do not stop after the first few.
+- Explicit "I bet ..." claims are gradeable bets even when their grammar uses
+  present tense. Concrete future assertions in a Bets/Takes section still count.
+- Self-assessments of calibration, confidence, strengths, or recurring errors are
+  interpretive judgments, as are generalizations, comparisons, causal diagnoses,
+  and recommendations grounded in the author's observations.
+- Calibration examples that MUST be extracted as judgments include "I'm right
+  roughly 70% of the time on X", "I am worse than I think on Y", and "I'm
+  well-calibrated on Z". Preserve the exact source wording and any stated rate.
+  When the same paragraph adds a consequent self-instruction ("so I should stop
+  or trust it more"), prefer the calibration assessment; do not emit the
+  consequent instruction as a duplicate of that assessment.
+- A third party's assertion ("she thinks ...", "X argues ...") is not the page
+  author's claim unless the author explicitly endorses it. Extract the author's
+  pushback or evaluation instead, using an exact self-contained source span.
+- When two nearby sentences express the same assertion, emit only the clearest
+  author-endorsed version. Supporting reasons are evidence, not separate claims,
+  unless they assert a genuinely independent gradeable proposition.
+
 The exact claim_text quote must contain its own gradeability signal:
 - prediction/bet: an explicit forward-looking or uncertainty cue such as
   "will", "likely", "next year", "будет", "вероятно", or "ожидаю"
@@ -161,6 +182,17 @@ The exact claim_text quote must contain its own gradeability signal:
   "правильное решение"
 - claim_text must contain at least three lexical words; a bare metric, label,
   heading, or ETA is invalid even when quoted exactly
+
+Use this COPY-FIRST workflow for every row:
+1. Select the smallest complete declarative span already present in PAGE PROSE.
+2. Copy that span into claim_text. Do not summarize, rewrite, join clauses from
+   different places, or remove words/polarity. Preserve punctuation and wording.
+3. Copy one contiguous evidence_span that contains claim_text. The safest valid
+   evidence_span is the same exact source span as claim_text; expand it only when
+   adjacent author framing is needed.
+4. Before returning, verify both strings occur in PAGE PROSE and that
+   evidence_span contains claim_text. Markdown may visually wrap a sentence;
+   copy its text without paraphrasing it.
 
 For each gradeable claim, output a JSON object with:
 - claim_text   (one exact contiguous quote copied byte-for-byte from PAGE PROSE,
@@ -555,9 +587,9 @@ function parseCleanExtractionArray(raw: string): unknown[] | null {
   }
 }
 
-const PREDICTION_SIGNAL_RE = /\b(?:will|won't|would|likely|unlikely|expect(?:s|ed|ing)?|predict(?:s|ed|ing)?|forecast(?:s|ed|ing)?|probab(?:le|ly|ility)|chance|risk|may|might|could|next\s+(?:week|month|quarter|year)|by\s+(?:q[1-4]|\d{4}))\b|(?:будет|будут|буду|вероятн\p{L}*|ожида\p{L}*|прогноз\p{L}*|предска\p{L}*|шанс\p{L}*|риск\p{L}*|может|могут|в\s+следующ\p{L}*|к\s+\d{4})/iu;
+const PREDICTION_SIGNAL_RE = /\b(?:i\s+bet|will|won't|would|likely|unlikely|expect(?:s|ed|ing)?|predict(?:s|ed|ing)?|forecast(?:s|ed|ing)?|probab(?:le|ly|ility)|chance|risk|may|might|could|going\s+to|before|within|next\s+(?:(?:\d+|a|an)\s+)?(?:week|month|quarter|year)s?|by\s+(?:(?:early|mid|late)[-\s])?(?:q[1-4]|\d{4}|year(?:-end|\s+\d+)?))\b|(?:будет|будут|буду|вероятн\p{L}*|ожида\p{L}*|прогноз\p{L}*|предска\p{L}*|шанс\p{L}*|риск\p{L}*|может|могут|в\s+следующ\p{L}*|к\s+\d{4})/iu;
 const CONDITIONAL_PREDICTION_SIGNAL_RE = /\bif\b[\s\S]{0,160}\b(?:will|would|then|reach(?:es)?|rise|fall|grow|drop|increase|decrease|land)\b|(?:если)[\s\S]{0,160}(?:будет|станет|достигн\p{L}*|выраст\p{L}*|упад\p{L}*|сниз\p{L}*|увелич\p{L}*)/iu;
-const JUDGMENT_SIGNAL_RE = /\b(?:should|must|ought|need(?:s)?\s+to|better|worse|best|worst|right|wrong|correct|correctly|incorrect|prefer(?:s|red|ring)?|recommend(?:s|ed|ing)?|worth|valuable|harmful|beneficial|dangerous|safe|safer|unsafe|good|bad|ideal|effective|ineffective|important|critical|reasonable|unreasonable|clever|sound|flawed|superior|inferior|robust|fragile|i\s+think|i\s+believe)\b|(?:следует|нужно|необходимо|долж(?:ен|на|ны|но)|лучше|хуже|правильн\p{L}*|неправильн\p{L}*|корректн\p{L}*|рекоменд\p{L}*|предпочт\p{L}*|не\s+стоит|стоит|важн\p{L}*|критичн\p{L}*|опасн\p{L}*|безопасн\p{L}*|губительн\p{L}*|полезн\p{L}*|эффективн\p{L}*|неэффективн\p{L}*|оптимальн\p{L}*|разумн\p{L}*|сильн\p{L}*|слаб\p{L}*|над[её]жн\p{L}*|хрупк\p{L}*|счита\p{L}*|дума\p{L}*|полага\p{L}*)/iu;
+const JUDGMENT_SIGNAL_RE = /\b(?:should|must|ought|need(?:s)?\s+to|better|worse|best|worst|right|wrong|correct|correctly|incorrect|prefer(?:s|red|ring)?|recommend(?:s|ed|ing)?|worth|valuable|harmful|beneficial|dangerous|safe|safer|unsafe|good|bad|ideal|effective|ineffective|important|critical|reasonable|unreasonable|clever|sound|flawed|superior|inferior|robust|fragile|strong|strongly|stronger|weak|weaker|fast(?:er)?|slow(?:er)?|aggressive|mistake|problem|trouble|concern|skeptical|calibrat(?:ed|ion)|confident|over-?confident|under-?invest|more\s+than|less\s+than|too\s+(?:long|short|high|low|aggressive)|does(?:n't|\s+not)\s+hold|leaves?\s+money\s+on\s+the\s+table|i\s+think|i\s+believe|i(?:'m|\s+am)\s+not\s+sure|actually)\b|(?:следует|нужно|необходимо|долж(?:ен|на|ны|но)|лучше|хуже|правильн\p{L}*|неправильн\p{L}*|корректн\p{L}*|рекоменд\p{L}*|предпочт\p{L}*|не\s+стоит|стоит|важн\p{L}*|критичн\p{L}*|опасн\p{L}*|безопасн\p{L}*|губительн\p{L}*|полезн\p{L}*|эффективн\p{L}*|неэффективн\p{L}*|оптимальн\p{L}*|разумн\p{L}*|сильн\p{L}*|слаб\p{L}*|над[её]жн\p{L}*|хрупк\p{L}*|счита\p{L}*|дума\p{L}*|полага\p{L}*)/iu;
 const STRICT_HOLDER_RE = /^(?:world|brain|people\/[a-z0-9][a-z0-9._-]*|companies\/[a-z0-9][a-z0-9._-]*)$/;
 
 function incrementRejectionReason(
@@ -593,6 +625,76 @@ export function hasGradeableClaimSignal(claimText: string, rawKind: string): boo
   }
   if (rawKind === 'judgment') return JUDGMENT_SIGNAL_RE.test(normalized);
   return false;
+}
+
+/**
+ * LLMs routinely collapse Markdown hard-wrap whitespace even under an exact-
+ * quote instruction. Recover only a whitespace-equivalent source span and
+ * publish the source bytes, never the model-normalized string. This is not
+ * fuzzy grounding: changed, inserted, deleted, or reordered non-whitespace
+ * characters still fail closed.
+ */
+export function canonicalizeWhitespaceEquivalentSpan(
+  pageBody: string,
+  candidate: string,
+): string | null {
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+  if (/\r?\n[ \t]*\r?\n/u.test(trimmed)) return null;
+  if (pageBody.includes(trimmed)) return trimmed;
+
+  const normalize = (value: string, withMap: boolean): {
+    text: string;
+    starts: number[];
+    ends: number[];
+  } => {
+    let text = '';
+    const starts: number[] = [];
+    const ends: number[] = [];
+    for (let i = 0; i < value.length;) {
+      if (/\s/u.test(value[i]!)) {
+        const runStart = i;
+        while (i < value.length && /\s/u.test(value[i]!)) i++;
+        const run = value.slice(runStart, i);
+        if (/\r?\n[ \t]*\r?\n/u.test(run)) {
+          text += '\u0000';
+          if (withMap) {
+            starts.push(runStart);
+            ends.push(i);
+          }
+          continue;
+        }
+        // Markdown often wraps a hyphenated token after the hyphen. Treat only
+        // that presentation whitespace as absent; other runs become one space.
+        if (text.endsWith('-')) continue;
+        if (text.length === 0 || i === value.length || text.endsWith(' ')) continue;
+        text += ' ';
+        if (withMap) {
+          starts.push(runStart);
+          ends.push(i);
+        }
+        continue;
+      }
+      text += value[i]!;
+      if (withMap) {
+        starts.push(i);
+        ends.push(i + 1);
+      }
+      i++;
+    }
+    return { text, starts, ends };
+  };
+
+  const source = normalize(pageBody, true);
+  const needle = normalize(trimmed, false).text;
+  if (!needle) return null;
+  const normalizedStart = source.text.indexOf(needle);
+  if (normalizedStart < 0) return null;
+  const normalizedEnd = normalizedStart + needle.length - 1;
+  const sourceStart = source.starts[normalizedStart];
+  const sourceEnd = source.ends[normalizedEnd];
+  if (sourceStart === undefined || sourceEnd === undefined) return null;
+  return pageBody.slice(sourceStart, sourceEnd);
 }
 
 /**
@@ -644,16 +746,19 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTak
       continue;
     }
     const r = raw as Record<string, unknown>;
-    const claim_text = typeof r.claim_text === 'string' ? r.claim_text.trim() : '';
+    const rawClaimText = typeof r.claim_text === 'string' ? r.claim_text.trim() : '';
     const strictGrounding = typeof pageBody === 'string';
-    if (!claim_text) {
+    if (!rawClaimText) {
       if (strictGrounding) reject('missing_claim');
       continue;
     }
-    if (claim_text.length > (strictGrounding ? 200 : 500)) {
+    if (rawClaimText.length > (strictGrounding ? 200 : 500)) {
       if (strictGrounding) reject('claim_too_long');
       continue;
     }
+    const claim_text = strictGrounding
+      ? canonicalizeWhitespaceEquivalentSpan(pageBody, rawClaimText)
+      : rawClaimText;
     const rawKind = typeof r.kind === 'string' ? r.kind : '';
     const kind: ProposedTake['kind'] | null = strictGrounding
       ? (rawKind === 'prediction' || rawKind === 'judgment'
@@ -668,7 +773,7 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTak
       reject('unknown_kind');
       continue;
     }
-    if (strictGrounding && !hasGradeableClaimSignal(claim_text, rawKind)) {
+    if (strictGrounding && !hasGradeableClaimSignal(rawClaimText, rawKind)) {
       reject('missing_gradeable_signal');
       continue;
     }
@@ -688,24 +793,35 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTak
     const weightRaw = typeof r.weight === 'number' ? r.weight : 0.5;
     const weight = Math.max(0, Math.min(1, weightRaw));
     const domain = typeof r.domain === 'string' && r.domain.length > 0 ? r.domain : undefined;
-    const evidence_span = typeof r.evidence_span === 'string' && r.evidence_span.trim().length > 0
+    const rawEvidenceSpan = typeof r.evidence_span === 'string' && r.evidence_span.trim().length > 0
       ? r.evidence_span.trim()
       : undefined;
+    const evidence_span = strictGrounding && rawEvidenceSpan
+      ? canonicalizeWhitespaceEquivalentSpan(pageBody, rawEvidenceSpan)
+      : rawEvidenceSpan;
     if (strictGrounding) {
-      if (!evidence_span) {
+      if (!rawEvidenceSpan) {
         reject('missing_evidence');
+        continue;
+      }
+      if (rawEvidenceSpan.length > 500) {
+        reject('evidence_too_long');
+        continue;
+      }
+      if (!claim_text) {
+        reject('claim_not_verbatim');
+        continue;
+      }
+      if (claim_text.length > 200) {
+        reject('claim_too_long');
+        continue;
+      }
+      if (!evidence_span) {
+        reject('evidence_not_verbatim');
         continue;
       }
       if (evidence_span.length > 500) {
         reject('evidence_too_long');
-        continue;
-      }
-      if (!pageBody.includes(claim_text)) {
-        reject('claim_not_verbatim');
-        continue;
-      }
-      if (!pageBody.includes(evidence_span)) {
-        reject('evidence_not_verbatim');
         continue;
       }
       if (!evidence_span.includes(claim_text)) {
@@ -713,7 +829,8 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTak
         continue;
       }
     }
-    out.push({ claim_text, kind, holder, weight, domain, evidence_span });
+    if (!claim_text) continue;
+    out.push({ claim_text, kind, holder, weight, domain, evidence_span: evidence_span ?? undefined });
   }
   if (Object.keys(rejectionReasonCounts).length > 0) {
     Object.defineProperty(out, 'rejectionReasonCounts', {

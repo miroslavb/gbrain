@@ -28,6 +28,7 @@ import {
   BUILTIN_PATTERNS,
   validatePatternEntry,
 } from '../../src/core/conversation-parser/builtins.ts';
+import { expectsConversationTranscript } from '../../src/core/conversation-parser/body.ts';
 import type { Page } from '../../src/core/types.ts';
 
 // Helper to construct a minimal Page for date-derivation tests.
@@ -49,6 +50,34 @@ function makePage(
     effective_date: effective_date ?? null,
   } as Page;
 }
+
+describe('expectsConversationTranscript', () => {
+  test('keeps canonical session pages retryable even before their format is known', () => {
+    const page = { ...makePage(), slug: 'sessions/hermes/example', type: 'conversation' as const };
+    expect(expectsConversationTranscript(page, 'unknown export body')).toBe(true);
+  });
+
+  test('recognizes transcript metadata and repeated generic anchors', () => {
+    expect(expectsConversationTranscript(
+      makePage({ message_count: 42, session_id: 'abc' }),
+      'summary body',
+    )).toBe(true);
+    expect(expectsConversationTranscript(
+      makePage(),
+      '**Role A** (new-format): hello\n**Role B** (new-format): hi',
+    )).toBe(true);
+  });
+
+  test('classifies narrative meetings and email-skill prose as non-transcript', () => {
+    const meeting = { ...makePage(), slug: 'meetings/review', type: 'meeting' as const };
+    expect(expectsConversationTranscript(
+      meeting,
+      '# Review\n\nAttendees: Alice, Bob.\n\n## Notes\nReviewed the rollout.',
+    )).toBe(false);
+    const skill = { ...makePage(), slug: 'skills/email/himalaya/skill', type: 'email' as const };
+    expect(expectsConversationTranscript(skill, '# Email CLI\n\nUse the following commands.')).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // REGRESSION: PR #1461's 6 telegram-bracket cases verbatim
@@ -485,6 +514,53 @@ describe('scorePatternFull — full-body scoring (v0.41.18+ Codex P1 #1)', () =>
     const im = BUILTIN_PATTERNS.find((p) => p.id === 'imessage-slack')!;
     const body = '## Summary\nProse paragraph.\n> Blockquote\n## Heading';
     expect(scorePatternFull(body, im)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bold-paren-date-role — indexed Hermes session previews.
+// ---------------------------------------------------------------------------
+
+describe('bold-paren-date-role pattern (indexed Hermes previews)', () => {
+  test('parses a generated preview after summary preamble and anchors at midnight UTC', () => {
+    const body = [
+      '# hermes session — Continue',
+      '## Summary',
+      '- **Agent:** hermes',
+      '## Dialog preview (head)',
+      '**User** (2026-05-01): Continue from the last checkpoint.',
+      '**Assistant** (2026-05-01): I will inspect the current state.',
+      '**Assistant** (2026-05-01): The migration should fail loudly.',
+      '## Dialog preview (tail)',
+      '**User** (2026-05-02): What is the final status?',
+      '**Assistant** (2026-05-02): The bounded work is complete.',
+    ].join('\n');
+    const r = parseConversation(body);
+    expect(r.phase).toBe('regex_match');
+    expect(r.matched_pattern_id).toBe('bold-paren-date-role');
+    expect(r.messages).toHaveLength(5);
+    expect(r.messages[0]).toMatchObject({
+      speaker: 'User',
+      timestamp: '2026-05-01T00:00:00Z',
+      text: 'Continue from the last checkpoint.',
+    });
+    expect(r.messages.at(-1)?.timestamp).toBe('2026-05-02T00:00:00Z');
+  });
+
+  test('closed role set does not capture arbitrary dated bold labels', () => {
+    const r = parseConversation([
+      '**Owner** (2026-05-01): alice',
+      '**Status** (2026-05-01): green',
+    ].join('\n'));
+    expect(r.matched_pattern_id).not.toBe('bold-paren-date-role');
+  });
+
+  test('full date+time remains owned by imessage-slack', () => {
+    const r = parseConversation([
+      '**User** (2026-05-01 9:15 AM): hello',
+      '**Assistant** (2026-05-01 9:16 AM): hi',
+    ].join('\n'));
+    expect(r.matched_pattern_id).toBe('imessage-slack');
   });
 });
 

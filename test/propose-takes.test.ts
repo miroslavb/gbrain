@@ -276,6 +276,13 @@ describe('parseExtractorOutput', () => {
       ['Правильное решение — не создавать веер соединений.', 'judgment', true],
       ['Вероятно рынок сократится к 2027.', 'prediction', true],
       ['If the P0 fixes land, coverage reaches 71%.', 'prediction', true],
+      ['The market is going to compress within 18 months.', 'prediction', true],
+      ['I bet the fund leads the round.', 'bet', true],
+      ['At least one exit happens by mid-2027.', 'prediction', true],
+      ['Most cold-start failures are actually positioning problems.', 'judgment', true],
+      ["The round was priced on math that doesn't hold.", 'judgment', true],
+      ['That velocity correlates strongly with eventual scale.', 'judgment', true],
+      ['Founders inherit their prior cadence more than they admit.', 'judgment', true],
       ['The remaining gaps correctly require unavailable source data.', 'judgment', true],
       ['The median-of-medians is a clever workaround.', 'judgment', true],
       ['Analytics accuracy ≥99%', 'judgment', false],
@@ -286,6 +293,47 @@ describe('parseExtractorOutput', () => {
     for (const [claim, kind, expected] of rows) {
       expect(hasGradeableClaimSignal(claim, kind)).toBe(expected);
     }
+  });
+
+  test('canonicalizes only Markdown wrap whitespace back to exact source bytes', () => {
+    const pageBody = [
+      'Post-PMF startups will compound faster than horizontal SaaS over the',
+      'next 18 months.',
+      'The median time-to-first-paying-',
+      'customer is too long.',
+      'I think the first paragraph is strong.',
+      '',
+      'The second paragraph is weak.',
+    ].join('\n');
+    const out = parseExtractorOutput(JSON.stringify([
+      {
+        claim_text: 'Post-PMF startups will compound faster than horizontal SaaS over the next 18 months.',
+        kind: 'prediction',
+        evidence_span: 'Post-PMF startups will compound faster than horizontal SaaS over the next 18 months.',
+      },
+      {
+        claim_text: 'The median time-to-first-paying-customer is too long.',
+        kind: 'judgment',
+        evidence_span: 'The median time-to-first-paying-customer is too long.',
+      },
+      {
+        claim_text: 'Post-PMF startups might compound much faster than horizontal SaaS.',
+        kind: 'prediction',
+        evidence_span: 'Post-PMF startups might compound much faster than horizontal SaaS.',
+      },
+      {
+        claim_text: 'I think the first paragraph is strong. The second paragraph is weak.',
+        kind: 'judgment',
+        evidence_span: 'I think the first paragraph is strong. The second paragraph is weak.',
+      },
+    ]), pageBody);
+
+    expect(out.map(row => row.claim_text)).toEqual([
+      'Post-PMF startups will compound faster than horizontal SaaS over the\nnext 18 months.',
+      'The median time-to-first-paying-\ncustomer is too long.',
+    ]);
+    expect(out[0]!.evidence_span).toBe(out[0]!.claim_text);
+    expect(out.rejectionReasonCounts).toEqual({ claim_not_verbatim: 2 });
   });
 
   test('second-canary semantic regressions are filtered while explicit judgments survive', () => {

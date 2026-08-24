@@ -16,9 +16,15 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { extractFactsFromTurn, parseExtractorJson } from '../src/core/facts/extract.ts';
+import { EXTRACTOR_SYSTEM, extractFactsFromTurn, parseExtractorJson } from '../src/core/facts/extract.ts';
 
 describe('extractFactsFromTurn', () => {
+  test('extractor contract excludes deterministic sensitive-value classes before quality gating', () => {
+    expect(EXTRACTOR_SYSTEM).toContain('IP addresses');
+    expect(EXTRACTOR_SYSTEM).toContain('API/access tokens');
+    expect(EXTRACTOR_SYSTEM).toContain('private filesystem');
+    expect(EXTRACTOR_SYSTEM).toContain('URLs containing secrets');
+  });
   test('empty turn returns no facts', async () => {
     const r = await extractFactsFromTurn({ turnText: '', source: 'test' });
     expect(r).toEqual([]);

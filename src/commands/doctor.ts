@@ -1285,20 +1285,17 @@ export async function buildChecks(
     }
   }
 
-  // 3d.3 v0.41.13.0 — conversation_format_coverage. Scans up to 200
-  // most-recent conversation-type pages, runs parseConversation in
-  // dry mode, reports per-pattern hit counts + unmatched count. Warn
+  // 3d.3 v0.41.13.0 — conversation_format_coverage. Scans up to 200 recent
+  // conversation pages in dry mode, reports pattern hits + unmatched. Warn
   // at >10% unmatched with paste-ready hint pointing at
-  // `gbrain conversation-parser scan <slug>` so the operator can
-  // triage the misses interactively.
+  // `gbrain conversation-parser scan <slug>` for interactive triage.
   if (engine) {
     try {
-      const { readConversationBodyForParsing } = await import('../core/conversation-parser/body.ts');
+      const { expectsConversationTranscript, readConversationBodyForParsing } = await import('../core/conversation-parser/body.ts');
       const { parseConversation } = await import('../core/conversation-parser/parse.ts');
       // Single source of truth for the conversation-facts type allowlist (#4135).
       const allowedTypes = ALLOWED_TYPES;
-      // PageFilters supports singular `type` only; iterate the allowed types
-      // and cap at ~50/each to land at ~200 total max.
+      // PageFilters has singular `type`; iterate it and cap at ~50/type (~200 total).
       const sample: import('../core/types.ts').Page[] = [];
       for (const t of allowedTypes) {
         const slice = await engine.listPages({ limit: 50, type: t as import('../core/types.ts').PageType });
@@ -1312,15 +1309,16 @@ export async function buildChecks(
         });
       } else {
         const hitsByPattern: Record<string, number> = {};
-        let unmatched = 0;
+        let unmatched = 0, nonTranscript = 0, expectedTranscripts = 0;
         for (const page of sample) {
           const body = await readConversationBodyForParsing(engine, page);
           const result = parseConversation(body, { page, noPolish: true, noFallback: true });
-          const id = result.matched_pattern_id ?? '_no_match';
+          const expected = expectsConversationTranscript(page, body), id = result.matched_pattern_id ?? (expected ? '_no_match' : '_non_transcript');
           hitsByPattern[id] = (hitsByPattern[id] ?? 0) + 1;
-          if (result.phase === 'no_match') unmatched++;
+          if (expected) expectedTranscripts++;
+          if (result.phase === 'no_match') expected ? unmatched++ : nonTranscript++;
         }
-        const unmatchedPct = (unmatched / sample.length) * 100;
+        const unmatchedPct = (unmatched / Math.max(1, expectedTranscripts)) * 100;
         const breakdown = Object.entries(hitsByPattern)
           .sort(([, a], [, b]) => b - a)
           .map(([k, v]) => `${k}=${v}`)
@@ -1330,7 +1328,7 @@ export async function buildChecks(
             name: 'conversation_format_coverage',
             status: 'warn',
             message:
-              `${unmatched}/${sample.length} conversation pages (${unmatchedPct.toFixed(1)}%) match NO built-in pattern. ` +
+              `${unmatched}/${expectedTranscripts} expected transcripts (${unmatchedPct.toFixed(1)}%) match NO built-in pattern. ` +
               `Breakdown: ${breakdown}. ` +
               `Investigate: gbrain conversation-parser scan <slug>`,
           });
@@ -1338,7 +1336,9 @@ export async function buildChecks(
           checks.push({
             name: 'conversation_format_coverage',
             status: 'ok',
-            message: `${sample.length} pages: ${breakdown}`,
+            message: `${sample.length} pages: ${breakdown}${nonTranscript > 0
+              ? ` (${nonTranscript} narrative/mislabeled page(s) correctly classified as non-transcript)`
+              : ''}`,
           });
         }
       }

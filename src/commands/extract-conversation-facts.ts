@@ -400,15 +400,14 @@ export interface ExtractConversationFactsResult {
 // effect.
 // ---------------------------------------------------------------------------
 
-import {
-  loadPricingOverrides,
-} from '../core/budget/budget-tracker.ts';
+import { loadPricingOverrides } from '../core/budget/budget-tracker.ts';
 import {
   deriveDateContext,
   parseConversation,
   type ParseConversationOpts as OrchestratorParseOpts,
 } from '../core/conversation-parser/parse.ts';
 import {
+  expectsConversationTranscript,
   readConversationBodySnapshot,
   readRawTranscriptPathSnapshot,
   readSummaryBody,
@@ -1048,7 +1047,7 @@ async function processPage(
     state.result.pages_skipped++;
     if (
       !state.dryRun &&
-      parseResult.phase !== 'no_match' &&
+      (parseResult.phase !== 'no_match' || !expectsConversationTranscript(page, body)) &&
       allSegments.length === 0 &&
       // #4136 — a decline must stay NON-TERMINAL. The audit row is keyed by
       // a content versionToken and skips the page on every future run; a

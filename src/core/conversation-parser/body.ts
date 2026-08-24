@@ -21,6 +21,32 @@ export function readSummaryBody(page: Page): string {
   return `${compiled}\n\n${timeline}`;
 }
 
+/**
+ * Decide whether a no-match page is a likely parser gap or merely prose whose
+ * coarse type happens to be conversation-adjacent (for example a skill under
+ * `skills/email/` or narrative meeting notes). This stays deliberately broad:
+ * any canonical conversation/session slug, transcript metadata, or repeated
+ * speaker-shaped anchors remains retryable as a parser miss.
+ */
+export function expectsConversationTranscript(page: Page, body: string): boolean {
+  if (/^(?:conversations|sessions)\//.test(page.slug)) return true;
+  const fm = page.frontmatter ?? {};
+  const messageCount = Number(fm.message_count);
+  if (Number.isFinite(messageCount) && messageCount >= 2) return true;
+  if (
+    typeof fm.raw_transcript === 'string' ||
+    typeof fm.source_session_path === 'string' ||
+    typeof fm.session_id === 'string'
+  ) return true;
+
+  const anchorHint = /^(?:\*\*[^*\n]{1,80}\*\*\s*(?:\([^\n)]{1,40}\)|\d{1,2}:\d{2})?\s*:|#{2,3}\s+(?:user|assistant|human|system|tool)\b|Speaker\s+[A-Z0-9]+:|\[[^\]\n]{1,40}\]\s+[^:\n]{1,80}:)/i;
+  let hints = 0;
+  for (const line of body.split(/\r?\n/)) {
+    if (anchorHint.test(line.trim()) && ++hints >= 2) return true;
+  }
+  return false;
+}
+
 function extractRawTranscriptPath(page: Page): string | null {
   const raw = page.frontmatter?.raw_transcript;
   if (typeof raw !== 'string') return null;

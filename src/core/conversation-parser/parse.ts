@@ -266,6 +266,21 @@ function buildIso(
     return `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00Z`;
   }
 
+  // Date-only inline anchors (for example indexed Hermes session previews)
+  // retain day-level ordering but have no honest wall-clock component.
+  if (
+    entry.date_source === 'inline' &&
+    captures.date_group !== undefined &&
+    captures.hour_group === undefined &&
+    captures.minute_group === undefined
+  ) {
+    const date = match[captures.date_group];
+    if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return null;
+    }
+    return `${date}T00:00:00Z`;
+  }
+
   // Time-only patterns: date from DateContext.
   if (
     entry.date_source === 'frontmatter' &&

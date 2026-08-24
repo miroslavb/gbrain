@@ -1070,7 +1070,7 @@ describe('runExtractConversationFactsCore', () => {
     expect(rows.map((row) => row.source)).toEqual([NON_EXTRACTABLE_AUDIT_SOURCE]);
   });
 
-  test('does not classify an unrecognized parser miss as non-extractable', async () => {
+  test('classifies narrative meeting notes with no transcript evidence as non-extractable', async () => {
     await engine.putPage('meetings/unrecognized-format', {
       type: 'meeting',
       title: 'Unrecognized meeting format',
@@ -1084,10 +1084,30 @@ describe('runExtractConversationFactsCore', () => {
       types: ['meeting'],
       sleepMs: 0,
     });
-    expect(result.pages_marked_non_extractable).toBe(0);
+    expect(result.pages_marked_non_extractable).toBe(1);
     const markers = await engine.executeRaw<{ count: string | number }>(
       `SELECT COUNT(*) AS count FROM facts WHERE source = $1 AND source_markdown_slug = $2`,
       [NON_EXTRACTABLE_AUDIT_SOURCE, 'meetings/unrecognized-format'],
+    );
+    expect(Number(markers[0]?.count ?? 0)).toBe(1);
+  });
+
+  test('keeps a metadata-backed unrecognized transcript retryable as a parser miss', async () => {
+    const slug = 'meetings/unrecognized-transcript-format';
+    await engine.putPage(slug, {
+      type: 'meeting',
+      title: 'Unrecognized transcript format',
+      compiled_truth: 'USER >>> hello\nAGENT >>> hi\nUSER >>> continue\nAGENT >>> done',
+      timeline: '',
+      frontmatter: { message_count: 4, session_id: 'unknown-format' },
+    });
+    const result = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, types: ['meeting'], sleepMs: 0,
+    });
+    expect(result.pages_marked_non_extractable).toBe(0);
+    const markers = await engine.executeRaw<{ count: string | number }>(
+      `SELECT COUNT(*) AS count FROM facts WHERE source = $1 AND source_markdown_slug = $2`,
+      [NON_EXTRACTABLE_AUDIT_SOURCE, slug],
     );
     expect(Number(markers[0]?.count ?? 0)).toBe(0);
   });
