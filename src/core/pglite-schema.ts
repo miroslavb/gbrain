@@ -823,9 +823,10 @@ CREATE TABLE IF NOT EXISTS proposal_page_runs (
   proposal_count      INTEGER     NOT NULL DEFAULT 0 CHECK (proposal_count >= 0),
   evidence_span_count INTEGER     NOT NULL DEFAULT 0 CHECK (evidence_span_count >= 0),
   error_code          TEXT,
-  completed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (source_id, page_slug, source_hash, prompt_version, proposal_run_id)
+  completed_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS proposal_page_runs_identity_idx
+  ON proposal_page_runs (source_id, page_slug, source_hash, prompt_version, proposal_run_id);
 CREATE INDEX IF NOT EXISTS proposal_page_runs_cache_idx
   ON proposal_page_runs (source_id, page_slug, source_hash, prompt_version)
   WHERE status IN ('completed','empty');

@@ -99,6 +99,7 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   acceptance queue. New producer canaries stay page-bounded; proposal rows and
   their per-page terminal receipt publish in one transaction. Migration 142
   must also converge the briefly shipped v127 `outcome`/four-column-PK layout;
+  its sequential handler makes each ALTER visible before dependent SQL because
   `CREATE TABLE IF NOT EXISTS` alone is not a schema migration.
 - **Extraction quality gates:** conversation facts and atoms must pass the
   deterministic sensitive scanner and the batched semantic support/atomicity
