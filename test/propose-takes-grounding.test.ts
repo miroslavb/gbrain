@@ -159,6 +159,10 @@ describe('grounded take proposal publication', () => {
     await putPage('projects/newer-project', 'I think this project status is better.');
     await putPage('infra/newer-benchmark', 'I think this benchmark is better.');
     await putPage('codex/skill', 'I think this generated skill is better.');
+    await putPage('jira/jm-108', 'I think this root Jira directive is better.');
+    await putPage('jusan/jira/jm-107', 'I think this imported Jira directive is better.');
+    await putPage('cf/10059779', 'I think this root Confluence directive is better.');
+    await putPage('jusan/cf/10059778', 'I think this imported Confluence directive is better.');
     let seen = '';
     const extractor: ProposeTakesExtractor = async ({ pagePath, pageBody }) => {
       seen = pagePath;
@@ -168,6 +172,10 @@ describe('grounded take proposal publication', () => {
     await runShortFixture(ctx(), { extractor, pageLimit: 1 });
     expect(seen).toBe('concepts/eligible-judgment');
     expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('projects/%');
+    expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('jira/%');
+    expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('%/jira/%');
+    expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('cf/%');
+    expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('%/cf/%');
     expect(PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS).toContain('%/skill');
   });
 

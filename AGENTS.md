@@ -104,9 +104,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   selection is restricted in SQL (before `LIMIT`) to durable concept/atom/lore/
   briefing/writing/originals pages and also denies operational slug contours
   (`projects/`, `infra/`, `infrastructure/`, `features/`, generated `*/skill`)
+  plus generic Jira and Confluence import contours (`*/jira/*`, `*/cf/*`)
   because production type metadata is not authoritative. Conversations,
-  sessions, projects, companies, and operational pages are out of scope. The
-  production selector also requires at least 800 characters of compiled prose
+  sessions, projects, companies, imported system records, and operational pages
+  are out of scope. The production selector also requires at least 800
+  characters of compiled prose
   before `LIMIT`; short factual stubs must not consume bounded canary slots.
   Every selected page passes the shared deterministic full-source sensitivity
   scanner before any external LLM call. A hit writes only a

@@ -53,11 +53,12 @@ import type { BrainEngine } from '../engine.ts';
 import type { PhaseStatus, CyclePhase } from '../cycle.ts';
 
 /**
- * Bump when the extractor prompt or the JSON output shape changes. Old
- * verdicts in `take_proposals` (composite key includes prompt_version) stay
- * valid as audit history; new runs re-spend LLM tokens on every page.
+ * Bump when the extractor prompt, JSON output shape, or production
+ * eligibility/privacy contract changes. Old verdicts in `take_proposals`
+ * (composite key includes prompt_version) stay valid as audit history; new
+ * runs re-spend LLM tokens on every page.
  */
-export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.4-sensitive-longform-grounded-receipts';
+export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.5-import-contour-sensitive-longform-grounded-receipts';
 
 /**
  * Containment allowlist. Apply this predicate in SQL before ORDER/LIMIT so a
@@ -82,6 +83,10 @@ export const PROPOSE_TAKES_EXCLUDED_SLUG_PATTERNS = [
   'infra/%',
   'infrastructure/%',
   'features/%',
+  'jira/%',
+  '%/jira/%',
+  'cf/%',
+  '%/cf/%',
   '%/skill',
   '%/skills/%',
 ] as const;
@@ -119,14 +124,15 @@ export const EMPTY_EXTRACTION_TOMBSTONE_TEXT = '(no gradeable claims)';
  *   - kind enum kept narrow ('prediction'|'judgment'|'bet') — the v1
  *     stub's 4-tag enum bled into noise classification.
  *
- * The current v0.46.28.4 prompt adds production containment learned from three
+ * The current v0.46.28.5 prompt adds production containment learned from four
  * grounded canaries: exact evidence alone does not distinguish a gradeable
  * judgment from a KPI, historical measurement, ETA, procedural fact, or
- * heading fragment; type labels alone do not guarantee long-form prose; and a
- * page can contain credentials or PII that must fail before an external LLM
- * call. Those stricter rules are not represented by the historical score above;
- * re-run cat15 before enabling automatic production work. The train-holdout gap
- * should stay < 0.10 (overfitting threshold).
+ * heading fragment; type labels alone do not guarantee long-form prose; Jira
+ * and Confluence imports can be mislabeled as concepts; and a page can contain
+ * credentials or PII that must fail before an external LLM call. Those stricter
+ * rules are not represented by the historical score above; re-run cat15 before
+ * enabling automatic production work. The train-holdout gap should stay < 0.10
+ * (overfitting threshold).
  */
 export const EXTRACT_TAKES_PROMPT = `Extract gradeable claims from the prose below.
 
