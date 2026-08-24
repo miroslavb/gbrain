@@ -109,6 +109,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   gaps (canonical session/conversation slugs, transcript metadata, or repeated
   speaker anchors) from narrative meetings and code/docs accidentally typed as
   `email`; definitive non-transcripts receive a durable non-extractable outcome.
+  Legacy `# Session` pages containing `## Summary`,
+  `## User Questions`, and `## Key Assistant Responses` are generated summaries,
+  not speaker-turn transcripts; mark them non-extractable unless a raw transcript
+  path is present.
 - **MDX route slugs:** slash-prefixed `slug:` values in `.mdx` are external
   website routes (for example Docusaurus `slug: /`), not GBrain identities.
   Ignore the route during file import and frontmatter audit, and retain the path-derived DB slug;

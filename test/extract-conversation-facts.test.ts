@@ -1177,6 +1177,32 @@ describe('runExtractConversationFactsCore', () => {
     expect(Number(markers[0]?.count ?? 0)).toBe(1);
   });
 
+  test('classifies legacy session summaries without speaker turns as non-extractable', async () => {
+    const slug = 'sessions/hermes/legacy-summary-only';
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'Legacy session summary', timeline: '', frontmatter: {},
+      compiled_truth: [
+        '# Session legacy-summary-only',
+        '## Summary',
+        'A generated overview, not a transcript.',
+        '## User Questions',
+        '1. A summarized question.',
+        '## Key Assistant Responses',
+        '### Response 1',
+        'A synthesized answer without a speaker-turn anchor.',
+      ].join('\n\n'),
+    });
+    const result = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, sleepMs: 0,
+    });
+    expect(result.pages_marked_non_extractable).toBe(1);
+    const markers = await engine.executeRaw<{ count: string | number }>(
+      `SELECT COUNT(*) AS count FROM facts WHERE source = $1 AND source_markdown_slug = $2`,
+      [NON_EXTRACTABLE_AUDIT_SOURCE, slug],
+    );
+    expect(Number(markers[0]?.count ?? 0)).toBe(1);
+  });
+
   test('keeps a metadata-backed unrecognized transcript retryable as a parser miss', async () => {
     const slug = 'meetings/unrecognized-transcript-format';
     await engine.putPage(slug, {

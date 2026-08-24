@@ -29,13 +29,20 @@ export function readSummaryBody(page: Page): string {
  * speaker-shaped anchors remains retryable as a parser miss.
  */
 export function expectsConversationTranscript(page: Page, body: string): boolean {
-  if (/^(?:conversations|sessions)\//.test(page.slug)) return true;
   const fm = page.frontmatter ?? {};
+  if (typeof fm.raw_transcript === 'string' || typeof fm.source_session_path === 'string') return true;
+  // Legacy session-ingest summaries preserve questions and synthesized
+  // answers under these headings, but not speaker turns. Treating their
+  // canonical sessions/* slug as transcript evidence leaves them retrying
+  // forever and risks extracting assistant summaries as user facts.
+  if (
+    /^# Session\s+/m.test(body) && /^## Summary\s*$/m.test(body) &&
+    /^## User Questions\s*$/m.test(body) && /^## Key Assistant Responses\s*$/m.test(body)
+  ) return false;
+  if (/^(?:conversations|sessions)\//.test(page.slug)) return true;
   const messageCount = Number(fm.message_count);
   if (Number.isFinite(messageCount) && messageCount >= 2) return true;
   if (
-    typeof fm.raw_transcript === 'string' ||
-    typeof fm.source_session_path === 'string' ||
     typeof fm.session_id === 'string'
   ) return true;
 
