@@ -165,6 +165,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   stable reason codes, and actual route/model only—never source or candidate text.
   Bind receipt histograms as raw JSON objects through `executeRawJsonb`; migration
   144 repairs double-encoded JSONB strings and enforces object-shaped histograms.
+  Migration 145 marks only guarded legacy `extracts/` operation receipts as
+  raw-trace-exempt when their existing `run_id`/`round`/`source_id` tuple is the
+  durable trace; never apply that exemption to an ordinary synthesis page.
   The conversation extractor prompt must also exclude IP/email/phone values,
   credentials, private paths, and secret-bearing URLs before candidates reach
   the gate. Redact those values plus configured sensitive literals before the
