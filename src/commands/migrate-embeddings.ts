@@ -846,6 +846,7 @@ export async function runMigrateEmbeddings(
     console.log(`  DB plane:   ${report.db_plane.model ?? '(none)'} @ ${report.db_plane.dims ?? '?'}d`);
     console.log(`  Column:     content_chunks.embedding ${report.column_dims === null ? 'absent/unreadable' : `${report.column_dims}d`}${report.pinned_widths.map((p) => `; ${p.table} ${p.dims === null ? '?' : `${p.dims}d`}`).join('')}`);
     console.log(`  Vectors:    ${report.missing_embeddings ?? '?'} chunk(s) missing; ${report.chunkless_pages ?? '?'} contentful page(s) without chunks; facts pending: ${report.facts_pending ?? 'n/a'}`);
+    if ((report.facts_pending ?? 0) > 0) console.log('  Facts fix:  gbrain embed --stale --facts --catch-up');
     if (report.embed_skip_null_chunks !== null && report.embed_skip_null_chunks > 0) {
       console.log(`  Embed-skip: ${report.embed_skip_null_chunks} chunk(s) on embed_skip pages have NULL vectors — excluded from re-embedding by design (remove the frontmatter marker to re-embed them)`);
     }

@@ -148,9 +148,13 @@ ingestion — not just new content.
 The dimension change **deletes every stored embedding vector** in the brain —
 they are in the old model's space and unusable. They are not recoverable:
 going back to the previous provider means paying for a second full re-embed.
-`content_chunks` vectors are rebuilt by the re-embed pass, the query cache
-refills on the next query, and fact embeddings are rewritten on their next
-write (or a `gbrain extract` pass).
+`content_chunks` vectors are rebuilt by the re-embed pass and the query cache
+refills on the next query. Fact vectors are rewritten on their next fact
+write; an interrupted/unavailable write can be healed deterministically with
+`gbrain embed --stale --facts --catch-up` (no fact extraction or chat LLM).
+The fact lane freezes a start-of-run ID watermark, uses guarded text-matching
+updates, and prints aggregate `pending_before`, `snapshot_remaining`, and
+`pending_after` fields; require `snapshot_remaining=0` before accepting a run.
 
 ## Resume after a kill
 

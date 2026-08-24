@@ -240,6 +240,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Chunkless-page census parity:** count/list/heal only pages with
   non-whitespace compiled truth or timeline. A newline-only code stub cannot
   produce chunks and must not keep migrations permanently "chunkless".
+- **Fact-vector catch-up is explicit:** embedding migrations report active
+  NULL fact vectors separately. Heal them with bounded/dry-run validation then
+  `embed --stale --facts --catch-up`; this lane only embeds stored fact text
+  under a fixed start-of-run fact-id watermark and must never re-run extraction
+  or enable a mass facts gate. Require `snapshot_remaining=0` from its receipt.
 - **Bounded stale extraction:** link/timeline backlog canaries must set
   `extract --stale --max-pages N`; the exact cross-batch cap wins over
   `--catch-up`. Validate page freshness plus link/timeline graph integrity after

@@ -31,12 +31,9 @@ import {
   type EmbedBatchWithBackoffOpts,
 } from '../core/embed-retry.ts';
 import { EmbedProviderFailureCircuit, isPhysicalBatchInputTooLargeError } from '../core/embed-provider-circuit.ts';
-
-// Peeled to src/core/embed-retry.ts (core→commands layering fix: core modules
-// import-file.ts / embed-stale.ts consume these, and a commands module in
-// their value closure risks a real ESM cycle). Façade rule: embed.ts keeps
-// re-exporting its historical surface so import sites and tests never chase
-// the peel.
+import { backfillStaleFactEmbeddings, type FactEmbeddingBackfillResult } from '../core/embed-stale-facts.ts';
+// Core consumers use embed-retry.ts directly; this façade preserves the
+// historical exports without creating a core→commands ESM cycle.
 export {
   restampIfDemotedToTitleTier,
   MAX_RATE_LIMIT_RETRIES,
@@ -57,27 +54,21 @@ export {
   isTransientNetworkEmbedError,
 } from '../core/embed-retry.ts';
 export type { EmbedBatchWithBackoffOpts } from '../core/embed-retry.ts';
-
 /** #3037: cap failure samples so a corpus-wide outage doesn't bloat --json. */
 const FAILURE_SAMPLE_CAP = 10;
-
-/**
- * #3037: record embed failures on the run result. `chunkCount` is the number
- * of chunks left un-embedded by this failure (1 for page-level errors where
- * the chunk count isn't known at the catch site).
- */
+/** #3037: record chunks/items left unembedded; page-level callers use 1. */
 function recordFailure(result: EmbedResult, chunkCount: number, slug: string, e: unknown): void {
   result.failures += chunkCount;
   if (result.failure_samples.length < FAILURE_SAMPLE_CAP) {
     result.failure_samples.push(`${slug}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
-
 export interface EmbedOpts {
   /** Embed ALL pages (every chunk). */
   all?: boolean;
   /** Embed only stale chunks (missing embedding). */
   stale?: boolean;
+  /** With --stale, also heal active facts whose embedding is NULL. */ facts?: boolean;
   /** Embed specific pages by slug. */
   slugs?: string[];
   /** Embed a single page. */
@@ -189,7 +180,6 @@ export interface EmbedOpts {
    */
   heldLocks?: DbLockHandle[];
 }
-
 /**
  * Structured result from a library-level embed run.
  *
@@ -231,8 +221,9 @@ export interface EmbedResult {
    * dryRun, would chunk) so their new NULL-embedding chunks fold into the
    * SAME pass. 0 on a healthy brain. Additive field — see
    * `ChunklessPageRow` for the detection rationale.
-   */
+  */
   chunkless_pages_healed: number;
+  /** Explicit `--facts` lane receipt; omitted when not requested. */ fact_embeddings?: FactEmbeddingBackfillResult;
   /**
    * Set when a single-flight run did NO work because another backfill holds
    * the per-source embed lock. A hard-killed (SIGKILL/crash) run leaves its
@@ -536,6 +527,13 @@ export async function runEmbedCore(engine: BrainEngine, opts: EmbedOpts): Promis
         quiet: opts.quiet,
         includeNullSignature: opts.includeNullSignature,
       }, drainSignal);
+      if (opts.facts && opts.stale && result.failures === 0 && !drainSignal.aborted) {
+        result.fact_embeddings = await backfillStaleFactEmbeddings(engine, {
+          sourceId: opts.sourceId, dryRun: opts.dryRun, signal: drainSignal, batchSize: opts.batchSize, quiet: opts.quiet,
+        });
+        result.failures += result.fact_embeddings.failures;
+        result.failure_samples.push(...result.fact_embeddings.failure_samples.slice(0, FAILURE_SAMPLE_CAP - result.failure_samples.length));
+      }
     } catch (e) {
       // A heartbeat-triggered abort is a clean, resumable stop (lock_lost is
       // already set + explained on stderr) — not an error to propagate.
@@ -627,6 +625,7 @@ export function isKeylessStaleRefusal(args: string[], embeddingDisabled: boolean
   return args.includes('--stale')
     && !args.includes('--all')
     && !args.includes('--slugs')
+    && !args.includes('--facts')
     && !args.includes('--dry-run')
     && embeddingDisabled === true;
 }
@@ -648,9 +647,7 @@ export async function runEmbed(engine: BrainEngine, args: string[]): Promise<Emb
       chunkless_pages_healed: 0,
     };
   }
-
-  // v0.36+ T7: --background submits via Minion queue, returns job_id to
-  // stdout, exits. Same semantics in TTY and cron (D9).
+  // v0.36+ T7: --background submits via Minion queue; same in TTY and cron.
   if (args.includes('--background')) {
     const { maybeBackground } = await import('../core/cli-options.ts');
     const backgrounded = await maybeBackground({
@@ -666,6 +663,7 @@ export async function runEmbed(engine: BrainEngine, args: string[]): Promise<Emb
         return {
           all: cleanArgs.includes('--all'),
           stale: cleanArgs.includes('--stale'),
+          facts: cleanArgs.includes('--facts'),
           dryRun: cleanArgs.includes('--dry-run'),
           slugs: slugsI >= 0 ? cleanArgs.slice(slugsI + 1).filter(a => !a.startsWith('--')) : undefined,
           sourceId: srcI >= 0 ? cleanArgs[srcI + 1] : undefined,
@@ -686,10 +684,10 @@ export async function runEmbed(engine: BrainEngine, args: string[]): Promise<Emb
     if (backgrounded) return;
     // PGLite degraded to inline — fall through.
   }
-
   const slugsIdx = args.indexOf('--slugs');
   const all = args.includes('--all');
   const stale = args.includes('--stale');
+  const facts = args.includes('--facts');
   const dryRun = args.includes('--dry-run');
   // v0.31.12: --source <id> scopes to a single source.
   const sourceIdx = args.indexOf('--source');
@@ -711,11 +709,11 @@ export async function runEmbed(engine: BrainEngine, args: string[]): Promise<Emb
     opts = { slugs: args.slice(slugsIdx + 1).filter(a => !a.startsWith('--')), dryRun, sourceId, batchSize, priority, catchUp };
   } else if (all || stale) {
     // E-2: CLI-only single-flight for stale runs (the minion path locks itself).
-    opts = { all, stale, dryRun, sourceId, batchSize, priority, catchUp, ...(pace && { pace }), ...(stale && { singleFlight: true }), ...(includeNullSignature && { includeNullSignature: true }) };
+    opts = { all, stale, facts: stale && facts, dryRun, sourceId, batchSize, priority, catchUp, ...(pace && { pace }), ...(stale && { singleFlight: true }), ...(includeNullSignature && { includeNullSignature: true }) };
   } else {
     const slug = args.find(a => !a.startsWith('--'));
     if (!slug) {
-      serr('Usage: gbrain embed [<slug>|--all|--stale|--slugs s1 s2 ...] [--dry-run] [--batch-size N] [--priority recent] [--catch-up] [--include-null-signature]');
+      serr('Usage: gbrain embed [<slug>|--all|--stale|--slugs s1 s2 ...] [--facts] [--dry-run] [--batch-size N] [--priority recent] [--catch-up] [--include-null-signature]');
       process.exit(1);
     }
     opts = { slug, dryRun, sourceId, batchSize, priority, catchUp };
@@ -741,7 +739,7 @@ export async function runEmbed(engine: BrainEngine, args: string[]): Promise<Emb
     // per-page stderr lines scrolled away. cli.ts turns failures>0 into a
     // non-zero exit verdict.
     if (result.failures > 0) {
-      serr(`[embed] ${result.failures} chunk(s) failed to embed. First error: ${result.failure_samples[0] ?? 'unknown'}`);
+      serr(`[embed] ${result.failures} item(s) failed to embed. First error: ${result.failure_samples[0] ?? 'unknown'}`);
     }
     return result;
   } catch (e) {

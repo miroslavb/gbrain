@@ -28,8 +28,9 @@ describe('isKeylessStaleRefusal', () => {
     expect(isKeylessStaleRefusal(['--slugs', 'a', 'b', '--stale'], true)).toBe(false);
   });
 
-  test('the all flag and dry-run are excluded — explicit asks stay loud', () => {
+  test('the all, facts and dry-run flags are excluded — explicit asks stay loud', () => {
     expect(isKeylessStaleRefusal(['--all', '--stale'], true)).toBe(false);
+    expect(isKeylessStaleRefusal(['--stale', '--facts'], true)).toBe(false);
     expect(isKeylessStaleRefusal(['--stale', '--dry-run'], true)).toBe(false);
   });
 

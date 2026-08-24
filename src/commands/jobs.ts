@@ -2196,15 +2196,14 @@ export async function registerBuiltinHandlers(
 
   registerBuiltinJob(worker, engine, 'embed', async (job) => {
     const { runEmbedCore } = await import('./embed.ts');
-    // Primary Minion progress channel is job.updateProgress (DB-backed,
-    // readable via `gbrain jobs get <id>`). Stderr from the worker daemon
-    // only emits coarse job-start / job-done lines; per-page detail lives
-    // in the DB. Per Codex review #20.
+    // Primary Minion progress is DB-backed job.updateProgress; daemon stderr
+    // keeps only coarse job-start/job-done lines. Per Codex review #20.
     const embedResult = await runEmbedCore(engine, {
       slug: typeof job.data.slug === 'string' ? job.data.slug : undefined,
       slugs: Array.isArray(job.data.slugs) ? (job.data.slugs as string[]) : undefined,
       all: !!job.data.all,
       stale: job.data.all ? false : (job.data.stale !== false),
+      facts: !!job.data.facts,
       // `embed --background` serializes dryRun into the payload (embed.ts's
       // job-args builder). Not reading it back here meant a backgrounded
       // preview embedded for real: API spend and NULL->vector writes from an
@@ -2246,6 +2245,7 @@ export async function registerBuiltinHandlers(
       dry_run: !!embedResult.dryRun,
       would_embed: embedResult.would_embed,
       failures: embedResult.failures,
+      fact_embeddings: embedResult.fact_embeddings,
     };
   });
 
