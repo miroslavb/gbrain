@@ -51,6 +51,7 @@ import { loadSensitivityConfig, scanSensitive, type SensitivityScanConfig } from
 import type { OperationContext } from '../operations.ts';
 import type { BrainEngine } from '../engine.ts';
 import type { PhaseStatus, CyclePhase } from '../cycle.ts';
+import { executeRawJsonb } from '../sql-query.ts';
 
 /**
  * Bump when the extractor prompt, JSON output shape, or production
@@ -859,7 +860,8 @@ async function writeProposalPageRun(
     rejectionReasonCounts?: ProposalRejectionReasonCounts;
   },
 ): Promise<void> {
-  await engine.executeRaw(
+  await executeRawJsonb(
+    engine,
     `INSERT INTO proposal_page_runs
        (source_id, page_slug, source_hash, prompt_version, proposal_run_id,
         model_id, status, proposal_count, evidence_span_count, error_code, rejection_reason_counts)
@@ -869,8 +871,8 @@ async function writeProposalPageRun(
       input.sourceId, input.pageSlug, input.sourceHash, input.promptVersion,
       input.proposalRunId, input.modelId, input.status, input.proposalCount,
       input.evidenceSpanCount, input.errorCode ?? null,
-      JSON.stringify(input.rejectionReasonCounts ?? {}),
     ],
+    [input.rejectionReasonCounts ?? {}],
   );
 }
 

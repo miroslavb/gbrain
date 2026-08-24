@@ -275,13 +275,16 @@ describe('grounded take proposal publication', () => {
     const result = await runShortFixture(ctx(), { extractor: async () => extraction, pageLimit: 1 });
     expect(result.details).toMatchObject({ page_receipts_quality_rejected: 1, page_receipts_empty: 0 });
     expect(await engine.executeRaw<{
-      status: string; error_code: string; rejection_reason_counts: Record<string, number>;
+      status: string; error_code: string; rejection_reason_counts: Record<string, number>; reason_type: string;
     }>(
-      `SELECT status, error_code, rejection_reason_counts FROM proposal_page_runs`,
+      `SELECT status, error_code, rejection_reason_counts,
+              jsonb_typeof(rejection_reason_counts) AS reason_type
+         FROM proposal_page_runs`,
     )).toEqual([{
       status: 'quality_rejected',
       error_code: 'invalid_claim_contract',
       rejection_reason_counts: { missing_gradeable_signal: 2, invalid_holder: 1 },
+      reason_type: 'object',
     }]);
   });
 });

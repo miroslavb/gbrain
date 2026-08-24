@@ -1408,7 +1408,9 @@ CREATE TABLE IF NOT EXISTS proposal_page_runs (
   evidence_span_count INTEGER     NOT NULL DEFAULT 0 CHECK (evidence_span_count >= 0),
   error_code          TEXT,
   -- Aggregate-only stable reason codes; never source/proposal text.
-  rejection_reason_counts JSONB   NOT NULL DEFAULT '{}'::jsonb,
+  rejection_reason_counts JSONB   NOT NULL DEFAULT '{}'::jsonb
+    CONSTRAINT proposal_page_runs_rejection_reason_counts_object_check
+    CHECK (jsonb_typeof(rejection_reason_counts) = 'object'),
   completed_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS proposal_page_runs_identity_idx

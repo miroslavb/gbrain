@@ -147,6 +147,8 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,
   stable reason codes, and actual route/model only—never source or candidate text.
+  Bind receipt histograms as raw JSON objects through `executeRawJsonb`; migration
+  144 repairs double-encoded JSONB strings and enforces object-shaped histograms.
   The conversation extractor prompt must also exclude IP/email/phone values,
   credentials, private paths, and secret-bearing URLs before candidates reach
   the gate; deterministic rejection remains mandatory defense in depth.
