@@ -101,6 +101,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   `extract --stale --max-pages N`; the exact cross-batch cap wins over
   `--catch-up`. Validate page freshness plus link/timeline graph integrity after
   the 100-page tranche before admitting the 500-page tranche.
+  The link identity constraint must be `UNIQUE NULLS NOT DISTINCT` over
+  `(from_page_id,to_page_id,link_type,link_source,origin_page_id)`; migration
+  v141 repairs legacy `*_key` constraints and retains the earliest duplicate.
 - **Private documents:** ordinary search excludes `docs/inbox/`; uploaded
   documents are read only through the caller-aware document ACL surface.
 
