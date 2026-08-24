@@ -117,6 +117,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   `extracts/`, `dream-cycle-summaries/`) against the active pack. Report types
   that exist only inside those contours separately; do not broad-retype durable
   pages merely to silence the warning.
+- **Scattered DB-only pages:** never declare a broad `storage.db_only` prefix
+  when it contains real file-backed pages or collector output. A reviewed
+  legacy page may instead carry `storage_tier: db_only` plus a non-empty
+  `storage_tier_reason`; doctor, storage status, and restore/export must agree
+  on that page-local declaration.
 - **Take proposals:** legacy rows without exact evidence, source hashes, and a
   matching successful `proposal_page_runs` receipt are audit history, never an
   acceptance queue. New producer canaries stay page-bounded; proposal rows and

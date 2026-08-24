@@ -352,8 +352,22 @@ export function isDbTracked(slug: string, config: StorageConfig): boolean {
   return config.db_tracked.some((dir) => matchesTierDir(slug, dir));
 }
 
-export function isDbOnly(slug: string, config: StorageConfig): boolean {
-  return config.db_only.some((dir) => matchesTierDir(slug, dir));
+/**
+ * A page-level declaration is the precise escape hatch for legacy DB-resident
+ * rows scattered through otherwise file-backed directories. Requiring a
+ * non-empty reason prevents a bare boolean from silently hiding recovery debt.
+ */
+export function hasExplicitDbOnlyDeclaration(frontmatter: unknown): boolean {
+  if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) return false;
+  const record = frontmatter as Record<string, unknown>;
+  return record.storage_tier === 'db_only'
+    && typeof record.storage_tier_reason === 'string'
+    && record.storage_tier_reason.trim().length > 0;
+}
+
+export function isDbOnly(slug: string, config: StorageConfig, frontmatter?: unknown): boolean {
+  return hasExplicitDbOnlyDeclaration(frontmatter)
+    || config.db_only.some((dir) => matchesTierDir(slug, dir));
 }
 
 /**
@@ -402,9 +416,10 @@ export function findDbOnlyCollisions(
   return hits;
 }
 
-export function getStorageTier(slug: string, config: StorageConfig): StorageTier {
+export function getStorageTier(slug: string, config: StorageConfig, frontmatter?: unknown): StorageTier {
+  if (hasExplicitDbOnlyDeclaration(frontmatter)) return 'db_only';
   if (isDbTracked(slug, config)) return 'db_tracked';
-  if (isDbOnly(slug, config)) return 'db_only';
+  if (isDbOnly(slug, config, frontmatter)) return 'db_only';
   return 'unspecified';
 }
 

@@ -20,6 +20,7 @@ import {
   effectiveDbOnlyDirs,
   DERIVE_PHASE_DB_ONLY_DEFAULTS,
   findDbOnlyCollisions,
+  hasExplicitDbOnlyDeclaration,
 } from '../../../core/storage-config.ts';
 import { slugifyPath, slugifyCodePath, isCodeFilePath } from '../../../core/sync.ts';
 import { resolveSourceLocalFilePath } from '../../../core/markdown.ts';
@@ -403,14 +404,19 @@ export async function checkUndeclaredDbOnlyPages(engine: BrainEngine): Promise<C
       // the migration-25 backfill (page_kind='markdown', type never
       // re-stamped) still flow through and match via the code-slug backed
       // set collected below.
-      const rows = await engine.executeRaw<{ slug: string; source_path: string | null }>(
-        `SELECT slug, source_path FROM pages WHERE deleted_at IS NULL AND source_id = $1 AND page_kind = 'markdown' AND type IS DISTINCT FROM 'code'`,
+      const rows = await engine.executeRaw<{
+        slug: string;
+        source_path: string | null;
+        frontmatter: Record<string, unknown> | null;
+      }>(
+        `SELECT slug, source_path, frontmatter FROM pages WHERE deleted_at IS NULL AND source_id = $1 AND page_kind = 'markdown' AND type IS DISTINCT FROM 'code'`,
         [src.id],
       );
       if (rows.length === 0) continue;
       let backedWithoutSourcePath: Set<string> | null = null;
-      for (const { slug, source_path: sourcePath } of rows) {
+      for (const { slug, source_path: sourcePath, frontmatter } of rows) {
         if (dbOnlyDirs.some(dir => slug.startsWith(dir))) continue;
+        if (hasExplicitDbOnlyDeclaration(frontmatter)) continue;
         if (sourcePath) {
           const filePath = resolveSourceLocalFilePath(src.local_path!, sourcePath);
           if (filePath && existsSync(filePath)) continue;
@@ -433,7 +439,7 @@ export async function checkUndeclaredDbOnlyPages(engine: BrainEngine): Promise<C
     return {
       name,
       status: 'warn',
-      message: `${total} DB page(s) have no backing file and sit outside every declared/default db_only path — invisible to file-lane backup/recovery. Sample: ${samples.join('; ')}. Fix: restore or export the files, or declare their prefixes under storage.db_only in gbrain.yml (derive-phase defaults already cover: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})`,
+      message: `${total} DB page(s) have no backing file and sit outside every declared/default db_only path — invisible to file-lane backup/recovery. Sample: ${samples.join('; ')}. Fix: restore or export the files, declare their prefixes under storage.db_only in gbrain.yml, or set per-page storage_tier: db_only plus a non-empty storage_tier_reason after explicit review (derive-phase defaults already cover: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})`,
       details: { total, per_source: perSource, sample_slugs: samples },
     };
   } catch (e) {

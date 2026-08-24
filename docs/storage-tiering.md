@@ -64,6 +64,19 @@ derive-phase output prefixes (`life/events/`, `atoms/`, `extracts/`,
 brains stay quiet without adding them to `gbrain.yml`. They are NOT auto-added to
 `.gitignore` — only explicitly declared `db_only` dirs are.
 
+For a reviewed legacy DB page scattered inside an otherwise file-backed
+directory, use a page-local declaration instead of broadening `storage.db_only`:
+
+```yaml
+storage_tier: db_only
+storage_tier_reason: "Reviewed legacy DB page; retained in database backups"
+```
+
+Both fields are required. Doctor, `gbrain storage status`, and
+`gbrain export --restore-only` honor this declaration. It deliberately does
+not add a directory to `.gitignore`, so nearby file-backed pages and collector
+outputs continue to sync normally.
+
 Example `.gitignore` addition:
 
 ```gitignore

@@ -255,6 +255,32 @@ describe('undeclared_db_only_pages (#2784)', () => {
     expect((c.details as any).per_source['src-a']).toBe(1);
   });
 
+  test('reviewed per-page db_only declaration with a reason keeps the check quiet', async () => {
+    const repo = makeRepo();
+    await addSource('src-a', repo);
+    await addPage('people/retained-db-history', { sourceId: 'src-a' });
+    await engine.executeRaw(`
+      UPDATE pages
+         SET frontmatter = '{"storage_tier":"db_only","storage_tier_reason":"reviewed legacy DB page"}'::jsonb
+       WHERE source_id='src-a' AND slug='people/retained-db-history'
+    `);
+    const c = await checkUndeclaredDbOnlyPages(engine);
+    expect(c.status).toBe('ok');
+  });
+
+  test('per-page db_only marker without a reason does not hide recovery debt', async () => {
+    const repo = makeRepo();
+    await addSource('src-a', repo);
+    await addPage('people/unreviewed-db-history', { sourceId: 'src-a' });
+    await engine.executeRaw(`
+      UPDATE pages SET frontmatter = '{"storage_tier":"db_only"}'::jsonb
+       WHERE source_id='src-a' AND slug='people/unreviewed-db-history'
+    `);
+    const c = await checkUndeclaredDbOnlyPages(engine);
+    expect(c.status).toBe('warn');
+    expect(c.message).toContain('people/unreviewed-db-history');
+  });
+
   test('code pages are excluded (different slug scheme)', async () => {
     const repo = makeRepo();
     await addSource('src-a', repo);

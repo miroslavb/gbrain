@@ -70,6 +70,16 @@ describe('Storage Configuration', () => {
       expect(getStorageTier('projects/random-thing', testConfig)).toBe('unspecified');
     });
 
+    test('reviewed page-local db_only declaration overrides a broad tracked prefix', () => {
+      expect(getStorageTier('people/legacy-db-page', testConfig, {
+        storage_tier: 'db_only',
+        storage_tier_reason: 'reviewed legacy DB page',
+      })).toBe('db_only');
+      expect(getStorageTier('people/unreviewed', testConfig, {
+        storage_tier: 'db_only',
+      })).toBe('db_tracked');
+    });
+
     test('handles prefix edge cases', () => {
       expect(isGitTracked('people', testConfig)).toBe(false);
       expect(isGitTracked('people/', testConfig)).toBe(true);

@@ -87,7 +87,7 @@ export async function runExport(engine: BrainEngine, args: string[]) {
       for (const p of tierPages) {
         if (seen.has(p.slug)) continue;
         seen.add(p.slug);
-        if (!isDbOnly(p.slug, storageConfig)) continue; // belt-and-suspenders
+        if (!isDbOnly(p.slug, storageConfig, p.frontmatter)) continue; // belt-and-suspenders
         const filePath = join(repoPath, p.slug + '.md');
         if (existsSync(filePath)) continue;
         pages.push(p);

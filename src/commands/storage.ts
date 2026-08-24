@@ -149,7 +149,7 @@ export async function getStorageStatus(
   const pages = await engine.listPages({ limit: 1_000_000 });
 
   for (const page of pages) {
-    const tier = config ? getStorageTier(page.slug, config) : 'unspecified';
+    const tier = config ? getStorageTier(page.slug, config, page.frontmatter) : 'unspecified';
     pagesByTier[tier]++;
     if (!repoPath) continue;
     const entry = fileMap.get(page.slug);
