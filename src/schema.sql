@@ -1369,6 +1369,8 @@ CREATE TABLE IF NOT EXISTS take_proposals (
   holder                      TEXT         NOT NULL,
   weight                      REAL         NOT NULL,
   domain                      TEXT,
+  evidence_span               TEXT,
+  source_hash                 TEXT,
   dedup_against_fence_rows    JSONB,
   model_id                    TEXT         NOT NULL,
   acted_at                    TIMESTAMPTZ,
@@ -1384,6 +1386,31 @@ CREATE INDEX IF NOT EXISTS take_proposals_pending_idx
   WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS take_proposals_run_id_idx
   ON take_proposals (proposal_run_id);
+
+-- Per-page terminal producer receipts. Successful receipts are the hardened
+-- idempotency authority; failed/quality-rejected attempts remain auditable but
+-- retryable. Legacy take_proposals rows intentionally have no matching receipt.
+CREATE TABLE IF NOT EXISTS proposal_page_runs (
+  id                  BIGSERIAL PRIMARY KEY,
+  source_id           TEXT        NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  page_slug           TEXT        NOT NULL,
+  source_hash         TEXT        NOT NULL,
+  prompt_version      TEXT        NOT NULL,
+  proposal_run_id     TEXT        NOT NULL,
+  model_id            TEXT        NOT NULL,
+  status              TEXT        NOT NULL
+                                  CHECK (status IN ('completed','empty','quality_rejected','failed')),
+  proposal_count      INTEGER     NOT NULL DEFAULT 0 CHECK (proposal_count >= 0),
+  evidence_span_count INTEGER     NOT NULL DEFAULT 0 CHECK (evidence_span_count >= 0),
+  error_code          TEXT,
+  completed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (source_id, page_slug, source_hash, prompt_version, proposal_run_id)
+);
+CREATE INDEX IF NOT EXISTS proposal_page_runs_cache_idx
+  ON proposal_page_runs (source_id, page_slug, source_hash, prompt_version)
+  WHERE status IN ('completed','empty');
+CREATE INDEX IF NOT EXISTS proposal_page_runs_run_idx
+  ON proposal_page_runs (proposal_run_id, completed_at);
 
 -- take_grade_cache: grade_takes verdict cache. Composite PK on
 -- (take_id, prompt_version, judge_model_id, evidence_signature) means

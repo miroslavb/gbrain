@@ -60,7 +60,11 @@ beforeAll(async () => {
     compiled_truth: 'I bet drain-example doubles revenue within 12 months. They ship fast.',
   });
   mkdirSync(join(repo, 'companies'), { recursive: true });
-  writeFileSync(join(repo, `${SLUG}.md`), `# Drain Example\n\nprose body\n`, 'utf-8');
+  writeFileSync(
+    join(repo, `${SLUG}.md`),
+    '# Drain Example\n\nI bet drain-example doubles revenue within 12 months. They ship fast.\n',
+    'utf-8',
+  );
 });
 
 afterAll(async () => {
@@ -71,7 +75,7 @@ describe('propose_takes → takes propose drain (#4102)', () => {
   test('phase inserts a pending proposal; CLI lists, accepts, and stamps promoted_row_num', async () => {
     // 1. Produce: run the phase with an injected extractor (no gateway).
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: CLAIM, kind: 'bet', holder: 'world', weight: 0.75, domain: 'revenue' },
+      { claim_text: CLAIM, kind: 'bet', holder: 'world', weight: 0.75, domain: 'revenue', evidence_span: 'I bet drain-example doubles revenue within 12 months.' },
     ];
     const phase = await runPhaseProposeTakes(ctx(), { extractor });
     expect(phase.status).toBe('ok');

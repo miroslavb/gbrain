@@ -149,6 +149,36 @@ describe('runDream — --phase <name> restricts the cycle', () => {
     spy.mockRestore();
     errSpy.mockRestore();
   });
+
+  test('--max-pages rejects non-positive values', async () => {
+    const spy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
+    const errSpy = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runDream(engine, ['--dir', repo, '--phase', 'propose_takes', '--max-pages', '0']);
+      throw new Error('expected runDream to exit');
+    } catch (e: any) {
+      expect(e.message).toBe('EXIT');
+    }
+    expect(spy).toHaveBeenCalledWith(2);
+    expect(errSpy.mock.calls.flat().join(' ')).toMatch(/--max-pages must be a positive integer/);
+    spy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  test('--max-pages is confined to the propose_takes phase', async () => {
+    const spy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
+    const errSpy = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runDream(engine, ['--dir', repo, '--phase', 'lint', '--max-pages', '1']);
+      throw new Error('expected runDream to exit');
+    } catch (e: any) {
+      expect(e.message).toBe('EXIT');
+    }
+    expect(spy).toHaveBeenCalledWith(2);
+    expect(errSpy.mock.calls.flat().join(' ')).toMatch(/supported only with --phase propose_takes/);
+    spy.mockRestore();
+    errSpy.mockRestore();
+  });
 });
 
 // ─── --once (issue #2860) ───────────────────────────────────────────

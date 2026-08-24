@@ -6233,6 +6233,43 @@ export const MIGRATIONS: Migration[] = [
       return /UNIQUE NULLS NOT DISTINCT/i.test(rows[0]?.definition ?? '');
     },
   },
+  {
+    version: 142,
+    name: 'grounded_take_proposal_receipts',
+    // The legacy queue predates grounded evidence and per-page terminal
+    // receipts. Keep those rows as audit history (NULL evidence/source_hash),
+    // while new producer runs publish proposals and a terminal page receipt
+    // atomically. Successful receipts become the hardened idempotency and
+    // acceptance authority; failed/quality-rejected attempts remain retryable.
+    // Keep in sync with schema.sql, pglite-schema.ts, and embedded schema.
+    idempotent: true,
+    sql: `
+      ALTER TABLE take_proposals ADD COLUMN IF NOT EXISTS evidence_span TEXT;
+      ALTER TABLE take_proposals ADD COLUMN IF NOT EXISTS source_hash TEXT;
+
+      CREATE TABLE IF NOT EXISTS proposal_page_runs (
+        id                  BIGSERIAL PRIMARY KEY,
+        source_id           TEXT        NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+        page_slug           TEXT        NOT NULL,
+        source_hash         TEXT        NOT NULL,
+        prompt_version      TEXT        NOT NULL,
+        proposal_run_id     TEXT        NOT NULL,
+        model_id            TEXT        NOT NULL,
+        status              TEXT        NOT NULL
+                                    CHECK (status IN ('completed','empty','quality_rejected','failed')),
+        proposal_count      INTEGER     NOT NULL DEFAULT 0 CHECK (proposal_count >= 0),
+        evidence_span_count INTEGER     NOT NULL DEFAULT 0 CHECK (evidence_span_count >= 0),
+        error_code          TEXT,
+        completed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (source_id, page_slug, source_hash, prompt_version, proposal_run_id)
+      );
+      CREATE INDEX IF NOT EXISTS proposal_page_runs_cache_idx
+        ON proposal_page_runs (source_id, page_slug, source_hash, prompt_version)
+        WHERE status IN ('completed','empty');
+      CREATE INDEX IF NOT EXISTS proposal_page_runs_run_idx
+        ON proposal_page_runs (proposal_run_id, completed_at);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

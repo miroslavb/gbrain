@@ -70,4 +70,11 @@ describe('propose_takes deadline < job timeout (#4168)', () => {
     const forwards = cycleSrc.match(/deadlineAtMs: opts\.deadlineAtMs \?\? null/g) ?? [];
     expect(forwards.length).toBeGreaterThanOrEqual(3);
   });
+
+  test('SOURCE SHAPE: dream --max-pages reaches propose_takes pageLimit only', () => {
+    const dream = readFileSync(new URL('../src/commands/dream.ts', import.meta.url), 'utf-8');
+    expect(dream).toContain("phase !== 'propose_takes'");
+    expect(dream).toContain('proposeTakesPageLimit: opts.proposeMaxPages ?? undefined');
+    expect(cycleSrc).toContain('pageLimit: opts.proposeTakesPageLimit');
+  });
 });

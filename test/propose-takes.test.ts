@@ -71,24 +71,28 @@ function buildMockEngine(opts: {
         })) as T[];
       }
       // SELECT idempotency check
-      if (sql.includes('SELECT id FROM take_proposals')) {
+      if (sql.includes('SELECT id FROM proposal_page_runs')) {
         const [sourceId, slug, ch, pv] = params ?? [];
         const key = `${sourceId}|${slug}|${ch}|${pv}`;
         if (existing.has(key)) return [{ id: 1 } as unknown as T];
         return [];
       }
-      // INSERT into take_proposals — persist the idempotency key so a
-      // subsequent cycle observes a cache hit (the real unique index folds
-      // md5(claim_text) in per #2138/v125, but the SELECT above matches any
-      // row for the per-page 4-tuple), and return one row per successful
-      // insert to satisfy RETURNING id.
+      if (sql.includes('INSERT INTO proposal_page_runs')) {
+        const [sourceId, slug, ch, pv, , , status] = params ?? [];
+        if (status === 'completed' || status === 'empty') {
+          existing.add(`${sourceId}|${slug}|${ch}|${pv}`);
+        }
+        return [];
+      }
+      // INSERT into take_proposals returns one row per successful insert.
       if (sql.includes('INSERT INTO take_proposals')) {
-        const [sourceId, slug, ch, pv] = params ?? [];
-        existing.add(`${sourceId}|${slug}|${ch}|${pv}`);
         return [{ id: captured.length } as unknown as T];
       }
       // Other writes — return nothing.
       return [];
+    },
+    async transaction<T>(fn: (tx: BrainEngine) => Promise<T>): Promise<T> {
+      return fn(this as unknown as BrainEngine);
     },
   } as unknown as BrainEngine;
 
@@ -343,7 +347,7 @@ describe('runPhaseProposeTakes — phase integration', () => {
     const pages = [buildPage({ slug: 'wiki/concepts/network-effects', body: 'Marketplaces with cold-start liquidity always win.' })];
     const { engine, captured } = buildMockEngine({ pages });
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'Marketplaces with cold-start liquidity win', kind: 'bet', holder: 'brain', weight: 0.7, domain: 'market' },
+      { claim_text: 'Marketplaces with cold-start liquidity win', kind: 'bet', holder: 'brain', weight: 0.7, domain: 'market', evidence_span: 'Marketplaces with cold-start liquidity always win.' },
     ];
     const result = await runPhaseProposeTakes(buildCtx(engine), { extractor });
 
@@ -365,8 +369,8 @@ describe('runPhaseProposeTakes — phase integration', () => {
     const pages = [buildPage({ slug: 'wiki/essays/thesis', body: 'Two strong claims live here.' })];
     const { engine, captured } = buildMockEngine({ pages });
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6 },
-      { claim_text: 'Claim two', kind: 'bet', holder: 'brain', weight: 0.8 },
+      { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: 'Two strong claims live here.' },
+      { claim_text: 'Claim two', kind: 'bet', holder: 'brain', weight: 0.8, evidence_span: 'Two strong claims live here.' },
     ];
     const result = await runPhaseProposeTakes(buildCtx(engine), { extractor });
 
@@ -432,7 +436,7 @@ New prose appended here.`;
     const extractor: ProposeTakesExtractor = async () => {
       callCount++;
       if (callCount === 1) throw new Error('LLM timeout');
-      return [{ claim_text: 'second page claim', kind: 'take', holder: 'brain', weight: 0.5 }];
+      return [{ claim_text: 'second page claim', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'page B prose' }];
     };
     const result = await runPhaseProposeTakes(buildCtx(engine), { extractor });
 
@@ -457,7 +461,7 @@ New prose appended here.`;
     ];
     const { engine } = buildMockEngine({ pages });
     let extractorCalls = 0;
-    const extractor: ProposeTakesExtractor = async () => {
+    const extractor: ProposeTakesExtractor = async ({ pageBody }) => {
       extractorCalls++;
       return [];
     };
@@ -490,10 +494,10 @@ New prose appended here.`;
     ];
     const { engine, captured } = buildMockEngine({ pages });
     let extractorCalls = 0;
-    const extractor: ProposeTakesExtractor = async () => {
+    const extractor: ProposeTakesExtractor = async ({ pageBody }) => {
       extractorCalls++;
       await new Promise((r) => setTimeout(r, 10));
-      return [{ claim_text: 'x', kind: 'take', holder: 'brain', weight: 0.5 }];
+      return [{ claim_text: 'x', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: pageBody }];
     };
     // 5ms deadline: page 1 processes (elapsed 0 at check), the 10ms extractor
     // call pushes elapsed past the cap, page 2 is never scanned.
@@ -532,8 +536,8 @@ New prose appended here.`;
       buildPage({ slug: 'wiki/b', body: 'page b' }),
     ];
     const { engine, captured } = buildMockEngine({ pages });
-    const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'x', kind: 'take', holder: 'brain', weight: 0.5 },
+    const extractor: ProposeTakesExtractor = async ({ pageBody }) => [
+      { claim_text: 'x', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: pageBody },
     ];
     await runPhaseProposeTakes(buildCtx(engine), { extractor });
     const inserts = captured.filter(c => c.sql.includes('INSERT INTO take_proposals'));
@@ -554,14 +558,14 @@ New prose appended here.`;
       const pages = [buildPage({ slug: 'wiki/model-default', body: 'configured model should be recorded' })];
       const { engine, captured } = buildMockEngine({ pages });
       const extractor: ProposeTakesExtractor = async () => [
-        { claim_text: 'configured model should be recorded', kind: 'take', holder: 'brain', weight: 0.5 },
+        { claim_text: 'configured model should be recorded', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'configured model should be recorded' },
       ];
 
       await runPhaseProposeTakes(buildCtx(engine), { extractor });
 
       const insert = captured.find(c => c.sql.includes('INSERT INTO take_proposals'));
       expect(insert).toBeDefined();
-      expect(insert!.params[11]).toBe('openai:gpt-5');
+      expect(insert!.params[12]).toBe('openai:gpt-5');
     } finally {
       resetGateway();
     }
@@ -576,7 +580,7 @@ New prose appended here.`;
       const pages = [buildPage({ slug: 'wiki/openrouter-model', body: 'nested provider model should stay intact' })];
       const { engine, captured } = buildMockEngine({ pages });
       const extractor: ProposeTakesExtractor = async () => [
-        { claim_text: 'nested provider model should stay intact', kind: 'take', holder: 'brain', weight: 0.5 },
+        { claim_text: 'nested provider model should stay intact', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'nested provider model should stay intact' },
       ];
 
       const result = await runPhaseProposeTakes(buildCtx(engine), {
@@ -588,7 +592,7 @@ New prose appended here.`;
       expect(result.details.budget_exhausted).toBe(false);
       const insert = captured.find(c => c.sql.includes('INSERT INTO take_proposals'));
       expect(insert).toBeDefined();
-      expect(insert!.params[11]).toBe('openrouter:anthropic/claude-sonnet-4-6');
+      expect(insert!.params[12]).toBe('openrouter:anthropic/claude-sonnet-4-6');
     } finally {
       resetGateway();
     }
@@ -943,7 +947,7 @@ describe('runPhaseProposeTakes — global-error halt (#3044)', () => {
     const extractor: ProposeTakesExtractor = async () => {
       extractorCalls++;
       if (extractorCalls === 1) {
-        return [{ claim_text: 'first page worked', kind: 'take', holder: 'brain', weight: 0.5 }];
+        return [{ claim_text: 'first page worked', kind: 'take', holder: 'brain', weight: 0.5, evidence_span: 'page a prose' }];
       }
       throw Object.assign(new Error('invalid x-api-key'), { status: 401 });
     };

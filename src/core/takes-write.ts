@@ -392,6 +392,10 @@ export interface AddTakeInput {
   weight?: number;
   source?: string;
   sinceDate?: string;
+  /** Consumer retry seam: reuse an exact active fence row instead of appending. */
+  dedupeExact?: boolean;
+  /** Fail closed under the file lock if grounded source evidence disappeared. */
+  requiredEvidenceSpan?: string;
 }
 
 export async function addTakeToPage(
@@ -419,10 +423,31 @@ export async function addTakeToPage(
       target.engine, target.brainDir, target.slug, target.sourceId,
     );
     const body = existsSync(path) ? readFileSync(path, 'utf-8') : '';
+    if (input.requiredEvidenceSpan && !body.includes(input.requiredEvidenceSpan)) {
+      throw new Error('Take proposal evidence is absent from the current canonical page; regenerate the proposal.');
+    }
     // F1: guard only fires when a fence ALREADY exists (an empty/fence-less body
     // parses to zero warnings) — a whole-fence re-render must not delete rows
     // this version couldn't parse.
-    assertFenceRoundTrips(parseTakesFence(body));
+    const parsed = parseTakesFence(body);
+    assertFenceRoundTrips(parsed);
+    if (input.dedupeExact) {
+      const existing = parsed.takes.find((take) =>
+        take.active && take.claim === input.claim && take.kind === input.kind && take.holder === input.holder,
+      );
+      if (existing) {
+        let mirrorWarning: string | undefined;
+        try {
+          await target.engine.addTakesBatch([toBatchInput(pageId, existing)]);
+        } catch (err) {
+          mirrorWarning = mirrorErrorMessage(err);
+        }
+        return {
+          rowNum: existing.rowNum,
+          mirror: { written: true, path, ...(mirrorWarning ? { mirror_warning: mirrorWarning } : {}) },
+        };
+      }
+    }
     const { body: nextBody, rowNum } = upsertTakeRow(body, {
       claim: input.claim,
       kind: input.kind,

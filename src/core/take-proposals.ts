@@ -20,6 +20,7 @@
 
 import type { BrainEngine, TakeKind } from './engine.ts';
 import { addTakeToPage } from './takes-write.ts';
+import { createHash } from 'node:crypto';
 
 export interface TakeProposalRow {
   id: number;
@@ -34,9 +35,13 @@ export interface TakeProposalRow {
   proposed_at: string | Date;
   model_id: string;
   promoted_row_num: number | null;
+  evidence_span: string | null;
+  source_hash: string | null;
+  proposal_run_id: string;
+  prompt_version: string;
 }
 
-export type TakeProposalErrorCode = 'not_found' | 'not_pending';
+export type TakeProposalErrorCode = 'not_found' | 'not_pending' | 'unverified';
 
 export class TakeProposalError extends Error {
   constructor(
@@ -61,7 +66,7 @@ export function coerceProposalKind(raw: string): TakeKind {
 }
 
 const PROPOSAL_COLUMNS =
-  'id, source_id, page_slug, claim_text, kind, holder, weight, domain, status, proposed_at, model_id, promoted_row_num';
+  'id, source_id, page_slug, claim_text, kind, holder, weight, domain, status, proposed_at, model_id, promoted_row_num, evidence_span, source_hash, proposal_run_id, prompt_version';
 
 export interface ListPendingOpts {
   /** Scope to one source (the CLI always provides one). Omit = all sources (trusted local only). */
@@ -75,7 +80,15 @@ export async function listPendingProposals(
   opts: ListPendingOpts = {},
 ): Promise<TakeProposalRow[]> {
   const limit = Math.max(1, Math.min(500, opts.limit ?? 20));
-  const where = [`status = 'pending'`];
+  const where = [
+    `tp.status = 'pending'`,
+    `tp.evidence_span IS NOT NULL`,
+    `tp.source_hash IS NOT NULL`,
+    `EXISTS (SELECT 1 FROM proposal_page_runs ppr
+      WHERE ppr.source_id = tp.source_id AND ppr.page_slug = tp.page_slug
+        AND ppr.source_hash = tp.source_hash AND ppr.prompt_version = tp.prompt_version
+        AND ppr.proposal_run_id = tp.proposal_run_id AND ppr.status = 'completed')`,
+  ];
   const params: unknown[] = [];
   if (opts.sourceId) {
     params.push(opts.sourceId);
@@ -83,10 +96,10 @@ export async function listPendingProposals(
   }
   params.push(limit);
   return engine.executeRaw<TakeProposalRow>(
-    `SELECT ${PROPOSAL_COLUMNS}
-       FROM take_proposals
+    `SELECT ${PROPOSAL_COLUMNS.split(', ').map((column) => `tp.${column}`).join(', ')}
+       FROM take_proposals tp
       WHERE ${where.join(' AND ')}
-      ORDER BY proposed_at DESC, id DESC
+      ORDER BY tp.proposed_at DESC, tp.id DESC
       LIMIT $${params.length}`,
     params,
   );
@@ -117,7 +130,47 @@ async function loadProposal(
       `Proposal #${id} is already '${row.status}' (acted on) — only pending proposals can be accepted or rejected.`,
     );
   }
+  if (!row.evidence_span || !row.source_hash) {
+    throw new TakeProposalError(
+      'unverified',
+      `Proposal #${id} is legacy-unverified (missing evidence/source hash) and is quarantined from acceptance.`,
+    );
+  }
+  const receipts = await engine.executeRaw<{ id: number }>(
+    `SELECT id FROM proposal_page_runs
+      WHERE source_id=$1 AND page_slug=$2 AND source_hash=$3 AND prompt_version=$4
+        AND proposal_run_id=$5 AND status='completed' LIMIT 1`,
+    [row.source_id, row.page_slug, row.source_hash, row.prompt_version, row.proposal_run_id],
+  );
+  if (receipts.length === 0) {
+    throw new TakeProposalError(
+      'unverified',
+      `Proposal #${id} has no matching successful page receipt and is quarantined from acceptance.`,
+    );
+  }
   return row;
+}
+
+async function assertProposalSnapshotCurrent(
+  engine: BrainEngine,
+  proposal: TakeProposalRow,
+): Promise<void> {
+  const pages = await engine.executeRaw<{ compiled_truth: string | null }>(
+    `SELECT compiled_truth FROM pages
+      WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL
+      LIMIT 1`,
+    [proposal.source_id, proposal.page_slug],
+  );
+  const body = pages[0]?.compiled_truth;
+  const currentHash = typeof body === 'string'
+    ? createHash('sha256').update(body).digest('hex')
+    : null;
+  if (currentHash !== proposal.source_hash || !body?.includes(proposal.evidence_span!)) {
+    throw new TakeProposalError(
+      'unverified',
+      `Proposal #${proposal.id} no longer matches the current source snapshot and must be regenerated.`,
+    );
+  }
 }
 
 export interface ProposalActionTarget {
@@ -128,6 +181,8 @@ export interface ProposalActionTarget {
   sourceId?: string;
   /** Recorded in acted_by. Defaults to 'cli'. */
   actedBy?: string;
+  /** Fault-injection seam after canonical write, before proposal status flip. */
+  afterCanonicalWrite?: () => Promise<void>;
 }
 
 /**
@@ -142,6 +197,7 @@ export async function acceptProposal(
 ): Promise<{ proposal: TakeProposalRow; rowNum: number }> {
   const { engine } = target;
   const proposal = await loadProposal(engine, id, target.sourceId);
+  await assertProposalSnapshotCurrent(engine, proposal);
   if (!target.brainDir) {
     throw new TakeProposalError(
       'not_found',
@@ -162,14 +218,21 @@ export async function acceptProposal(
       kind: coerceProposalKind(proposal.kind),
       holder: proposal.holder,
       weight: typeof proposal.weight === 'number' ? proposal.weight : Number(proposal.weight),
+      dedupeExact: true,
+      requiredEvidenceSpan: proposal.evidence_span!,
     },
   );
-  await engine.executeRaw(
+  await target.afterCanonicalWrite?.();
+  const updated = await engine.executeRaw<{ id: number }>(
     `UPDATE take_proposals
         SET status = 'accepted', acted_at = now(), acted_by = $2, promoted_row_num = $3
-      WHERE id = $1 AND status = 'pending'`,
+      WHERE id = $1 AND status = 'pending'
+      RETURNING id`,
     [id, target.actedBy ?? 'cli', rowNum],
   );
+  if (updated.length === 0) {
+    throw new TakeProposalError('not_pending', `Proposal #${id} was acted on concurrently; no duplicate take was added.`);
+  }
   return { proposal, rowNum };
 }
 

@@ -533,13 +533,11 @@ export interface CycleOpts {
    * issue #2860 — one-shot per-invocation bypass of a phase's own
    * `dream.<phase>.enabled` / `cycle.<phase>.enabled` config gate. Wired
    * from `gbrain dream --phase <name> --once`.
-   *
    * Deliberately typed as the SINGLE named `CyclePhase`, not a boolean —
    * each gated phase's dispatch block below only honors the override when
    * `onceForPhase` matches ITS OWN phase name, so the bypass can never leak
    * to a different phase even if a caller passes a wider `phases` array
    * than the CLI does (the CLI always restricts to `phases: [phase]`).
-   *
    * Never reads or writes config — the phase still evaluates its config
    * gate every call; this only overrides the boolean OUTCOME for that one
    * call. Applies to: patterns, synthesize, conversation_facts_backfill,
@@ -550,6 +548,8 @@ export interface CycleOpts {
    * one-shot escape hatch (`--drain` for extract_atoms).
    */
   onceForPhase?: CyclePhase;
+  /** Exact page cap for an explicit/bounded propose_takes run. */
+  proposeTakesPageLimit?: number;
   /**
    * Absolute wall-clock deadline (epoch ms) of the enclosing minion job,
    * from `MinionJobContext.deadlineAtMs` (the claim-time `timeout_at`
@@ -2617,7 +2617,7 @@ export async function runCycle(
           // #4102: `once` bypasses the cycle.propose_takes.enabled off switch
           // for `gbrain dream --phase propose_takes --once` (same semantics as
           // conversation_facts_backfill / enrich_thin above).
-          const { result, duration_ms } = await timePhase(() => runPhaseProposeTakes(calibrationCtx, { repoPath: brainDir ?? undefined, deadlineAtMs: opts.deadlineAtMs ?? null, once: opts.onceForPhase === 'propose_takes' }) as Promise<PhaseResult>);
+          const { result, duration_ms } = await timePhase(() => runPhaseProposeTakes(calibrationCtx, { repoPath: brainDir ?? undefined, deadlineAtMs: opts.deadlineAtMs ?? null, once: opts.onceForPhase === 'propose_takes', pageLimit: opts.proposeTakesPageLimit }) as Promise<PhaseResult>);
           result.duration_ms = duration_ms;
           phaseResults.push(result);
           progress.finish();

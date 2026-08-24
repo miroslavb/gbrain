@@ -56,7 +56,7 @@ import type { PhaseStatus, CyclePhase } from '../cycle.ts';
  * verdicts in `take_proposals` (composite key includes prompt_version) stay
  * valid as audit history; new runs re-spend LLM tokens on every page.
  */
-export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.36.1.0-tuned-cat15';
+export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.1-grounded-receipts';
 
 /**
  * Sentinel claim_text for the tombstone row written when a page extracts
@@ -113,11 +113,15 @@ NOT gradeable (do NOT extract these):
 
 For each gradeable claim, output a JSON object with:
 - claim_text   (string, <=200 chars, paraphrase or near-verbatim from prose)
-- kind         ('prediction' | 'judgment' | 'bet')
+- kind         ('bet' for predictions, 'take' for judgments/recommendations,
+                'hunch' for explicitly weak guesses, or 'fact' only when the
+                claim is a gradeable factual assertion)
 - holder       ('world' | 'people/<slug>' | 'companies/<slug>' | 'brain' — default 'brain' when author asserts the claim)
 - weight       (number 0..1 inferred from hedging language: 'I bet'/'strong conviction'=0.7-0.85,
                 'I think'/'moderate conviction'=0.5-0.7, 'maybe'/'I'd guess'=0.3-0.5)
 - domain       (short tag — e.g. 'tactics', 'macro', 'hiring', 'geography', 'pricing')
+- evidence_span (an exact, verbatim substring from PAGE PROSE that directly
+                 supports the claim; <=500 chars; never paraphrase this field)
 
 Output ONLY a JSON array of these objects. No prose. No commentary. If no
 gradeable claims, return [].
@@ -136,6 +140,7 @@ export interface ProposedTake {
   holder: string;
   weight: number;
   domain?: string;
+  evidence_span?: string;
 }
 
 /** Extractor function signature — injected for tests; production calls gateway. */
@@ -174,6 +179,7 @@ export interface ProposeTakesResult {
   cache_hits: number;
   cache_misses: number;
   proposals_inserted: number;
+  proposals_rejected_ungrounded: number;
   /** Idempotency rows written for pages that extracted zero claims. */
   tombstones_written: number;
   budget_exhausted: boolean;
@@ -199,6 +205,10 @@ export interface ProposeTakesResult {
   llm_calls_succeeded: number;
   /** Extractor calls that threw (global or per-page alike). */
   llm_calls_failed: number;
+  page_receipts_completed: number;
+  page_receipts_empty: number;
+  page_receipts_quality_rejected: number;
+  page_receipts_failed: number;
   warnings: string[];
 }
 
@@ -224,7 +234,7 @@ async function listCandidatePages(
   scope: ScopedReadOpts,
   limit: number,
 ): Promise<ProposeTakesPageRow[]> {
-  const where = ['deleted_at IS NULL'];
+  const where = ["deleted_at IS NULL", "compiled_truth IS NOT NULL", "btrim(compiled_truth) <> ''"];
   const params: unknown[] = [];
   if (scope.sourceIds && scope.sourceIds.length > 0) {
     params.push(scope.sourceIds);
@@ -468,9 +478,42 @@ export function parseExtractorOutput(raw: string): ProposedTake[] {
     const weightRaw = typeof r.weight === 'number' ? r.weight : 0.5;
     const weight = Math.max(0, Math.min(1, weightRaw));
     const domain = typeof r.domain === 'string' && r.domain.length > 0 ? r.domain : undefined;
-    out.push({ claim_text, kind, holder, weight, domain });
+    const evidence_span = typeof r.evidence_span === 'string' && r.evidence_span.trim().length > 0
+      ? r.evidence_span.trim()
+      : undefined;
+    out.push({ claim_text, kind, holder, weight, domain, evidence_span });
   }
   return out;
+}
+
+/** A grounded proposal must quote its source page exactly, never paraphrase evidence. */
+export function hasVerbatimEvidence(proposal: ProposedTake, pageBody: string): boolean {
+  const span = proposal.evidence_span?.trim();
+  return !!span && span.length <= 500 && pageBody.includes(span);
+}
+
+type ProposalPageRunStatus = 'completed' | 'empty' | 'quality_rejected' | 'failed';
+
+async function writeProposalPageRun(
+  engine: BrainEngine,
+  input: {
+    sourceId: string; pageSlug: string; sourceHash: string; promptVersion: string;
+    proposalRunId: string; modelId: string; status: ProposalPageRunStatus;
+    proposalCount: number; evidenceSpanCount: number; errorCode?: string;
+  },
+): Promise<void> {
+  await engine.executeRaw(
+    `INSERT INTO proposal_page_runs
+       (source_id, page_slug, source_hash, prompt_version, proposal_run_id,
+        model_id, status, proposal_count, evidence_span_count, error_code)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (source_id, page_slug, source_hash, prompt_version, proposal_run_id) DO NOTHING`,
+    [
+      input.sourceId, input.pageSlug, input.sourceHash, input.promptVersion,
+      input.proposalRunId, input.modelId, input.status, input.proposalCount,
+      input.evidenceSpanCount, input.errorCode ?? null,
+    ],
+  );
 }
 
 /**
@@ -666,10 +709,15 @@ class ProposeTakesPhase extends BaseCyclePhase {
       cache_hits: 0,
       cache_misses: 0,
       proposals_inserted: 0,
+      proposals_rejected_ungrounded: 0,
       tombstones_written: 0,
       budget_exhausted: false,
       llm_calls_succeeded: 0,
       llm_calls_failed: 0,
+      page_receipts_completed: 0,
+      page_receipts_empty: 0,
+      page_receipts_quality_rejected: 0,
+      page_receipts_failed: 0,
       warnings: [],
       deadline_hit: false,
     };
@@ -723,12 +771,13 @@ class ProposeTakesPhase extends BaseCyclePhase {
       const ch = contentHash(body);
       const existingTakes = extractExistingTakesForDedup(body);
 
-      // Idempotency check. If a row exists for (source_id, page_slug, content_hash,
-      // prompt_version), this page was already processed — skip and count as cache hit.
+      // Successful per-page terminal receipts are the idempotency authority.
+      // A partial legacy proposal insert without a terminal receipt must retry.
       const sourceId = page.source_id ?? scope.sourceId ?? 'default';
       const cached = await engine.executeRaw<{ id: number }>(
-        `SELECT id FROM take_proposals
-         WHERE source_id = $1 AND page_slug = $2 AND content_hash = $3 AND prompt_version = $4
+        `SELECT id FROM proposal_page_runs
+         WHERE source_id = $1 AND page_slug = $2 AND source_hash = $3 AND prompt_version = $4
+           AND status IN ('completed','empty')
          LIMIT 1`,
         [sourceId, page.slug, ch, promptVersion],
       );
@@ -768,6 +817,18 @@ class ProposeTakesPhase extends BaseCyclePhase {
         });
       } catch (err) {
         result.llm_calls_failed += 1;
+        try {
+          await writeProposalPageRun(engine, {
+            sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+            proposalRunId, modelId, status: 'failed', proposalCount: 0,
+            evidenceSpanCount: 0, errorCode: 'extractor_error',
+          });
+          result.page_receipts_failed += 1;
+        } catch (receiptErr) {
+          result.warnings.push(
+            `failed receipt write on ${page.slug}: ${receiptErr instanceof Error ? receiptErr.message : String(receiptErr)}`,
+          );
+        }
         const msg = err instanceof Error ? err.message : String(err);
         const detail = `extractor failed on ${page.slug}: ${msg}`;
         const decision = llmHalt.observe(err);
@@ -801,70 +862,85 @@ class ProposeTakesPhase extends BaseCyclePhase {
       result.llm_calls_succeeded += 1;
       llmHalt.reset();
 
-      // Write proposals to take_proposals. #2138: the idempotency key is
-      // per-CLAIM — take_proposals_idempotency_idx folds md5(claim_text) into
-      // the per-page tuple (migration v125), so a multi-claim page keeps every
-      // claim. RETURNING id prevents a repeated claim from inflating the count.
-      for (const p of proposals) {
-        const inserted = await engine.executeRaw<{ id: number }>(
-          `INSERT INTO take_proposals
-             (source_id, page_slug, content_hash, prompt_version, proposal_run_id,
-              claim_text, kind, holder, weight, domain, dedup_against_fence_rows, model_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING
-           RETURNING id`,
-          [
-            sourceId,
-            page.slug,
-            ch,
-            promptVersion,
-            proposalRunId,
-            p.claim_text,
-            p.kind,
-            p.holder,
-            p.weight,
-            p.domain ?? null,
-            JSON.stringify(existingTakes),
-            modelId,
-          ],
+      const grounded = proposals.filter((proposal) => hasVerbatimEvidence(proposal, body));
+      const rejectedUngrounded = proposals.length - grounded.length;
+      result.proposals_rejected_ungrounded += rejectedUngrounded;
+      if (rejectedUngrounded > 0) {
+        result.warnings.push(
+          `${page.slug}: rejected ${rejectedUngrounded}/${proposals.length} proposal(s) without an exact evidence_span`,
         );
-        result.proposals_inserted += inserted.length;
+      }
+      if (proposals.length > 0 && grounded.length === 0) {
+        await writeProposalPageRun(engine, {
+          sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+          proposalRunId, modelId, status: 'quality_rejected', proposalCount: 0,
+          evidenceSpanCount: 0, errorCode: 'ungrounded_evidence',
+        });
+        result.page_receipts_quality_rejected += 1;
+        continue;
       }
 
-      // Memoize the empty case too. A page that extracted zero claims gets
-      // NO row from the loop above, so without this its idempotency tuple is
-      // never recorded and the next cycle re-spends an LLM call on unchanged
-      // prose (the idle-cost bug). Write one tombstone row keyed by the same
-      // per-page tuple (the cache-hit lookup above matches ANY row for the
-      // 4-tuple; the unique index — take_proposals_idempotency_idx, migration
-      // v125 — folds md5(claim_text) in, so the conflict target must too).
-      // status='rejected' keeps it out of any pending-review query; its sole
-      // purpose is to make the next cycle a cache hit. Only reached on a
-      // SUCCESSFUL empty extract — the extractor-throw path `continue`s above,
-      // so failed pages are retried rather than tombstoned.
-      if (proposals.length === 0) {
-        await engine.executeRaw(
-          `INSERT INTO take_proposals
-             (source_id, page_slug, content_hash, prompt_version, proposal_run_id,
-              claim_text, kind, holder, weight, domain, dedup_against_fence_rows, model_id, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'rejected')
-           ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING`,
-          [
-            sourceId,
-            page.slug,
-            ch,
-            promptVersion,
-            proposalRunId,
-            EMPTY_EXTRACTION_TOMBSTONE_TEXT,
-            'fact',
-            'brain',
-            0,
-            null,
-            JSON.stringify(existingTakes),
-            modelId,
-          ],
+      // Publish every page atomically: either all grounded proposal rows and
+      // the successful terminal receipt commit, or neither does.
+      let insertedForPage = 0;
+      try {
+        await engine.transaction(async (tx) => {
+          for (const p of grounded) {
+            const inserted = await tx.executeRaw<{ id: number }>(
+              `INSERT INTO take_proposals
+                 (source_id, page_slug, content_hash, source_hash, prompt_version, proposal_run_id,
+                  claim_text, kind, holder, weight, domain, evidence_span,
+                  dedup_against_fence_rows, model_id)
+               VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING
+               RETURNING id`,
+              [sourceId, page.slug, ch, promptVersion, proposalRunId, p.claim_text,
+                p.kind, p.holder, p.weight, p.domain ?? null, p.evidence_span!.trim(),
+                JSON.stringify(existingTakes), modelId],
+            );
+            insertedForPage += inserted.length;
+          }
+
+          if (proposals.length === 0) {
+            await tx.executeRaw(
+              `INSERT INTO take_proposals
+                 (source_id, page_slug, content_hash, source_hash, prompt_version, proposal_run_id,
+                  claim_text, kind, holder, weight, domain, evidence_span,
+                  dedup_against_fence_rows, model_id, status)
+               VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,NULL,$11,$12,'rejected')
+               ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING`,
+              [sourceId, page.slug, ch, promptVersion, proposalRunId,
+                EMPTY_EXTRACTION_TOMBSTONE_TEXT, 'fact', 'brain', 0, null,
+                JSON.stringify(existingTakes), modelId],
+            );
+          }
+
+          await writeProposalPageRun(tx, {
+            sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+            proposalRunId, modelId, status: proposals.length === 0 ? 'empty' : 'completed',
+            proposalCount: insertedForPage, evidenceSpanCount: grounded.length,
+          });
+        });
+      } catch (err) {
+        try {
+          await writeProposalPageRun(engine, {
+            sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
+            proposalRunId, modelId, status: 'failed', proposalCount: 0,
+            evidenceSpanCount: 0, errorCode: 'publication_error',
+          });
+          result.page_receipts_failed += 1;
+        } catch { /* original publication error remains the primary signal */ }
+        result.warnings.push(
+          `atomic proposal publication failed on ${page.slug}: ${err instanceof Error ? err.message : String(err)}`,
         );
+        continue;
+      }
+      result.proposals_inserted += insertedForPage;
+      if (proposals.length === 0) {
         result.tombstones_written += 1;
+        result.page_receipts_empty += 1;
+      } else {
+        result.page_receipts_completed += 1;
       }
     }
 
@@ -921,7 +997,8 @@ class ProposeTakesPhase extends BaseCyclePhase {
       result.aborted_failure_streak === true;
     return {
       summary:
-        `propose_takes: scanned ${result.pages_scanned} pages, ${result.cache_hits} cached, ${result.proposals_inserted} new proposals, ${result.tombstones_written} empty (run ${proposalRunId})` +
+        `propose_takes: scanned ${result.pages_scanned} pages, ${result.cache_hits} cached, ${result.proposals_inserted} grounded proposals, ` +
+        `${result.proposals_rejected_ungrounded} ungrounded rejected, ${result.tombstones_written} empty (run ${proposalRunId})` +
         (result.aborted_global_error
           ? `; aborted on ${result.aborted_global_error} error after ${result.pages_scanned} page(s)`
           : '') +

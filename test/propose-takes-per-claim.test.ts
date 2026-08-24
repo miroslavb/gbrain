@@ -47,9 +47,9 @@ async function countProposals(slug: string): Promise<number> {
 }
 
 const proposals: ProposeTakesExtractor = async () => [
-  { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6 },
-  { claim_text: 'Claim two', kind: 'bet', holder: 'brain', weight: 0.8 },
-  { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6 },
+  { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: 'Two strong claims live in this essay.' },
+  { claim_text: 'Claim two', kind: 'bet', holder: 'brain', weight: 0.8, evidence_span: 'Two strong claims live in this essay.' },
+  { claim_text: 'Claim one', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: 'Two strong claims live in this essay.' },
 ];
 
 async function putThesis(): Promise<void> {

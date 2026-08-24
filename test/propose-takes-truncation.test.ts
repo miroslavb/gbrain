@@ -149,9 +149,12 @@ function buildMockEngine(pageCount: number): { engine: BrainEngine; captured: Ca
           compiled_truth: `prose for page ${i} with a bold claim in it`,
         })) as T[];
       }
-      if (sql.includes('SELECT id FROM take_proposals')) return [];
+      if (sql.includes('SELECT id FROM proposal_page_runs')) return [];
       if (sql.includes('INSERT INTO take_proposals')) return [{ id: captured.length } as unknown as T];
       return [];
+    },
+    async transaction<T>(fn: (tx: BrainEngine) => Promise<T>): Promise<T> {
+      return fn(this as unknown as BrainEngine);
     },
   } as unknown as BrainEngine;
   return { engine, captured };
@@ -173,7 +176,7 @@ describe('extractor failure-streak halt (#3763)', () => {
     const pageCount = EXTRACTOR_FAILURE_HALT_STREAK + 2;
     const { engine, captured } = buildMockEngine(pageCount);
     let calls = 0;
-    const extractor: ProposeTakesExtractor = async () => {
+    const extractor: ProposeTakesExtractor = async ({ pageBody }) => {
       calls++;
       throw new Error('propose_takes extractor: no parseable takes JSON (transient — retry)');
     };
@@ -198,10 +201,10 @@ describe('extractor failure-streak halt (#3763)', () => {
     const pageCount = EXTRACTOR_FAILURE_HALT_STREAK + 2;
     const { engine } = buildMockEngine(pageCount);
     let calls = 0;
-    const extractor: ProposeTakesExtractor = async () => {
+    const extractor: ProposeTakesExtractor = async ({ pageBody }) => {
       calls++;
       if (calls === 1) {
-        return [{ claim_text: 'one good claim', kind: 'take', holder: 'brain', weight: 0.6 }];
+        return [{ claim_text: 'one good claim', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: pageBody }];
       }
       throw new Error('per-page failure');
     };

@@ -90,6 +90,8 @@ interface DreamArgs {
    * skillopt, drift) — a no-op for phases that always run when named directly.
    */
   once: boolean;
+  /** Exact producer bound for --phase propose_takes. */
+  proposeMaxPages: number | null;
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -265,6 +267,21 @@ function parseArgs(args: string[]): DreamArgs {
     process.exit(2);
   }
 
+  const maxPagesIdx = args.indexOf('--max-pages');
+  let proposeMaxPages: number | null = null;
+  if (maxPagesIdx !== -1) {
+    const raw = args[maxPagesIdx + 1];
+    if (!raw || !/^\d+$/.test(raw) || Number(raw) <= 0) {
+      console.error(`--max-pages must be a positive integer; got "${raw}"`);
+      process.exit(2);
+    }
+    if (phase !== 'propose_takes' && !wantsHelp) {
+      console.error('--max-pages is currently supported only with --phase propose_takes');
+      process.exit(2);
+    }
+    proposeMaxPages = Number(raw);
+  }
+
   return {
     json: args.includes('--json'),
     dryRun: args.includes('--dry-run'),
@@ -281,6 +298,7 @@ function parseArgs(args: string[]): DreamArgs {
     drain,
     windowSeconds,
     once,
+    proposeMaxPages,
   };
 }
 
@@ -370,6 +388,7 @@ Options:
                       "--dry-run" does NOT mean "zero LLM calls."
   --json              Emit the CycleReport as JSON (agent-readable)
   --phase <name>      Run a single phase: ${ALL_PHASES.join(' | ')}
+  --max-pages <n>     Exact page cap for --phase propose_takes canaries.
   --once              With --phase <name>: run that phase once even if its
                       own dream.<phase>.enabled / cycle.<phase>.enabled
                       config gate is false. Never reads or writes config —
@@ -758,6 +777,7 @@ export async function runDream(engine: BrainEngine | null, args: string[]): Prom
     // issue #2860: opts.phase is guaranteed non-null here when opts.once is
     // set (parseArgs enforces --once requires --phase).
     onceForPhase: opts.once ? opts.phase! : undefined,
+    proposeTakesPageLimit: opts.proposeMaxPages ?? undefined,
   });
 
   if (opts.json) {
