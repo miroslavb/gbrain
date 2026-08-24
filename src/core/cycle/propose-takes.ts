@@ -58,7 +58,7 @@ import type { PhaseStatus, CyclePhase } from '../cycle.ts';
  * (composite key includes prompt_version) stay valid as audit history; new
  * runs re-spend LLM tokens on every page.
  */
-export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.5-import-contour-sensitive-longform-grounded-receipts';
+export const PROPOSE_TAKES_PROMPT_VERSION = 'v0.46.28.6-strict-contract-rejection-receipts';
 
 /**
  * Containment allowlist. Apply this predicate in SQL before ORDER/LIMIT so a
@@ -124,15 +124,17 @@ export const EMPTY_EXTRACTION_TOMBSTONE_TEXT = '(no gradeable claims)';
  *   - kind enum kept narrow ('prediction'|'judgment'|'bet') — the v1
  *     stub's 4-tag enum bled into noise classification.
  *
- * The current v0.46.28.5 prompt adds production containment learned from four
+ * The current v0.46.28.6 contract adds production containment learned from four
  * grounded canaries: exact evidence alone does not distinguish a gradeable
  * judgment from a KPI, historical measurement, ETA, procedural fact, or
  * heading fragment; type labels alone do not guarantee long-form prose; Jira
  * and Confluence imports can be mislabeled as concepts; and a page can contain
  * credentials or PII that must fail before an external LLM call. Those stricter
- * rules are not represented by the historical score above; re-run cat15 before
- * enabling automatic production work. The train-holdout gap should stay < 0.10
- * (overfitting threshold).
+ * rules are not represented by the historical score above. It also persists
+ * aggregate-only first-failure diagnostics and rejects explicit holder/weight
+ * values outside the prompt contract. Re-run cat15 before enabling automatic
+ * production work. The train-holdout gap should stay < 0.10 (overfitting
+ * threshold).
  */
 export const EXTRACT_TAKES_PROMPT = `Extract gradeable claims from the prose below.
 
@@ -200,7 +202,27 @@ export type ProposeTakesExtraction = ProposedTake[] & {
   qualityRejected?: boolean;
   /** Rows removed by the strict grounding/kind/signal contract. */
   contractRejectedCount?: number;
+  /** Aggregate-only first-failure reasons; never contains source or proposal text. */
+  rejectionReasonCounts?: ProposalRejectionReasonCounts;
 };
+
+export type ProposalRejectionReason =
+  | 'invalid_row'
+  | 'missing_claim'
+  | 'claim_too_long'
+  | 'unknown_kind'
+  | 'missing_gradeable_signal'
+  | 'invalid_holder'
+  | 'invalid_weight'
+  | 'missing_evidence'
+  | 'evidence_too_long'
+  | 'claim_not_verbatim'
+  | 'evidence_not_verbatim'
+  | 'claim_not_in_evidence'
+  | 'post_parse_grounding'
+  | 'sensitive_source';
+
+export type ProposalRejectionReasonCounts = Partial<Record<ProposalRejectionReason, number>>;
 
 /** Extractor function signature — injected for tests; production calls gateway. */
 export type ProposeTakesExtractor = (input: {
@@ -278,6 +300,8 @@ export interface ProposeTakesResult {
   pages_rejected_sensitive: number;
   /** Provider/model ids that actually answered successful production calls. */
   models_used: string[];
+  /** Aggregate-only rejection diagnostics, safe for receipts and phase output. */
+  rejection_reason_counts: ProposalRejectionReasonCounts;
   warnings: string[];
 }
 
@@ -534,6 +558,26 @@ function parseCleanExtractionArray(raw: string): unknown[] | null {
 const PREDICTION_SIGNAL_RE = /\b(?:will|won't|would|likely|unlikely|expect(?:s|ed|ing)?|predict(?:s|ed|ing)?|forecast(?:s|ed|ing)?|probab(?:le|ly|ility)|chance|risk|may|might|could|next\s+(?:week|month|quarter|year)|by\s+(?:q[1-4]|\d{4}))\b|(?:будет|будут|буду|вероятн\p{L}*|ожида\p{L}*|прогноз\p{L}*|предска\p{L}*|шанс\p{L}*|риск\p{L}*|может|могут|в\s+следующ\p{L}*|к\s+\d{4})/iu;
 const CONDITIONAL_PREDICTION_SIGNAL_RE = /\bif\b[\s\S]{0,160}\b(?:will|would|then|reach(?:es)?|rise|fall|grow|drop|increase|decrease|land)\b|(?:если)[\s\S]{0,160}(?:будет|станет|достигн\p{L}*|выраст\p{L}*|упад\p{L}*|сниз\p{L}*|увелич\p{L}*)/iu;
 const JUDGMENT_SIGNAL_RE = /\b(?:should|must|ought|need(?:s)?\s+to|better|worse|best|worst|right|wrong|correct|correctly|incorrect|prefer(?:s|red|ring)?|recommend(?:s|ed|ing)?|worth|valuable|harmful|beneficial|dangerous|safe|safer|unsafe|good|bad|ideal|effective|ineffective|important|critical|reasonable|unreasonable|clever|sound|flawed|superior|inferior|robust|fragile|i\s+think|i\s+believe)\b|(?:следует|нужно|необходимо|долж(?:ен|на|ны|но)|лучше|хуже|правильн\p{L}*|неправильн\p{L}*|корректн\p{L}*|рекоменд\p{L}*|предпочт\p{L}*|не\s+стоит|стоит|важн\p{L}*|критичн\p{L}*|опасн\p{L}*|безопасн\p{L}*|губительн\p{L}*|полезн\p{L}*|эффективн\p{L}*|неэффективн\p{L}*|оптимальн\p{L}*|разумн\p{L}*|сильн\p{L}*|слаб\p{L}*|над[её]жн\p{L}*|хрупк\p{L}*|счита\p{L}*|дума\p{L}*|полага\p{L}*)/iu;
+const STRICT_HOLDER_RE = /^(?:world|brain|people\/[a-z0-9][a-z0-9._-]*|companies\/[a-z0-9][a-z0-9._-]*)$/;
+
+function incrementRejectionReason(
+  counts: ProposalRejectionReasonCounts,
+  reason: ProposalRejectionReason,
+  amount = 1,
+): void {
+  counts[reason] = (counts[reason] ?? 0) + amount;
+}
+
+function mergeRejectionReasonCounts(
+  target: ProposalRejectionReasonCounts,
+  source: ProposalRejectionReasonCounts | undefined,
+): void {
+  if (!source) return;
+  for (const [reason, count] of Object.entries(source)) {
+    if (typeof count !== 'number' || !Number.isFinite(count) || count <= 0) continue;
+    incrementRejectionReason(target, reason as ProposalRejectionReason, count);
+  }
+}
 
 /**
  * Exact quotation proves provenance, not semantic gradeability. Require the
@@ -557,7 +601,7 @@ export function hasGradeableClaimSignal(claimText: string, rawKind: string): boo
  * instead of array). Returns [] on any unrecoverable parse error rather
  * than throwing.
  */
-export function parseExtractorOutput(raw: string, pageBody?: string): ProposedTake[] {
+export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTakesExtraction {
   if (!raw || raw.trim().length === 0) return [];
   let text = raw.trim();
   // Strip <think>...</think> reasoning tags (MiniMax-M3, DeepSeek-R1, etc.).
@@ -591,13 +635,25 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposedTa
     }
   }
   const arr = Array.isArray(parsed) ? parsed : [parsed];
-  const out: ProposedTake[] = [];
+  const out: ProposeTakesExtraction = [];
+  const rejectionReasonCounts: ProposalRejectionReasonCounts = {};
+  const reject = (reason: ProposalRejectionReason): void => incrementRejectionReason(rejectionReasonCounts, reason);
   for (const raw of arr) {
-    if (typeof raw !== 'object' || raw === null) continue;
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      if (typeof pageBody === 'string') reject('invalid_row');
+      continue;
+    }
     const r = raw as Record<string, unknown>;
     const claim_text = typeof r.claim_text === 'string' ? r.claim_text.trim() : '';
     const strictGrounding = typeof pageBody === 'string';
-    if (!claim_text || claim_text.length > (strictGrounding ? 200 : 500)) continue;
+    if (!claim_text) {
+      if (strictGrounding) reject('missing_claim');
+      continue;
+    }
+    if (claim_text.length > (strictGrounding ? 200 : 500)) {
+      if (strictGrounding) reject('claim_too_long');
+      continue;
+    }
     const rawKind = typeof r.kind === 'string' ? r.kind : '';
     const kind: ProposedTake['kind'] | null = strictGrounding
       ? (rawKind === 'prediction' || rawKind === 'judgment'
@@ -608,22 +664,62 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposedTa
       : (['fact', 'take', 'bet', 'hunch'].includes(rawKind)
           ? rawKind as ProposedTake['kind']
           : 'take');
-    if (kind === null) continue;
-    if (strictGrounding && !hasGradeableClaimSignal(claim_text, rawKind)) continue;
+    if (kind === null) {
+      reject('unknown_kind');
+      continue;
+    }
+    if (strictGrounding && !hasGradeableClaimSignal(claim_text, rawKind)) {
+      reject('missing_gradeable_signal');
+      continue;
+    }
     const holder = typeof r.holder === 'string' && r.holder.length > 0 ? r.holder : 'brain';
+    if (strictGrounding && !STRICT_HOLDER_RE.test(holder)) {
+      reject('invalid_holder');
+      continue;
+    }
+    if (
+      strictGrounding &&
+      r.weight !== undefined &&
+      (typeof r.weight !== 'number' || !Number.isFinite(r.weight) || r.weight < 0 || r.weight > 1)
+    ) {
+      reject('invalid_weight');
+      continue;
+    }
     const weightRaw = typeof r.weight === 'number' ? r.weight : 0.5;
     const weight = Math.max(0, Math.min(1, weightRaw));
     const domain = typeof r.domain === 'string' && r.domain.length > 0 ? r.domain : undefined;
     const evidence_span = typeof r.evidence_span === 'string' && r.evidence_span.trim().length > 0
       ? r.evidence_span.trim()
       : undefined;
-    if (
-      strictGrounding &&
-      (!evidence_span || evidence_span.length > 500 || !pageBody.includes(evidence_span) || !evidence_span.includes(claim_text))
-    ) {
-      continue;
+    if (strictGrounding) {
+      if (!evidence_span) {
+        reject('missing_evidence');
+        continue;
+      }
+      if (evidence_span.length > 500) {
+        reject('evidence_too_long');
+        continue;
+      }
+      if (!pageBody.includes(claim_text)) {
+        reject('claim_not_verbatim');
+        continue;
+      }
+      if (!pageBody.includes(evidence_span)) {
+        reject('evidence_not_verbatim');
+        continue;
+      }
+      if (!evidence_span.includes(claim_text)) {
+        reject('claim_not_in_evidence');
+        continue;
+      }
     }
     out.push({ claim_text, kind, holder, weight, domain, evidence_span });
+  }
+  if (Object.keys(rejectionReasonCounts).length > 0) {
+    Object.defineProperty(out, 'rejectionReasonCounts', {
+      value: rejectionReasonCounts,
+      enumerable: false,
+    });
   }
   return out;
 }
@@ -643,18 +739,20 @@ async function writeProposalPageRun(
     sourceId: string; pageSlug: string; sourceHash: string; promptVersion: string;
     proposalRunId: string; modelId: string; status: ProposalPageRunStatus;
     proposalCount: number; evidenceSpanCount: number; errorCode?: string;
+    rejectionReasonCounts?: ProposalRejectionReasonCounts;
   },
 ): Promise<void> {
   await engine.executeRaw(
     `INSERT INTO proposal_page_runs
        (source_id, page_slug, source_hash, prompt_version, proposal_run_id,
-        model_id, status, proposal_count, evidence_span_count, error_code)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        model_id, status, proposal_count, evidence_span_count, error_code, rejection_reason_counts)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
      ON CONFLICT (source_id, page_slug, source_hash, prompt_version, proposal_run_id) DO NOTHING`,
     [
       input.sourceId, input.pageSlug, input.sourceHash, input.promptVersion,
       input.proposalRunId, input.modelId, input.status, input.proposalCount,
       input.evidenceSpanCount, input.errorCode ?? null,
+      JSON.stringify(input.rejectionReasonCounts ?? {}),
     ],
   );
 }
@@ -866,6 +964,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       page_receipts_failed: 0,
       pages_rejected_sensitive: 0,
       models_used: [],
+      rejection_reason_counts: {},
       warnings: [],
       deadline_hit: false,
     };
@@ -956,6 +1055,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
             proposalRunId, modelId: 'deterministic:sensitivity-scan',
             status: 'quality_rejected', proposalCount: 0,
             evidenceSpanCount: 0, errorCode: 'sensitive_source',
+            rejectionReasonCounts: { sensitive_source: sensitivityFindings.length },
           });
           result.page_receipts_quality_rejected += 1;
         }
@@ -1043,6 +1143,8 @@ class ProposeTakesPhase extends BaseCyclePhase {
       if (!result.models_used.includes(actualModelId)) result.models_used.push(actualModelId);
 
       const strictContractRejected = (proposals as ProposeTakesExtraction).contractRejectedCount ?? 0;
+      const strictRejectionReasonCounts = (proposals as ProposeTakesExtraction).rejectionReasonCounts;
+      mergeRejectionReasonCounts(result.rejection_reason_counts, strictRejectionReasonCounts);
       result.proposals_rejected_ungrounded += strictContractRejected;
       if (strictContractRejected > 0) {
         result.warnings.push(
@@ -1059,6 +1161,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
             sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
             proposalRunId, modelId: actualModelId, status: 'quality_rejected', proposalCount: 0,
             evidenceSpanCount: 0, errorCode: 'invalid_claim_contract',
+            rejectionReasonCounts: strictRejectionReasonCounts,
           });
           result.page_receipts_quality_rejected += 1;
         }
@@ -1080,6 +1183,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
       const rejectedUngrounded = proposals.length - grounded.length;
       result.proposals_rejected_ungrounded += rejectedUngrounded;
       if (rejectedUngrounded > 0) {
+        incrementRejectionReason(result.rejection_reason_counts, 'post_parse_grounding', rejectedUngrounded);
         result.warnings.push(
           `${page.slug}: rejected ${rejectedUngrounded}/${proposals.length} proposal(s) without an exact evidence_span`,
         );
@@ -1090,6 +1194,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
             sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
             proposalRunId, modelId: actualModelId, status: 'quality_rejected', proposalCount: 0,
             evidenceSpanCount: 0, errorCode: 'ungrounded_evidence',
+            rejectionReasonCounts: { post_parse_grounding: rejectedUngrounded },
           });
           result.page_receipts_quality_rejected += 1;
         }
@@ -1125,6 +1230,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
             sourceId, pageSlug: page.slug, sourceHash: ch, promptVersion,
             proposalRunId, modelId: actualModelId, status: proposals.length === 0 ? 'empty' : 'completed',
             proposalCount: insertedForPage, evidenceSpanCount: grounded.length,
+            rejectionReasonCounts: strictRejectionReasonCounts,
           });
         });
       } catch (err) {

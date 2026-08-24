@@ -119,7 +119,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   a deterministic multilingual kind signal (forward/uncertainty for predictions
   and bets; opinion/evaluation/recommendation for judgments). Bare KPIs, ETAs,
   historical measurements, procedural facts and headings fail closed even when
-  quoted exactly. Receipts record the
+  quoted exactly. Explicit holders must match the prompt's closed
+  world/brain/people/company forms and explicit weights must be finite in
+  `[0,1]`; do not silently normalize malformed model output. Migration 143 adds
+  aggregate-only first-failure reason histograms to page receipts. These counts
+  and phase details use stable codes only and must never persist source or
+  candidate text. Receipts record the
   provider/model that actually answered after fallback. Empty outcomes live only
   in `proposal_page_runs`, dry-run writes nothing, and pending-list reads hide
   proposals whose source snapshot or evidence is no longer current.

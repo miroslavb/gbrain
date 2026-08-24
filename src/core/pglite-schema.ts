@@ -823,6 +823,8 @@ CREATE TABLE IF NOT EXISTS proposal_page_runs (
   proposal_count      INTEGER     NOT NULL DEFAULT 0 CHECK (proposal_count >= 0),
   evidence_span_count INTEGER     NOT NULL DEFAULT 0 CHECK (evidence_span_count >= 0),
   error_code          TEXT,
+  -- Aggregate-only stable reason codes; never source/proposal text.
+  rejection_reason_counts JSONB   NOT NULL DEFAULT '{}'::jsonb,
   completed_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS proposal_page_runs_identity_idx

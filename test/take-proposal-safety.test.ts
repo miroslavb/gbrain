@@ -39,6 +39,13 @@ const ctx = (): OperationContext => ({
   dryRun: false, remote: false, sourceId: 'default',
 });
 
+const runSafetyProducer = (extractor: ProposeTakesExtractor) => runPhaseProposeTakes(ctx(), {
+  extractor,
+  pageLimit: 1,
+  minPageChars: 0,
+  sensitivityConfig: { allowlist: [], blocklistRe: null, patterns: [] },
+});
+
 describe('take proposal acceptance quarantine and retry safety', () => {
   test('legacy pending rows are hidden and cannot be accepted', async () => {
     const [legacy] = await engine.executeRaw<{ id: number }>(
@@ -81,7 +88,7 @@ describe('take proposal acceptance quarantine and retry safety', () => {
     const extractor: ProposeTakesExtractor = async () => [
       { claim_text: claim, kind: 'bet', holder: 'brain', weight: 0.7, evidence_span: body },
     ];
-    await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    await runSafetyProducer(extractor);
     const [proposal] = await listPendingProposals(engine, { sourceId: 'default' });
 
     await expect(acceptProposal({
@@ -104,7 +111,7 @@ describe('take proposal acceptance quarantine and retry safety', () => {
     const extractor: ProposeTakesExtractor = async () => [
       { claim_text: claim, kind: 'bet', holder: 'brain', weight: 0.7, evidence_span: body },
     ];
-    await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    await runSafetyProducer(extractor);
     const [proposal] = await listPendingProposals(engine, { sourceId: 'default' });
     await engine.putPage(slug, {
       type: 'concept', title: slug, compiled_truth: `${body} Updated after extraction.`, frontmatter: {},
@@ -121,7 +128,7 @@ describe('take proposal acceptance quarantine and retry safety', () => {
     const extractor: ProposeTakesExtractor = async () => [
       { claim_text: claim, kind: 'bet', holder: 'brain', weight: 0.7, evidence_span: body },
     ];
-    await runPhaseProposeTakes(ctx(), { extractor, pageLimit: 1 });
+    await runSafetyProducer(extractor);
     const [proposal] = await listPendingProposals(engine, { sourceId: 'default' });
     writeFileSync(join(repo, `${slug}.md`), '# Consumer safety\n\nEvidence was removed.\n', 'utf-8');
 

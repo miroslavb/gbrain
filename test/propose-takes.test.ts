@@ -233,6 +233,42 @@ describe('parseExtractorOutput', () => {
     ]);
   });
 
+  test('strict rejection diagnostics are exclusive aggregate codes with no candidate content', () => {
+    const secret = 'fake-secret-candidate-123456789';
+    const pageBody = [
+      'I predict valid markets will consolidate next year.',
+      'I think a sequential design is better.',
+      'I bet pricing falls next year.',
+    ].join('\n');
+    const out = parseExtractorOutput(JSON.stringify([
+      null,
+      { kind: 'prediction', holder: 'brain', weight: 0.5, evidence_span: pageBody },
+      { claim_text: 'x'.repeat(201), kind: 'judgment', holder: 'brain', weight: 0.5, evidence_span: pageBody },
+      { claim_text: 'I predict valid markets will consolidate next year.', kind: 'fact', holder: 'brain', weight: 0.5, evidence_span: pageBody },
+      { claim_text: secret, kind: 'judgment', holder: 'brain', weight: 0.5, evidence_span: secret },
+      { claim_text: 'I think a sequential design is better.', kind: 'judgment', holder: 'private/operator', weight: 0.5, evidence_span: pageBody },
+      { claim_text: 'I think a sequential design is better.', kind: 'judgment', holder: 'brain', weight: 2, evidence_span: pageBody },
+      { claim_text: 'I think a sequential design is better.', kind: 'judgment', holder: 'brain', weight: 0.5 },
+      { claim_text: 'I bet pricing falls next year.', kind: 'bet', holder: 'brain', weight: 0.5, evidence_span: 'I bet pricing falls next year. fabricated' },
+    ]), pageBody);
+
+    expect(out).toHaveLength(0);
+    expect(out.rejectionReasonCounts).toEqual({
+      invalid_row: 1,
+      missing_claim: 1,
+      claim_too_long: 1,
+      unknown_kind: 1,
+      missing_gradeable_signal: 1,
+      invalid_holder: 1,
+      invalid_weight: 1,
+      missing_evidence: 1,
+      evidence_not_verbatim: 1,
+    });
+    const serialized = JSON.stringify(out.rejectionReasonCounts);
+    expect(serialized).not.toContain(secret);
+    expect(Object.values(out.rejectionReasonCounts ?? {}).reduce((sum, count) => sum + count, 0)).toBe(9);
+  });
+
   test('production grounding requires a kind-specific semantic signal in the exact claim', () => {
     const rows = [
       ['The company will miss its target next year.', 'prediction', true],

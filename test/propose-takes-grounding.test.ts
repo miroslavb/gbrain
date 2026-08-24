@@ -268,11 +268,20 @@ describe('grounded take proposal publication', () => {
     const extraction = [] as ProposeTakesExtraction;
     Object.defineProperty(extraction, 'qualityRejected', { value: true });
     Object.defineProperty(extraction, 'modelId', { value: 'test:strict-parser' });
+    Object.defineProperty(extraction, 'rejectionReasonCounts', {
+      value: { missing_gradeable_signal: 2, invalid_holder: 1 },
+    });
 
     const result = await runShortFixture(ctx(), { extractor: async () => extraction, pageLimit: 1 });
     expect(result.details).toMatchObject({ page_receipts_quality_rejected: 1, page_receipts_empty: 0 });
-    expect(await engine.executeRaw<{ status: string; error_code: string }>(
-      `SELECT status, error_code FROM proposal_page_runs`,
-    )).toEqual([{ status: 'quality_rejected', error_code: 'invalid_claim_contract' }]);
+    expect(await engine.executeRaw<{
+      status: string; error_code: string; rejection_reason_counts: Record<string, number>;
+    }>(
+      `SELECT status, error_code, rejection_reason_counts FROM proposal_page_runs`,
+    )).toEqual([{
+      status: 'quality_rejected',
+      error_code: 'invalid_claim_contract',
+      rejection_reason_counts: { missing_gradeable_signal: 2, invalid_holder: 1 },
+    }]);
   });
 });
