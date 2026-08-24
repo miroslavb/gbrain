@@ -41,6 +41,10 @@ async function seedNote(slug: string): Promise<void> {
   await engine.putPage(slug, { type: 'note', title: slug, compiled_truth: `content of ${slug}`, frontmatter: {} });
 }
 
+async function seedConcept(slug: string): Promise<void> {
+  await engine.putPage(slug, { type: 'concept', title: slug, compiled_truth: `content of ${slug}`, frontmatter: {} });
+}
+
 async function pageId(slug: string): Promise<number> {
   return (await (engine as any).db.query(`SELECT id FROM pages WHERE slug=$1`, [slug])).rows[0].id;
 }
@@ -60,17 +64,18 @@ describe('#1305 — getHealth excludes soft-deleted pages', () => {
   });
 
   test('brain_score moves when the user soft-deletes the islanded pages', async () => {
-    // 2 connected pages + 8 islanded ones.
-    await seedNote('wiki/hub');
-    await seedNote('wiki/leaf');
+    // 2 connected curated pages + 8 islanded curated pages. Generic notes are
+    // intentionally outside the curated brain-score denominator.
+    await seedConcept('concepts/hub');
+    await seedConcept('concepts/leaf');
     await (engine as any).db.query(
       `INSERT INTO links (from_page_id, to_page_id, link_type) VALUES ($1, $2, 'mentions')`,
-      [await pageId('wiki/hub'), await pageId('wiki/leaf')],
+      [await pageId('concepts/hub'), await pageId('concepts/leaf')],
     );
-    for (let i = 0; i < 8; i++) await seedNote(`wiki/clutter-${i}`);
+    for (let i = 0; i < 8; i++) await seedConcept(`concepts/clutter-${i}`);
 
     const before = await engine.getHealth();
-    for (let i = 0; i < 8; i++) await engine.softDeletePage(`wiki/clutter-${i}`);
+    for (let i = 0; i < 8; i++) await engine.softDeletePage(`concepts/clutter-${i}`);
     const after = await engine.getHealth();
 
     // Pre-fix both assertions fail: orphan_pages stayed 8 and brain_score

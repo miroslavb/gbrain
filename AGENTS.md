@@ -90,6 +90,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Drift parity:** `multi_source_drift` must use the same file-admission
   boundary as source sync. In particular, markdown symlinks are not pages and
   must never create a false misroute warning.
+- **Graph denominators:** brain-score graph components cover canonical
+  concept/project/analysis/guide/person/company/entity/organization pages.
+  Report session/archive isolation separately, including parent-session entity
+  links; never improve the score by hiding the curated island backlog.
 - **Extraction quality gates:** conversation facts and atoms must pass the
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,

@@ -223,6 +223,7 @@ import {
   buildMemoryVerbsCheck,
   buildRetrievalReflexCheck,
 } from './doctor/checks/verbs-reflex.ts';
+import { buildGraphScopeChecks } from './doctor/checks/graph-scope.ts';
 export interface Check {
   name: string;
   status: 'ok' | 'warn' | 'fail';
@@ -2434,16 +2435,14 @@ export async function buildChecks(
       });
     }
 
-    // Bug 11 — brain_score breakdown. When the total is < 100, show which
-    // components contributed the deficit so users know what to fix.
     // Uses distinct *_score field names (not overloading link_coverage /
     // timeline_coverage, which are entity-scoped).
     if (health.brain_score < 100) {
       const parts = [
         `embed ${health.embed_coverage_score}/35`,
-        `links ${health.link_density_score}/25`,
-        `timeline density (all pages) ${health.timeline_coverage_score}/15`,
-        `orphans ${health.no_orphans_score}/15`,
+        `curated links ${health.link_density_score}/25`,
+        `curated timeline ${health.timeline_coverage_score}/15`,
+        `curated non-islands ${health.no_orphans_score}/15`,
         `dead-links ${health.no_dead_links_score}/10`,
       ];
       checks.push({
@@ -2454,6 +2453,7 @@ export async function buildChecks(
     } else {
       checks.push({ name: 'brain_score', status: 'ok', message: `Brain score 100/100` });
     }
+    checks.push(...buildGraphScopeChecks(health));
   } catch {
     checks.push({ name: 'graph_coverage', status: 'warn', message: 'Could not check graph coverage' });
   }

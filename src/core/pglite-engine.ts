@@ -96,6 +96,7 @@ import { buildSourceFactorCase, buildHardExcludeClause, buildVisibilityClause, b
 import { privatePagesFilterFragment } from './search/private-visibility.ts';
 import { unverifiedExtractionFragment } from './extraction-review.ts';
 import { shouldExcludeFromOrphanReporting, loadOrphanPolicyOverrides } from './orphan-policy.ts';
+import { summarizeGraphHealthScope, type GraphHealthRow } from './graph-health-scope.ts';
 import { LINK_EXTRACTOR_VERSION_TS } from './link-extraction.ts';
 import { EMBED_SKIP_FILTER_FRAGMENT } from './embed-skip.ts';
 import { QUARANTINE_FILTER_FRAGMENT } from './quarantine.ts';
@@ -5586,11 +5587,8 @@ export class PGLiteEngine implements BrainEngine {
       LIMIT 5
     `);
 
-    // Per-page flags for the linkable scope: orphan_pages and the
-    // no-orphans / timeline-coverage DENOMINATORS are all computed over
-    // pages the shared orphan-reporting policy considers linkable (the same
-    // scope `gbrain orphans` and doctor's orphan_ratio use), so one doctor
-    // report cannot carry two contradictory orphan/coverage numbers.
+    // Per-page graph flags feed two explicitly separate scopes: the broad
+    // operational orphan report and curated knowledge score denominators.
     // Archive (raw/), generated, and daily-log pages are not expected to
     // participate in the curated graph. Filtered in TS because the policy
     // includes per-brain config overrides.
@@ -5601,14 +5599,16 @@ export class PGLiteEngine implements BrainEngine {
     // `gbrain orphans` whenever a soft-deleted page still linked to (or was
     // linked from) a live one.
     const { rows: pageScopeRows } = await this.db.query(`
-      SELECT p.slug,
-             (NOT EXISTS (SELECT 1 FROM links l
-                          JOIN pages src ON src.id = l.from_page_id
-                          WHERE l.to_page_id = p.id AND src.deleted_at IS NULL)
-              AND NOT EXISTS (SELECT 1 FROM links l
-                          JOIN pages tgt ON tgt.id = l.to_page_id
-                          WHERE l.from_page_id = p.id AND tgt.deleted_at IS NULL)) as islanded,
-             EXISTS (SELECT 1 FROM timeline_entries te WHERE te.page_id = p.id) as has_timeline
+      SELECT p.slug, p.type,
+             (SELECT count(*)::int FROM links l WHERE
+               (l.from_page_id = p.id AND EXISTS (SELECT 1 FROM pages tgt WHERE tgt.id = l.to_page_id AND tgt.deleted_at IS NULL)) OR
+               (l.to_page_id = p.id AND EXISTS (SELECT 1 FROM pages src WHERE src.id = l.from_page_id AND src.deleted_at IS NULL))) AS link_count,
+             EXISTS (SELECT 1 FROM links l JOIN pages src ON src.id = l.from_page_id WHERE l.to_page_id = p.id AND src.deleted_at IS NULL) AS has_inbound,
+             EXISTS (SELECT 1 FROM timeline_entries te WHERE te.page_id = p.id) AS has_timeline,
+             EXISTS (SELECT 1 FROM links l JOIN pages other ON
+               (l.from_page_id = p.id AND other.id = l.to_page_id) OR (l.to_page_id = p.id AND other.id = l.from_page_id)
+               WHERE other.deleted_at IS NULL AND other.type IN
+                 ('concept','project','analysis','guide','person','company','entity','organization')) AS has_entity_link
       FROM pages p
       WHERE p.deleted_at IS NULL
     `);
@@ -5618,24 +5618,20 @@ export class PGLiteEngine implements BrainEngine {
     const embedCoverage = Number(r.embed_coverage);
     const stalePages = await this.countStalePagesForExtraction({ versionTs: LINK_EXTRACTOR_VERSION_TS });
     const orphanOverrides = await loadOrphanPolicyOverrides(this);
-    const linkablePages = (pageScopeRows as { slug: string; islanded: boolean; has_timeline: boolean }[])
+    const graphRows = pageScopeRows as GraphHealthRow[];
+    const linkablePages = graphRows
       .filter(row => !shouldExcludeFromOrphanReporting(row.slug, orphanOverrides));
     const linkablePageCount = linkablePages.length;
-    const orphanPages = linkablePages.filter(row => row.islanded).length;
-    const linkableTimelinePages = linkablePages.filter(row => row.has_timeline).length;
+    const orphanPages = linkablePages.filter(row => Number(row.link_count) === 0).length;
     const deadLinks = Number(r.dead_links);
-    const linkCount = Number(r.link_count);
-
-    const linkDensity = pageCount > 0 ? Math.min(linkCount / pageCount, 1) : 0;
-    // linkablePageCount === 0 gets full marks for the orphan / timeline
-    // components (same vacuous-truth rule as the empty-brain fix below):
-    // an all-archive brain has no curated graph to penalize.
-    const timelineCoverageDensity =
-      linkablePageCount > 0 ? Math.min(linkableTimelinePages / linkablePageCount, 1) : 1;
-    const noOrphans = linkablePageCount > 0 ? 1 - (orphanPages / linkablePageCount) : 1;
+    const graphScope = summarizeGraphHealthScope(graphRows);
+    const linkDensity = graphScope.curated_pages > 0 ? Math.min(graphScope.curated_link_endpoints / graphScope.curated_pages, 1) : 1;
+    // A brain with no curated pages gets full graph marks: archive/session
+    // material has no curated graph to penalize.
+    const timelineCoverageDensity = graphScope.curated_pages > 0 ? graphScope.curated_timeline_pages / graphScope.curated_pages : 1;
+    const noOrphans = graphScope.curated_pages > 0 ? 1 - (graphScope.curated_islands / graphScope.curated_pages) : 1;
     const noDeadLinks = pageCount > 0 ? 1 - Math.min(deadLinks / pageCount, 1) : 1;
-    // Bug 11 — per-component points. Sum equals brainScore by construction
-    // so `doctor` can render a breakdown that adds up to the total.
+    // Per-component points sum to brainScore by construction.
     //
     // v0.37.10.0: empty brains (pageCount === 0) get FULL marks (100/100),
     // not 0. Semantically an empty brain has no coverage problem to penalize
@@ -5674,6 +5670,7 @@ export class PGLiteEngine implements BrainEngine {
       timeline_coverage_score: timelineCoverageScore,
       no_orphans_score: noOrphansScore,
       no_dead_links_score: noDeadLinksScore,
+      graph_scope: graphScope,
     };
   }
 

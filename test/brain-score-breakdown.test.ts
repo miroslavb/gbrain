@@ -145,7 +145,7 @@ describe('Bug 11 — BrainHealth type shape', () => {
   });
 });
 
-describe('linkable scope — archive pages do not drag the score', () => {
+describe('curated graph scope — archive pages do not drag the score', () => {
   test('islanded raw/ and daily/ pages are excluded from the orphan component', async () => {
     // Curated, connected pages.
     await engine.putPage('people/alice-example', { type: 'person', title: 'Alice', compiled_truth: 'x', frontmatter: {} });
@@ -171,7 +171,7 @@ describe('linkable scope — archive pages do not drag the score', () => {
     expect(h.no_orphans_score).toBe(15);
   });
 
-  test('timeline coverage is measured over linkable pages only', async () => {
+  test('timeline coverage is measured over curated pages only', async () => {
     await engine.putPage('people/alice-example', { type: 'person', title: 'Alice', compiled_truth: 'x', frontmatter: {} });
     await engine.addTimelineEntry('people/alice-example', { date: '2025-01-01', source: 'note', summary: 'joined' });
     // A raw archive page without timeline must not dilute coverage.
@@ -179,7 +179,7 @@ describe('linkable scope — archive pages do not drag the score', () => {
 
     const h = await engine.getHealth();
     expect(h.linkable_page_count).toBe(1);
-    expect(h.timeline_coverage_score).toBe(15); // 1/1 linkable pages covered
+    expect(h.timeline_coverage_score).toBe(15); // 1/1 curated pages covered
   });
 
   test('an islanded curated page still counts as an orphan', async () => {

@@ -1595,8 +1595,8 @@ export interface BrainHealth {
    * Pages inside the linkable scope (src/core/orphan-policy.ts) — the
    * pages expected to participate in the curated link graph. Excludes
    * archive (raw/), generated, and daily-log pages; the same scope the
-   * orphans audit uses. Denominator for the no-orphans and
-   * timeline-coverage score components.
+   * orphans audit uses. This remains the broad operational orphan-reporting
+   * scope; graph_scope carries the narrower curated score denominators.
    */
   linkable_page_count: number;
   embed_coverage: number;
@@ -1649,17 +1649,17 @@ export interface BrainHealth {
    * Per-component contribution to brain_score. Sum equals brain_score by
    * construction. Displayed by `gbrain doctor` when brain_score < 100.
    * Field names are distinct from the entity-scoped link_coverage /
-   * timeline_coverage above to avoid semantic collision (these reflect
-   * whole-brain measures used in the score formula).
+   * timeline_coverage above to avoid semantic collision (link, timeline, and
+   * island components reflect curated knowledge types only).
    */
   embed_coverage_score: number;     // 0-35
   link_density_score: number;        // 0-25
   timeline_coverage_score: number;   // 0-15
   no_orphans_score: number;          // 0-15
   no_dead_links_score: number;       // 0-10
+  graph_scope?: import('./graph-health-scope.ts').GraphScopeStats;
   /**
-   * Host migration-ledger summary so remote get_health callers can detect a
-   * wedged brain WITHOUT shelling SSH + gbrain doctor. Composed at the op
+   * Host migration-ledger summary lets remote get_health detect a wedged brain. Composed at the op
    * layer by get_health from src/core/migration-ledger.ts
    * (migrationLedgerSummary — version strings only, never migration
    * internals); an unreadable/corrupt ledger degrades to the error variant.
