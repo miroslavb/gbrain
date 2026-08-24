@@ -616,6 +616,42 @@ describe('runExtractConversationFactsCore', () => {
     });
   });
 
+  test('redacts sensitive source values from extractor and semantic-validator calls', async () => {
+    const slug = 'conversations/sensitive-source';
+    await engine.putPage(slug, {
+      type: 'conversation', title: 'Sensitive source', timeline: '', frontmatter: {},
+      compiled_truth: [
+        '**User** (2026-08-24 9:00 AM): The host is 10.24.8.9.',
+        '**Assistant** (2026-08-24 9:01 AM): I will keep that private.',
+      ].join('\n'),
+    });
+    let extractorText = '', semanticText = '';
+    await runExtractConversationFactsCore(engine, {
+      sourceId: 'default', slug, sleepMs: 0,
+      extractor: async (input) => {
+        extractorText = input.turnText;
+        return [{
+          fact: 'The user wants infrastructure details kept private.', kind: 'preference',
+          entity_slug: null, source: PER_SEGMENT_SOURCE_PREFIX, confidence: 1,
+          notability: 'medium', embedding: null,
+        }];
+      },
+      _qualitySemanticValidator: async (request) => {
+        semanticText = request.sourceText;
+        return { payload: { decisions: [{
+          id: 'c0', action: 'accept', fully_supported: true,
+          exactly_one_proposition: true, self_contained: true,
+          correct_entity_attribution: true, no_hidden_causation: true,
+          no_overgeneralization: true, no_sensitive_content: true,
+        }] } };
+      },
+    });
+    expect(extractorText).not.toContain('10.24.8.9');
+    expect(semanticText).not.toContain('10.24.8.9');
+    expect(extractorText).toContain('sensitive value removed');
+    expect(semanticText).toContain('sensitive value removed');
+  });
+
   test('dry-run reports segmentation without writing facts', async () => {
     const result = await runExtractConversationFactsCore(engine, {
       sourceId: 'default',

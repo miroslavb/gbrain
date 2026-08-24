@@ -15,15 +15,14 @@ import type { ExtractedFact } from './extract.ts';
 import { chat, type ChatResult } from '../ai/gateway.ts';
 import { resolveModel } from '../model-config.ts';
 import { BudgetExhausted } from '../budget/budget-tracker.ts';
+import {
+  scanConversationFactSensitive as scanConversationFactSensitiveLeaf,
+  type ConversationFactSensitiveReason,
+} from './conversation-sensitive.ts';
+export { redactConversationFactSensitive } from './conversation-sensitive.ts';
 
 export type ConversationFactQualityReason =
-  | 'ip'
-  | 'email'
-  | 'phone'
-  | 'credential'
-  | 'private_path'
-  | 'secret_url'
-  | 'configured_pattern'
+  | ConversationFactSensitiveReason
   | 'unsupported'
   | 'not_atomic'
   | 'not_self_contained'
@@ -39,6 +38,14 @@ export type ConversationFactQualityReason =
   | 'split_unsupported'
   | 'split_fanout_exceeded'
   | 'split_sensitive';
+
+/** Back-compatible quality-gate surface; implementation lives in the leaf detector. */
+export function scanConversationFactSensitive(
+  text: string,
+  configuredPatterns: readonly string[],
+): ConversationFactQualityReason[] {
+  return scanConversationFactSensitiveLeaf(text, configuredPatterns);
+}
 
 export interface ConversationFactQualityConfig {
   configuredSensitivePatterns: string[];
@@ -137,50 +144,6 @@ export interface AcceptedConversationFact {
 export interface ConversationFactQualityGateResult {
   accepted: AcceptedConversationFact[];
   receipt: ConversationFactQualityReceipt;
-}
-
-const SENSITIVE_PATTERNS: ReadonlyArray<{
-  reason: ConversationFactQualityReason;
-  rx: RegExp;
-}> = [
-  { reason: 'ip', rx: /\b(?:\d{1,3}\.){3}\d{1,3}\b/ },
-  { reason: 'email', rx: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i },
-  {
-    reason: 'phone',
-    rx: /(?:\+\d{1,3}[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]\d{3}[ .-]\d{4}\b/,
-  },
-  {
-    reason: 'credential',
-    rx: /(?:\b(?:password|passwd|api[_ -]?key|secret|access[_ -]?token|bearer)\s*[:=]\s*\S+|\b(?:sk|pk)-(?:live|test)-[A-Za-z0-9_-]{12,}|\bAKIA[0-9A-Z]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i,
-  },
-  {
-    reason: 'private_path',
-    rx: /(?:^|[\s`"'])(?:\/(?:home|root|Users)\/[^\s`"']+|~\/(?:\.ssh|\.aws|\.config|\.gnupg)(?:\/[^\s`"']*)?|[A-Z]:\\Users\\[^\s`"']+)/i,
-  },
-  {
-    reason: 'secret_url',
-    rx: /https?:\/\/(?:[^/\s:@]+:[^@\s/]+@|[^\s]*[?&](?:token|access_token|api[_-]?key|secret|password|passwd|pwd|signature|sig)=)/i,
-  },
-];
-
-/** Return reason codes only. Never return the matched text. */
-export function scanConversationFactSensitive(
-  text: string,
-  configuredPatterns: readonly string[],
-): ConversationFactQualityReason[] {
-  const reasons: ConversationFactQualityReason[] = [];
-  for (const pattern of SENSITIVE_PATTERNS) {
-    pattern.rx.lastIndex = 0;
-    if (pattern.rx.test(text)) reasons.push(pattern.reason);
-  }
-  const lower = text.toLocaleLowerCase('en-US');
-  if (configuredPatterns.some((pattern) => {
-    const needle = pattern.trim().toLocaleLowerCase('en-US');
-    return needle.length > 0 && lower.includes(needle);
-  })) {
-    reasons.push('configured_pattern');
-  }
-  return reasons;
 }
 
 function addReason(

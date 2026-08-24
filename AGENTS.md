@@ -151,7 +151,8 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   144 repairs double-encoded JSONB strings and enforces object-shaped histograms.
   The conversation extractor prompt must also exclude IP/email/phone values,
   credentials, private paths, and secret-bearing URLs before candidates reach
-  the gate; deterministic rejection remains mandatory defense in depth.
+  the gate. Redact those values plus configured sensitive literals before the
+  LLM call; deterministic post-LLM rejection remains mandatory defense in depth.
   Atom budget accounting must load `pricing.overrides` for both the extractor
   and semantic-validator routes; preserve typed `BudgetExhausted` stops instead
   of folding them into semantic rejection counts.

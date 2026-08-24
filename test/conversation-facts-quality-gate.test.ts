@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ExtractedFact } from '../src/core/facts/extract.ts';
 import {
   DEFAULT_CONVERSATION_QUALITY_CONFIG,
+  redactConversationFactSensitive,
   runConversationFactQualityGate,
   scanConversationFactSensitive,
   type ConversationFactExisting,
@@ -59,6 +60,16 @@ describe('conversation fact deterministic sensitive scanner', () => {
   test('rejects operator-configured literal patterns without copying the text into the reason', () => {
     expect(scanConversationFactSensitive('Project ORCHID-CODE is active.', ['ORCHID-CODE']))
       .toEqual(['configured_pattern']);
+  });
+
+  test('redacts every occurrence and configured literals before extraction', () => {
+    const source = 'Host 10.24.8.9, alice@example.test, project ORCHID-CODE; again 10.24.8.9.';
+    const redacted = redactConversationFactSensitive(source, ['ORCHID-CODE']);
+    expect(redacted).not.toContain('10.24.8.9');
+    expect(redacted).not.toContain('alice@example.test');
+    expect(redacted).not.toContain('ORCHID-CODE');
+    expect(redacted.match(/sensitive value removed/g)).toHaveLength(4);
+    expect(scanConversationFactSensitive(redacted, ['ORCHID-CODE'])).toEqual([]);
   });
 });
 

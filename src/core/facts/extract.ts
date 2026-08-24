@@ -28,6 +28,7 @@ import { resolveModel } from '../model-config.ts';
 import { normalizeModelId } from '../model-id.ts';
 import type { BrainEngine, NewFact, FactKind } from '../engine.ts';
 import { normalizeMetricLabel } from './extract-from-fence.ts';
+import { redactConversationFactSensitive } from './conversation-sensitive.ts';
 
 /**
  * v0.31 (D15): kill-switch for fact extraction.
@@ -119,6 +120,8 @@ export interface ExtractInput {
   abortSignal?: AbortSignal;
   /** Cap on number of facts returned per turn. Defaults to 10. */
   maxFactsPerTurn?: number;
+  /** Operator-sensitive literals redacted with built-in classes before the LLM call. */
+  sensitivePatterns?: readonly string[];
 }
 
 /** A pre-INSERT fact ready for the engine.insertFact path. */
@@ -195,6 +198,8 @@ export const EXTRACTOR_SYSTEM = [
   '  paths, or URLs containing secrets. Return no fact for those strings even when the user',
   '  states or requests them. Durable preferences about privacy are allowed only without the',
   '  sensitive value itself.',
+  '- A placeholder saying a sensitive value was removed is a hard skip signal: do not emit',
+  '  a fact about the placeholder or the surrounding sensitive claim.',
   '- One fact per atomic claim. Cap at 10 facts per turn.',
   '- entity = a canonical slug (e.g. "people/alice-example", "companies/acme", "travel") when known,',
   '  else a display name the caller can canonicalize, else null when no entity is implied.',
@@ -293,6 +298,7 @@ export async function extractFactsFromTurnWithOutcome(
   // Anti-loop + sanitization.
   let cleaned = input.turnText.slice(0, MAX_TURN_TEXT_CHARS);
   for (const p of INJECTION_PATTERNS) cleaned = cleaned.replace(p.rx, p.replacement);
+  cleaned = redactConversationFactSensitive(cleaned, input.sensitivePatterns ?? []);
   cleaned = cleaned.trim();
   if (!cleaned) return { ok: true, facts: [] };
 

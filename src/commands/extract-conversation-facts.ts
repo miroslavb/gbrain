@@ -418,6 +418,7 @@ import {
   gatewayConversationFactSemanticValidator,
   loadConversationFactExisting,
   loadConversationFactQualityConfig,
+  redactConversationFactSensitive,
   runConversationFactQualityGate,
   type ConversationFactQualityConfig,
   type ConversationFactQualityReceipt,
@@ -1117,7 +1118,7 @@ async function processPage(
     if (state.signal?.aborted) throw new Error('aborted');
 
     const text = renderSegmentForExtraction(page.title || page.slug, seg);
-    const sessionId = `${PER_SEGMENT_SOURCE_PREFIX}:${page.slug}`;
+    const safeText = redactConversationFactSensitive(text, state.qualityConfig.configuredSensitivePatterns), sessionId = `${PER_SEGMENT_SOURCE_PREFIX}:${page.slug}`;
 
     // BrainBench (decision 15) may inject a deterministic extractor; when it
     // does, use it (returns facts directly — the hermetic gold path). The
@@ -1127,19 +1128,19 @@ async function processPage(
     let extracted: ExtractedFact[];
     if (state.extractor) {
       extracted = await state.extractor({
-        turnText: text,
+        turnText: safeText,
         sessionId,
         source: PER_SEGMENT_SOURCE_PREFIX,
         engine: state.engine,
-        abortSignal: state.signal,
+        abortSignal: state.signal, sensitivePatterns: state.qualityConfig.configuredSensitivePatterns,
       });
     } else {
       const extraction = await extractFactsFromTurnWithOutcome({
-        turnText: text,
+        turnText: safeText,
         sessionId,
         source: PER_SEGMENT_SOURCE_PREFIX,
         engine: state.engine,
-        abortSignal: state.signal,
+        abortSignal: state.signal, sensitivePatterns: state.qualityConfig.configuredSensitivePatterns,
       });
       if (!extraction.ok) {
         // #3669 — rethrow BudgetExhausted UNWRAPPED. Wrapping it in a plain
@@ -1172,7 +1173,7 @@ async function processPage(
           .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0),
       );
       const quality = await runConversationFactQualityGate({
-        sourceText: text,
+        sourceText: safeText,
         candidates: extracted,
         existingFacts,
         config: state.qualityConfig,

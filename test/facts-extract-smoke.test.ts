@@ -29,6 +29,26 @@ afterEach(() => {
 });
 
 describe('extractFactsFromTurn — B1 end-to-end smoke', () => {
+  test('sensitive values are absent from the outbound LLM turn', async () => {
+    let outbound = '';
+    __setChatTransportForTests(async (request): Promise<ChatResult> => {
+      outbound = JSON.stringify(request.messages);
+      return {
+        text: '{"facts":[]}', blocks: [], stopReason: 'end',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 },
+        model: 'test:stub', providerId: 'test',
+      };
+    });
+    await extractFactsFromTurn({
+      turnText: 'Host 10.24.8.9 belongs to ORCHID-CODE.',
+      sensitivePatterns: ['ORCHID-CODE'],
+      source: 'test:redaction',
+    });
+    expect(outbound).not.toContain('10.24.8.9');
+    expect(outbound).not.toContain('ORCHID-CODE');
+    expect(outbound).toContain('sensitive value removed');
+  });
+
   test('notability:high from stubbed LLM survives all the way to ExtractedFact', async () => {
     // Stub the LLM to return what a well-tuned Sonnet would emit for a
     // life-event input.
