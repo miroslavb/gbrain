@@ -129,7 +129,28 @@ describe('checkTypeProliferation (D16 pack-aware ratio)', () => {
       await seedPages(types);
       const result = await checkTypeProliferation(engine);
       expect(result.check.status).toBe('warn');
-      expect(result.check.message).toMatch(new RegExp(`${seedCount} distinct`));
+      expect(result.check.message).toContain(`${seedCount} taxonomy-relevant types`);
+    });
+  });
+
+  it('reports but excludes archive/generated-only types from the taxonomy budget', async () => {
+    await withEnv({ GBRAIN_HOME: emptyHome(), GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      const { loadActivePack } = await import('../src/core/schema-pack/load-active.ts');
+      const dbConfig = (await engine.getConfig('schema_pack')) ?? undefined;
+      const active = await loadActivePack({ cfg: null, remote: false, dbConfig }).catch(() => null);
+      const declared = active ? active.manifest.page_types.length : 15;
+      for (let i = 0; i < declared + 6; i++) {
+        await engine.putPage(`sessions/archive/type-${i}`, {
+          title: `archive type ${i}`,
+          type: `archive-type-${i}` as never,
+          compiled_truth: 'synthetic archived conversation body',
+          timeline: '', frontmatter: {}, source_path: null,
+        });
+      }
+      const result = await checkTypeProliferation(engine);
+      expect(result.check.status).toBe('ok');
+      expect(result.check.message).toContain(`${declared + 6} total`);
+      expect(result.check.message).toContain(`${declared + 6} archive/generated-only excluded`);
     });
   });
 });

@@ -112,6 +112,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   concept/project/analysis/guide/person/company/entity/organization pages.
   Report session/archive isolation separately, including parent-session entity
   links; never improve the score by hiding the curated island backlog.
+- **Type-proliferation denominator:** count semantic taxonomy choices outside
+  archive/generated contours (`sessions/`, `life/events/`, `atoms/`,
+  `extracts/`, `dream-cycle-summaries/`) against the active pack. Report types
+  that exist only inside those contours separately; do not broad-retype durable
+  pages merely to silence the warning.
 - **Take proposals:** legacy rows without exact evidence, source hashes, and a
   matching successful `proposal_page_runs` receipt are audit history, never an
   acceptance queue. New producer canaries stay page-bounded; proposal rows and

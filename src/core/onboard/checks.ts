@@ -495,10 +495,12 @@ export async function checkPackUpgradeAvailable(
 }
 
 /**
- * type_proliferation (D16): pack-aware ratio. Warns when distinct typed
- * pages exceed pack-declared types + 5; fails at declared × 2. No false
- * positives on custom packs (compares to actual pack declaration count,
- * not a hardcoded threshold).
+ * type_proliferation (D16): pack-aware curated-taxonomy ratio. Types that
+ * exist exclusively under archive/generated contours are reported separately
+ * but do not spend the semantic taxonomy budget: they describe storage lanes,
+ * not additional kinds an author must choose between. Warns when relevant
+ * distinct types exceed pack-declared types + 5; fails at declared × 2. No
+ * broad retyping is implied by this diagnostic.
  */
 export async function checkTypeProliferation(
   engine: BrainEngine,
@@ -517,31 +519,46 @@ export async function checkTypeProliferation(
   } catch {
     // Use fallback.
   }
-  const n = await safeCount(
+  const total = await safeCount(
     engine,
     `SELECT COUNT(DISTINCT type) AS count FROM pages WHERE deleted_at IS NULL AND type IS NOT NULL`,
   );
+  const relevant = await safeCount(
+    engine,
+    `SELECT COUNT(DISTINCT type) AS count
+       FROM pages
+      WHERE deleted_at IS NULL AND type IS NOT NULL
+        AND slug NOT LIKE 'sessions/%'
+        AND slug NOT LIKE 'life/events/%'
+        AND slug NOT LIKE 'atoms/%'
+        AND slug NOT LIKE 'extracts/%'
+        AND slug NOT LIKE 'dream-cycle-summaries/%'`,
+  );
+  const excluded = Math.max(0, total - relevant);
+  const scope = excluded > 0
+    ? `${relevant} taxonomy-relevant types (${total} total; ${excluded} archive/generated-only excluded)`
+    : `${relevant} taxonomy-relevant types`;
   const warn = declared + 5;
   const fail = declared * 2;
-  if (n > fail) {
+  if (relevant > fail) {
     return {
       check: {
         name: 'type_proliferation',
         status: 'fail',
         message:
-          `${n} distinct page types (pack declares ${declared}). ` +
+          `${scope}; pack declares ${declared}. ` +
           `Run \`gbrain onboard --check --explain\` to preview a pack upgrade ` +
           `or define a custom pack with mapping_rules.`,
       },
       remediations: [],  // pack_upgrade_available check emits the actionable step
     };
   }
-  if (n > warn) {
+  if (relevant > warn) {
     return {
       check: {
         name: 'type_proliferation',
         status: 'warn',
-        message: `${n} distinct page types vs ${declared} declared in pack — consider unification.`,
+        message: `${scope} vs ${declared} declared in pack — consider unification.`,
       },
       remediations: [],
     };
@@ -550,7 +567,7 @@ export async function checkTypeProliferation(
     check: {
       name: 'type_proliferation',
       status: 'ok',
-      message: `${n} distinct typed values (pack declares ${declared})`,
+      message: `${scope}; pack declares ${declared}`,
     },
     remediations: [],
   };
