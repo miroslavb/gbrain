@@ -1302,7 +1302,7 @@ export async function importFromFile(
           `at least one letter or number (any script).`,
       };
     }
-  } else if (parsed.slug !== expectedSlug) {
+  } else if (parsed.slug !== expectedSlug && !(/\.mdx$/i.test(relativePath) && parsed.slug.startsWith('/'))) {
     if (slugifyPath(parsed.slug) === expectedSlug) {
       // #3772: normalization-equivalent — the frontmatter slug is a stored
       // identity whose slugified spelling IS the path-derived slug. Export

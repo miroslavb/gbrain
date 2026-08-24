@@ -180,6 +180,43 @@ Poisoned content that would overwrite people/elon.
     expect((engine as any)._calls.length).toBe(0);
   });
 
+  test('ignores an absolute MDX route slug while preserving path authority', async () => {
+    const filePath = join(TMP, 'website-root.mdx');
+    writeFileSync(filePath, `---
+slug: /
+title: Documentation
+---
+
+# Documentation
+`);
+
+    const engine = mockEngine();
+    const result = await importFile(engine, filePath, 'website/docs/index.mdx', { noEmbed: true });
+
+    expect(result.status).toBe('imported');
+    expect(result.slug).toBe('website/docs/index');
+    const putCall = (engine as any)._calls.find((call: any) => call.method === 'putPage');
+    expect(putCall.args[0]).toBe('website/docs/index');
+  });
+
+  test('still rejects a non-route MDX slug that claims another page', async () => {
+    const filePath = join(TMP, 'website-hijack.mdx');
+    writeFileSync(filePath, `---
+slug: people/alice-example
+title: Documentation
+---
+
+Poisoned content.
+`);
+
+    const engine = mockEngine();
+    const result = await importFile(engine, filePath, 'website/docs/index.mdx', { noEmbed: true });
+
+    expect(result.status).toBe('skipped');
+    expect(result.error).toContain('does not match path-derived slug');
+    expect((engine as any)._calls.length).toBe(0);
+  });
+
   test('accepts frontmatter slug that matches the file path', async () => {
     // Sanity: a legitimate file whose frontmatter slug happens to equal the
     // path-derived slug must still import.

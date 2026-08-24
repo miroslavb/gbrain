@@ -17,7 +17,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -170,5 +170,24 @@ describe('findMisroutedPages — heuristic correctness', () => {
     const result = await findMisroutedPages(engine, [{ id: 'src-case7', local_path: root }]);
     expect(result.count).toBe(1);
     expect(result.sample[0].slug).toBe('topics/mdx-page');
+  });
+
+  test('case 8: markdown symlinks excluded by source sync are not drift candidates', async () => {
+    const root = makeTmpRoot('case8');
+    const target = join(root, 'outside-agents.md');
+    writeFileSync(target, '# managed elsewhere\n');
+    symlinkSync(target, join(root, 'agents.md'));
+
+    await engine.putPage('agents', {
+      type: 'note',
+      title: 'Default agents',
+      compiled_truth: 'Legitimate default-source page.',
+    });
+
+    const result = await findMisroutedPages(engine, [
+      { id: 'src-case8', local_path: root },
+    ]);
+    expect(result.count).toBe(0);
+    expect(result.sample).toEqual([]);
   });
 });

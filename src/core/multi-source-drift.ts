@@ -94,8 +94,16 @@ function walkMarkdownAndMdxFiles(
           entry === '.next' || entry === 'vendor' || entry === 'target') continue;
       const full = join(d, entry);
       let isDir = false;
+      let isFile = false;
       try {
-        isDir = lstatSync(full).isDirectory();
+        const stat = lstatSync(full);
+        // Full source sync deliberately never follows symlinks. Keeping the
+        // doctor walker on the same admission contract avoids reporting a
+        // default-source page as drift merely because another source exposes
+        // a same-named markdown symlink that sync can never import.
+        if (stat.isSymbolicLink()) continue;
+        isDir = stat.isDirectory();
+        isFile = stat.isFile();
       } catch {
         continue;
       }
@@ -106,6 +114,7 @@ function walkMarkdownAndMdxFiles(
         walk(full);
         continue;
       }
+      if (!isFile) continue;
       const isMd = entry.endsWith('.md') || entry.endsWith('.mdx');
       if (!isMd) continue;
       if (entry.startsWith('_')) continue; // matches extract.ts convention

@@ -42,6 +42,7 @@ import {
   pageTypesForAllowed,
   ALLOWED_TYPE_ALIASES,
 } from '../src/commands/extract-conversation-facts.ts';
+import { isHarnessInterruptionStatus } from '../src/core/facts/conversation-interruption.ts';
 import { _resetLlmCacheForTests } from '../src/core/conversation-parser/llm-base.ts';
 import { BudgetExhausted } from '../src/core/budget/budget-tracker.ts';
 
@@ -229,6 +230,25 @@ describe('splitIntoSegments', () => {
     expect(DEFAULT_SEGMENT_GAP_MINUTES).toBe(30);
     expect(DEFAULT_SEGMENT_MAX_MESSAGES).toBe(30);
     expect(SEGMENT_TEXT_CHAR_LIMIT).toBe(6500);
+  });
+});
+
+describe('harness interruption status', () => {
+  test('matches only the exact interrupted-model transport status', () => {
+    expect(isHarnessInterruptionStatus(
+      'Operation interrupted: waiting for model response (35.0s elapsed).',
+    )).toBe(true);
+    expect(isHarnessInterruptionStatus(
+      'Operation interrupted: waiting for model response.',
+    )).toBe(true);
+    expect(isHarnessInterruptionStatus([
+      'Operation interrupted: waiting for model response (35.0s elapsed).',
+      '## Segments',
+      '- [[sessions/example/segments/0001]]',
+    ].join('\n'))).toBe(true);
+    expect(isHarnessInterruptionStatus(
+      'The operation was interrupted while we discussed the model response.',
+    )).toBe(false);
   });
 });
 
@@ -1010,6 +1030,44 @@ describe('runExtractConversationFactsCore', () => {
     });
     expect(second.pages_skipped_non_extractable).toBe(1);
     expect(second.pages_marked_non_extractable).toBe(0);
+  });
+
+  test('quarantines a request followed only by the harness interruption status', async () => {
+    const slug = 'conversations/interrupted-request';
+    await engine.putPage(slug, {
+      type: 'conversation',
+      title: 'Interrupted implementation request',
+      compiled_truth: [
+        '**User** (2026-08-21 16:44): Implement the requested production change.',
+        '**Assistant** (2026-08-21 16:54): Operation interrupted: waiting for model response (35.0s elapsed).',
+      ].join('\n'),
+      timeline: '',
+      frontmatter: { date: '2026-08-21' },
+    });
+    await engine.insertFacts([
+      {
+        fact: 'The requested production change was implemented.',
+        source: PER_SEGMENT_SOURCE_PREFIX,
+        source_markdown_slug: slug,
+        row_num: 0,
+      },
+    ], { source_id: 'default' });
+
+    const result = await runExtractConversationFactsCore(engine, {
+      sourceId: 'default',
+      slug,
+      sleepMs: 0,
+    });
+
+    expect(result.pages_processed).toBe(0);
+    expect(result.pages_marked_non_extractable).toBe(1);
+    expect(result.quality_candidates).toBe(0);
+    expect(result.orphan_facts_cleaned).toBe(1);
+    const rows = await engine.executeRaw<{ source: string }>(
+      `SELECT source FROM facts WHERE source_markdown_slug = $1 ORDER BY source`,
+      [slug],
+    );
+    expect(rows.map((row) => row.source)).toEqual([NON_EXTRACTABLE_AUDIT_SOURCE]);
   });
 
   test('does not classify an unrecognized parser miss as non-extractable', async () => {

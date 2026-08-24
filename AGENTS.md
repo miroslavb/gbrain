@@ -78,6 +78,18 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   transaction. Lock/recheck page identity; for `raw_transcript`, use the
   symlink-safe bounded reader and run the sidecar digest check both before and
   after row mutations. Any failure preserves the previous completed epoch.
+- **Interrupted transcript quarantine:** the exact Hermes
+  `Operation interrupted: waiting for model response (...)` transport status
+  is not conversation content. Drop it before conversation-facts segmentation,
+  so a request with no completed reply becomes a durable non-extractable
+  outcome instead of publishing requested work as fact.
+- **MDX route slugs:** slash-prefixed `slug:` values in `.mdx` are external
+  website routes (for example Docusaurus `slug: /`), not GBrain identities.
+  Ignore the route during file import and retain the path-derived DB slug;
+  non-route mismatches must still fail as page-hijack attempts.
+- **Drift parity:** `multi_source_drift` must use the same file-admission
+  boundary as source sync. In particular, markdown symlinks are not pages and
+  must never create a false misroute warning.
 - **Extraction quality gates:** conversation facts and atoms must pass the
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,

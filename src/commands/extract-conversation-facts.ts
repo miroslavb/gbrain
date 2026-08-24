@@ -95,7 +95,7 @@ import { writeReceipt, shortRunId } from '../core/extract/receipt-writer.ts';
 import { upsertExtractRollup } from '../core/extract/rollup-writer.ts';
 import { ALLOWED_TYPES, type AllowedType } from '../core/facts/conversation-types.ts';
 import { TERMINAL_AUDIT_SOURCE, NON_EXTRACTABLE_AUDIT_SOURCE } from '../core/facts/audit-sources.ts';
-
+import { isHarnessInterruptionStatus } from '../core/facts/conversation-interruption.ts';
 // Re-exported verbatim so existing importers (this file's own helpers below
 // and this file's tests) keep working unchanged; doctor.ts, jobs.ts,
 // sources.ts, and the cycle backfill phase import the leaf directly. Moved to
@@ -983,7 +983,7 @@ async function processPage(
   // meant Telegram-bracket pages with frontmatter dates landed at
   // 1970-01-01. Now they pick up the correct date.
   const parseResult = parseConversation(body, { page });
-  let messages = parseResult.messages;
+  let messages = parseResult.messages.filter((message) => !isHarnessInterruptionStatus(message.text));
   if (parseResult.timezone_warning) {
     process.stderr.write(parseResult.timezone_warning + '\n');
   }
