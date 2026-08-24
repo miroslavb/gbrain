@@ -206,7 +206,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   only then may a hash-keyed terminal marker clear it from the atom backlog.
   Provider failures, validator timeouts/invalid responses, and invalid safety
   configuration never consume that allowance. Persist only stable aggregate
-  reason counts, never source or candidate text.
+  reason counts, never source or candidate text. JSON-stringified reason maps
+  must bind through `$N::text::jsonb` (or a raw-object JSONB helper), never
+  directly through `$N::jsonb`, so Postgres drivers cannot double-encode them.
 - **Chronicle yield gate:** explicit conversation `message_count < 100` is
   ineligible, including note-typed `conversations/` rescue pages. Meetings and
   calendar events are unaffected; missing metadata keeps legacy eligibility.

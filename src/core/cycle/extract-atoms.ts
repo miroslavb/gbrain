@@ -890,7 +890,7 @@ export async function runPhaseExtractAtoms(
                    CASE WHEN COALESCE(frontmatter->>'atoms_reject_hash', '') = $1::text
                         THEN COALESCE((frontmatter->>'atoms_reject_count')::int, 0) + 1
                         ELSE 1 END)
-              || jsonb_build_object('atoms_reject_last_reasons', $4::jsonb)
+              || jsonb_build_object('atoms_reject_last_reasons', $4::text::jsonb)
           WHERE source_id = $2 AND slug = $3 AND deleted_at IS NULL
           RETURNING (frontmatter->>'atoms_reject_count')::int AS cnt`,
         [item.contentHash.slice(0, 16), sourceId, item.slug, JSON.stringify(reasons)],
