@@ -35,12 +35,21 @@ beforeEach(() => {
   for (const k of envKeys()) envSnapshot[k] = process.env[k];
   tmp = mkdtempSync(join(tmpdir(), 'gbrain-install-test-'));
   process.env.HOME = tmp;
-  // Start each test with a clean slate for ephemeral env vars.
-  delete process.env.GBRAIN_HOME;
+  // Keep every wrapper/env-file write inside this test's scratch root.
+  // Changing HOME is insufficient under Bun because os.homedir() is cached;
+  // deleting the preload's GBRAIN_HOME redirected writeWrapperScript() to the
+  // operator's real ~/.gbrain and could replace a live autopilot-run.sh with
+  // deleted repo/fake-bin paths from this suite.
+  process.env.GBRAIN_HOME = tmp;
+  // Start each test with a clean slate for the remaining ephemeral env vars.
   delete process.env.RENDER;
   delete process.env.RAILWAY_ENVIRONMENT;
   delete process.env.FLY_APP_NAME;
   delete process.env.OPENCLAW_HOME;
+});
+
+test('suite keeps autopilot artifacts under its per-test GBRAIN_HOME', () => {
+  expect(gbrainPath()).toBe(join(tmp, '.gbrain'));
 });
 
 afterEach(() => {

@@ -68,6 +68,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   tree. Do not make them green by staging or deleting unrelated local reference
   packs; reproduce branch health in a clean clone. Pay module-size ratchets down
   by compacting or peeling code instead of silently raising their ceilings.
+- **Autopilot install-test isolation:** tests that call `writeWrapperScript()`
+  must keep the preload's per-run `GBRAIN_HOME` or replace it with another
+  explicit scratch root. Changing `HOME` alone is insufficient under Bun because
+  `os.homedir()` can remain cached. Never let an install test resolve
+  `$GBRAIN_HOME/.gbrain/autopilot-run.sh` to the operator's live wrapper.
 - **Conversation-facts epoch safety:** stage every page in bounded memory and
   publish extractor-owned rows plus the terminal marker in one reconcile
   transaction. Lock/recheck page identity; for `raw_transcript`, use the
