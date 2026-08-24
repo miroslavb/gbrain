@@ -792,6 +792,22 @@ describe('MinionQueue: Prune', () => {
     expect(pruned).toBe(1);
     expect(await queue.getJob(job1.id)).toBeNull();
   });
+
+  test('status filter prunes only the requested terminal class', async () => {
+    const dead = await queue.add('dead-only', {}, { max_attempts: 1 });
+    const cancelled = await queue.add('cancelled-kept', {});
+    await queue.claim('dead-token', 30_000, 'default', ['dead-only']);
+    await queue.failJob(dead.id, 'dead-token', 'synthetic terminal failure', 'dead');
+    await queue.cancelJob(cancelled.id);
+
+    const pruned = await queue.prune({
+      olderThan: new Date(Date.now() + 86_400_000),
+      status: ['dead'],
+    });
+    expect(pruned).toBe(1);
+    expect(await queue.getJob(dead.id)).toBeNull();
+    expect((await queue.getJob(cancelled.id))?.status).toBe('cancelled');
+  });
 });
 
 // --- Stats (1 test) ---

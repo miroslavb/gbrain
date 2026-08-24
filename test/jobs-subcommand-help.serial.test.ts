@@ -110,6 +110,7 @@ describe('jobs --help and jobs <subcommand> --help print real help, never the st
     const { code, out } = await runJobsHelp(['prune', '--help']);
     expect(code).toBe(0);
     expect(out).toContain('--older-than');
+    expect(out).toContain('--status');
     expect(out).not.toContain(STUB_MARKER);
   }, 30_000);
 

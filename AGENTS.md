@@ -78,6 +78,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   persists canonical `current/last-completed` phase progress at every phase
   boundary. Keep progress aggregate-only and best-effort so diagnostics never
   become a new cycle failure mode.
+- **Dead-job retention:** back up `minion_jobs` and its job-owned child tables
+  before archival. Use `gbrain jobs prune --status dead` to remove only old
+  dead letters; never consume completed-job retention as a side effect of a
+  dead-job audit.
 - **Conversation-facts epoch safety:** stage every page in bounded memory and
   publish extractor-owned rows plus the terminal marker in one reconcile
   transaction. Lock/recheck page identity; for `raw_transcript`, use the

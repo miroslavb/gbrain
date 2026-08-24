@@ -355,7 +355,7 @@ USAGE
   gbrain jobs get <id> [--json]
   gbrain jobs cancel <id>
   gbrain jobs retry <id>
-  gbrain jobs prune [--older-than 30d] [--dry-run]
+  gbrain jobs prune [--older-than 30d] [--status dead|completed|cancelled|failed] [--dry-run]
   gbrain jobs delete <id>
   gbrain jobs stats [--queue Q] [--cluster-errors] [--json]
                     (dream-inline-* queues report ABANDONED/live only with an
@@ -559,12 +559,15 @@ OPTIONS
   prune: `gbrain jobs prune — delete old terminal jobs
 
 USAGE
-  gbrain jobs prune [--older-than 30d] [--dry-run]
+  gbrain jobs prune [--older-than 30d] [--status dead|completed|cancelled|failed] [--dry-run]
 
 OPTIONS
   --older-than AGE  Delete completed/failed/dead/cancelled jobs older than
                     AGE in days (default 30d; bare N or Nd — hour forms
                     are not supported)
+  --status STATUS   Restrict pruning to one terminal status. Use dead to
+                    archive historical dead letters without touching healthy
+                    completed-job retention.
   --dry-run         Report what would be deleted without deleting
 `,
 };
@@ -981,25 +984,21 @@ export async function runJobs(engineOrNull: BrainEngine | null, args: string[]):
     }
 
     case 'prune': {
-      const olderThanStr = parseFlag(args, '--older-than') ?? '30d';
-      const days = parseInt(olderThanStr, 10);
-      if (isNaN(days) || days <= 0) {
-        console.error('Error: --older-than must be a positive number (days). Example: --older-than 30d');
-        process.exit(1);
-      }
+      const { parsePruneCliOptions } = await import('../core/minions/prune-options.ts');
+      let pruneOpts;
+      try { pruneOpts = parsePruneCliOptions(args); }
+      catch (e) { console.error(`Error: ${(e as Error).message}`); process.exit(1); }
 
       try { await queue.ensureSchema(); }
       catch (e) { console.error(e instanceof Error ? e.message : String(e)); process.exit(1); }
 
-      // #2712: --dry-run previews the count without deleting. It used to be
-      // silently ignored (the destructive default ran anyway).
-      const dryRun = hasFlag(args, '--dry-run');
-      const count = await queue.prune({ olderThan: new Date(Date.now() - days * 86400000), dryRun });
-      if (dryRun) {
-        console.log(`[dry-run] Would prune ${count} jobs older than ${days} days. Nothing deleted.`);
-      } else {
-        console.log(`Pruned ${count} jobs older than ${days} days.`);
-      }
+      const count = await queue.prune({
+        olderThan: pruneOpts.olderThan, status: pruneOpts.status, dryRun: pruneOpts.dryRun,
+      });
+      const suffix = `${pruneOpts.statusLabel} jobs older than ${pruneOpts.days} days.`;
+      console.log(pruneOpts.dryRun
+        ? `[dry-run] Would prune ${count}${suffix} Nothing deleted.`
+        : `Pruned ${count}${suffix}`);
       break;
     }
 
