@@ -76,6 +76,15 @@ describe('walkDir (brain-writer.ts) — descent-time pruning', () => {
     expect(visited.some(d => d.includes(seg('node_modules')))).toBe(false);
   });
 
+  test('does NOT descend into named Python environments ending in -venv', () => {
+    const namedVenv = join(root, 'embedding-venv', 'lib', 'site-packages');
+    mkdirSync(namedVenv, { recursive: true });
+    writeFileSync(join(namedVenv, 'template.md'), '---\n---\n');
+    const visited: string[] = [];
+    walkDir(root, () => {}, (dir) => visited.push(dir));
+    expect(visited.some((dir) => dir.includes(seg('embedding-venv')))).toBe(false);
+  });
+
   test('does NOT descend into .git', () => {
     const visited: string[] = [];
     walkDir(root, () => {}, (dir) => visited.push(dir));

@@ -2,6 +2,7 @@
 title: bob-example
 type: people
 slug: people/bob-example
+frontmatter_audit_exemptions: [SLUG_MISMATCH]
 ---
 
 # Bob Example

@@ -2,6 +2,7 @@
 title: alice-example
 type: people
 slug: people/alice-example
+frontmatter_audit_exemptions: [SLUG_MISMATCH]
 ---
 
 # Alice Example

@@ -632,7 +632,19 @@ function scanOneSource(
     }
     const expectedSlug = slugifyPath(relPath);
     const parsed = parseMarkdown(content, relPath, { validate: true, expectedSlug });
+    const auditExemptions = new Set(
+      (Array.isArray(parsed.frontmatter.frontmatter_audit_exemptions)
+        ? parsed.frontmatter.frontmatter_audit_exemptions
+        : [])
+        .filter((code): code is string => typeof code === 'string')
+        .map((code) => code.toUpperCase()),
+    );
     const errs = (parsed.errors ?? []).filter((e) => {
+      // Explicit, file-local audit exemption. This suppresses only the
+      // report; import validation remains strict, so it cannot authorize a
+      // page-identity hijack. Used by synthetic fixtures whose declared slug
+      // is the test identity rather than their repository storage path.
+      if (auditExemptions.has(e.code)) return false;
       if (e.code !== 'MISSING_OPEN') return true;
       if (opts.strictMissingOpen) return true;
       ignoredMissingOpen++;

@@ -98,8 +98,13 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   `email`; definitive non-transcripts receive a durable non-extractable outcome.
 - **MDX route slugs:** slash-prefixed `slug:` values in `.mdx` are external
   website routes (for example Docusaurus `slug: /`), not GBrain identities.
-  Ignore the route during file import and retain the path-derived DB slug;
+  Ignore the route during file import and frontmatter audit, and retain the path-derived DB slug;
   non-route mismatches must still fail as page-hijack attempts.
+- **Frontmatter audit scope:** prune bare and named Python environments (`venv/`,
+  `*-venv/`) as dependency trees. A synthetic fixture may declare
+  `frontmatter_audit_exemptions: [SLUG_MISMATCH]` when its canonical test
+  identity intentionally differs from its repository path; this suppresses
+  audit reporting only and never weakens import validation.
 - **Drift parity:** `multi_source_drift` must use the same file-admission
   boundary as source sync. In particular, markdown symlinks are not pages and
   must never create a false misroute warning.

@@ -2,6 +2,7 @@
 title: "On conviction"
 type: essay
 slug: writing/on-conviction
+frontmatter_audit_exemptions: [SLUG_MISMATCH]
 date: 2026-04-19
 ---
 

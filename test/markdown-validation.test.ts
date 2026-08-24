@@ -129,6 +129,21 @@ body`;
       const parsed = parseMarkdown(md, undefined, { validate: true });
       expect(parsed.errors!.map(e => e.code)).not.toContain('SLUG_MISMATCH');
     });
+
+    test('absolute MDX route slug is website metadata, not a page-identity mismatch', () => {
+      const input = `---\ntitle: Docs\nslug: /\n---\n\nBody`;
+      const parsed = parseMarkdown(input, 'website/docs/index.mdx', {
+        validate: true,
+        expectedSlug: 'website/docs/index',
+      });
+      expect(parsed.errors!.map((error) => error.code)).not.toContain('SLUG_MISMATCH');
+
+      const nonRoute = parseMarkdown(input.replace('slug: /', 'slug: another-page'), 'website/docs/index.mdx', {
+        validate: true,
+        expectedSlug: 'website/docs/index',
+      });
+      expect(nonRoute.errors!.map((error) => error.code)).toContain('SLUG_MISMATCH');
+    });
   });
 
   describe('NULL_BYTES', () => {

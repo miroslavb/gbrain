@@ -2,6 +2,7 @@
 title: acme-example
 type: companies
 slug: companies/acme-example
+frontmatter_audit_exemptions: [SLUG_MISMATCH]
 ---
 
 # acme-example

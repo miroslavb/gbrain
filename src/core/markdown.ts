@@ -218,6 +218,7 @@ export function parseMarkdown(
   if (opts?.validate) {
     collectValidationErrors(content, errors, {
       yamlParseError,
+      filePath,
       expectedSlug: opts.expectedSlug,
       parsedFrontmatter: parsed?.data ?? {},
     });
@@ -286,6 +287,7 @@ function collectValidationErrors(
   errors: ParseValidationError[],
   ctx: {
     yamlParseError: Error | null;
+    filePath?: string;
     expectedSlug?: string;
     parsedFrontmatter: Record<string, unknown>;
   },
@@ -443,7 +445,12 @@ function collectValidationErrors(
   //    legacy page identities across a round-trip) — not a mismatch.
   if (ctx.expectedSlug && typeof ctx.parsedFrontmatter.slug === 'string') {
     const declared = ctx.parsedFrontmatter.slug as string;
-    if (declared !== ctx.expectedSlug && slugifyPath(declared) !== ctx.expectedSlug) {
+    // Docusaurus/Astro MDX use an absolute `slug: /route` as WEBSITE routing
+    // metadata. Import already keeps path authority for this shape; validation
+    // must not contradict it with a false page-hijack warning. Non-route MDX
+    // slugs and every Markdown slug keep strict mismatch validation.
+    const absoluteMdxRoute = /\.mdx$/i.test(ctx.filePath ?? '') && declared.startsWith('/');
+    if (!absoluteMdxRoute && declared !== ctx.expectedSlug && slugifyPath(declared) !== ctx.expectedSlug) {
       errors.push({
         code: 'SLUG_MISMATCH',
         message: `Frontmatter slug "${declared}" does not match path-derived slug "${ctx.expectedSlug}"`,

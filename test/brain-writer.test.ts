@@ -9,6 +9,7 @@ import {
   BrainWriterError,
 } from '../src/core/brain-writer.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { parseMarkdown } from '../src/core/markdown.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 
 const fence = '---';
@@ -304,6 +305,27 @@ describe('scanBrainSources (PGLite)', () => {
     const onlyA = await scanBrainSources(engine, { sourceId: 'alpha' });
     expect(onlyA.per_source.length).toBe(1);
     expect(onlyA.per_source[0]!.source_id).toBe('alpha');
+  });
+
+  test('honors explicit per-file audit exemptions without weakening import validation', async () => {
+    const src = join(tmp, 'fixtures');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(
+      join(src, 'stored-here.md'),
+      `${fence}\ntitle: Synthetic fixture\nslug: canonical-test-identity\nfrontmatter_audit_exemptions:\n  - SLUG_MISMATCH\n${fence}\n\nbody`,
+    );
+    await registerSource('fixtures', src);
+
+    const report = await scanBrainSources(engine, { sourceId: 'fixtures' });
+    expect(report.ok).toBe(true);
+    expect(report.total).toBe(0);
+
+    const strict = parseMarkdown(
+      readFileSync(join(src, 'stored-here.md'), 'utf8'),
+      'stored-here.md',
+      { validate: true, expectedSlug: 'stored-here' },
+    );
+    expect(strict.errors!.map((error) => error.code)).toContain('SLUG_MISMATCH');
   });
 
   test('skips registered source with missing path', async () => {

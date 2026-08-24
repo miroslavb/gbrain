@@ -373,6 +373,11 @@ export function pruneDir(name: string, parentDir?: string): boolean {
   if (!name) return true;
   if (name.startsWith('.')) return false;
   if (PRUNE_DIR_NAMES.has(name)) return false;
+  // Named Python environments (`embedding-venv`, `docs-venv`, …) are the
+  // same vendored dependency surface as a bare `venv/`. This also keeps the
+  // git-visible fast walker aligned with the recursive walker because
+  // isSyncable() applies pruneDir to every path segment.
+  if (name.endsWith('-venv')) return false;
   // `.raw` is the literal directory name; `*.raw` is the gbrain sidecar
   // convention (e.g. `people/pedro.raw/` holds raw source for pedro.md).
   // Both forms should be skipped at descent time.

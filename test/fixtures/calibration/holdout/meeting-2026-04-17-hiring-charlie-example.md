@@ -2,6 +2,7 @@
 title: "Hiring conversation — charlie-example for acme-example COO role"
 type: meeting
 slug: meetings/2026-04-17-hiring-charlie-example
+frontmatter_audit_exemptions: [SLUG_MISMATCH]
 date: 2026-04-17
 attendees: [you, alice-example, charlie-example]
 ---
