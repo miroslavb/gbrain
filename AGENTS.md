@@ -153,6 +153,8 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   credentials, private paths, and secret-bearing URLs before candidates reach
   the gate. Redact those values plus configured sensitive literals before the
   LLM call; deterministic post-LLM rejection remains mandatory defense in depth.
+  The prompt must also split independent clauses and never invent causal language;
+  the semantic atomicity/hidden-causation gate remains fail-closed.
   Atom budget accounting must load `pricing.overrides` for both the extractor
   and semantic-validator routes; preserve typed `BudgetExhausted` stops instead
   of folding them into semantic rejection counts.

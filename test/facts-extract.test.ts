@@ -24,6 +24,8 @@ describe('extractFactsFromTurn', () => {
     expect(EXTRACTOR_SYSTEM).toContain('API/access tokens');
     expect(EXTRACTOR_SYSTEM).toContain('private filesystem');
     expect(EXTRACTOR_SYSTEM).toContain('URLs containing secrets');
+    expect(EXTRACTOR_SYSTEM).toContain('Split independent clauses');
+    expect(EXTRACTOR_SYSTEM).toContain('Never introduce because/caused');
   });
   test('empty turn returns no facts', async () => {
     const r = await extractFactsFromTurn({ turnText: '', source: 'test' });
