@@ -30,6 +30,8 @@ import { runEmbedCore } from '../src/commands/embed.ts';
 import { EMBED_SKIP_KEY, buildEmbedSkipMarker } from '../src/core/embed-skip.ts';
 import { QUARANTINE_KEY, buildQuarantineMarker } from '../src/core/quarantine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
+import { AITransientError } from '../src/core/ai/errors.ts';
+import { PROVIDER_FAILURE_HALT_STREAK } from '../src/core/embed-provider-circuit.ts';
 
 const DIMS = 1536;
 let engine: PGLiteEngine;
@@ -304,5 +306,38 @@ describe('embed --stale chunkless-page safety net (end-to-end)', () => {
     expect(result.embedded).toBeGreaterThanOrEqual(1);
     const unrelatedChunks = await engine.getChunks('normal/unrelated');
     expect(unrelatedChunks[0]?.embedded_at).not.toBeNull();
+  });
+
+  test('provider-wide outage opens a bounded circuit instead of walking the corpus', async () => {
+    for (let i = 0; i < 8; i++) {
+      const slug = `outage/page-${i}`;
+      await engine.putPage(slug, { type: 'note', title: slug, compiled_truth: `content ${i}` });
+      await engine.upsertChunks(slug, [
+        { chunk_index: 0, chunk_text: `content ${i}`, chunk_source: 'compiled_truth' },
+      ]);
+    }
+
+    const savedConcurrency = process.env.GBRAIN_EMBED_CONCURRENCY;
+    process.env.GBRAIN_EMBED_CONCURRENCY = '1';
+    let calls = 0;
+    __setEmbedTransportForTests(async () => {
+      calls++;
+      throw new AITransientError('simulated provider outage');
+    });
+    try {
+      const result = await runEmbedCore(engine, { stale: true, catchUp: true, quiet: true });
+
+      expect(calls).toBe(PROVIDER_FAILURE_HALT_STREAK);
+      expect(result.pages_processed).toBe(PROVIDER_FAILURE_HALT_STREAK);
+      expect(result.failures).toBe(PROVIDER_FAILURE_HALT_STREAK);
+      expect(await engine.countStaleChunks()).toBe(8);
+    } finally {
+      if (savedConcurrency === undefined) delete process.env.GBRAIN_EMBED_CONCURRENCY;
+      else process.env.GBRAIN_EMBED_CONCURRENCY = savedConcurrency;
+      __setEmbedTransportForTests(async ({ values }: { values: string[] }) => ({
+        embeddings: values.map(() => new Array(DIMS).fill(0.001)),
+        usage: { tokens: values.length * 4 },
+      } as never));
+    }
   });
 });

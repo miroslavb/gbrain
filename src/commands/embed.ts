@@ -30,6 +30,7 @@ import {
   isTransientNetworkEmbedError,
   type EmbedBatchWithBackoffOpts,
 } from '../core/embed-retry.ts';
+import { EmbedProviderFailureCircuit } from '../core/embed-provider-circuit.ts';
 
 // Peeled to src/core/embed-retry.ts (core→commands layering fix: core modules
 // import-file.ts / embed-stale.ts consume these, and a commands module in
@@ -1581,12 +1582,9 @@ async function embedAllStale(
     budgetTimer = setTimeout(() => budgetController.abort(), Math.max(0, fireInMs));
   };
   const budgetSignal = budgetController.signal;
-  // #1737: the effective signal fires when EITHER the internal wall-clock
-  // budget OR the caller's abort (worker timeout / lock loss / SIGTERM) fires.
-  // Replaces bare budgetSignal at every loop/pool/embed check below so the
-  // autopilot cycle's embed phase stops within one batch (~2s) of being
-  // killed instead of running the full 10-15 min and wedging the cycle lock.
-  const effectiveSignal = anySignal(budgetSignal, externalSignal);
+  const providerCircuit = new EmbedProviderFailureCircuit(anySignal(budgetSignal, externalSignal));
+  // One signal covers wall clock, caller shutdown, and provider outage.
+  const effectiveSignal = providerCircuit.signal;
 
   // v0.41.18.0 (A13): --priority recent threads orderBy='updated_desc' to
   // listStaleChunks. Composite cursor tracks (updated_at, page_id, chunk_index)
@@ -1639,7 +1637,7 @@ async function embedAllStale(
         if (!budgetExitNotified) {
           const why = budgetSignal.aborted
             ? `wall-clock budget (${BUDGET_MS}ms) exceeded`
-            : 'aborted by caller (job timeout / lock loss / shutdown)';
+            : providerCircuit.abortLabel ?? 'aborted by caller (job timeout / lock loss / shutdown)';
           serr(`\n  [embed] ${why}; exiting cleanly. Re-run picks up via partial index.`);
           budgetExitNotified = true;
         }
@@ -1752,12 +1750,14 @@ async function embedAllStale(
             recordFailure(result, failed, slug, firstError);
             serr(`\n  ${slug}: ${failed} chunk(s) failed to embed; embedded the other ${stale.length - failed}`);
           }
+          providerCircuit.recordSuccess();
         } catch (e: unknown) {
           // Budget/abort-fired cancellations are expected on the way out; don't
           // spam per-page "Error embedding" lines when we're shutting down.
           if (effectiveSignal.aborted) return;
           recordFailure(result, stale.length, slug, e);
           serr(`\n  Error embedding ${slug}: ${e instanceof Error ? e.message : e}`);
+          providerCircuit.recordFailure(e);
         }
         totalProcessedPages++;
         result.pages_processed++;

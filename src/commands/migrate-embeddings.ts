@@ -970,6 +970,7 @@ export async function runMigrateEmbeddings(
   const { getCliOptions, cliOptsToProgressOptions } = await import('../core/cli-options.ts');
   const progress = createProgress(cliOptsToProgressOptions(getCliOptions()));
   let progressStarted = false;
+  let progressDone = 0;
   const result = await executeMigrationFlow(engine, ctx, {
     to: flags.to!,
     ...(flags.dim !== undefined && { dim: flags.dim }),
@@ -981,12 +982,17 @@ export async function runMigrateEmbeddings(
     quiet: flags.json,
     ...(flags.batchSize !== undefined && { batchSize: flags.batchSize }),
     ...(flags.pace && { pace: flags.pace }),
-    onProgress: (done, total) => {
+    onProgress: (done, _total) => {
       if (!progressStarted) {
-        progress.start('migrate.reembed', total);
+        // The stale engine knows its exact CHUNK count but reports completion
+        // per PAGE. Supplying a synthetic page total made large migrations
+        // render 1154%+. Unknown-total progress is the truthful contract.
+        progress.start('migrate.reembed');
         progressStarted = true;
       }
-      progress.tick(1);
+      const delta = Math.max(0, done - progressDone);
+      if (delta > 0) progress.tick(delta);
+      progressDone = Math.max(progressDone, done);
     },
   });
   if (progressStarted) progress.finish();
