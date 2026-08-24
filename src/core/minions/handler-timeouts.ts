@@ -58,9 +58,12 @@ export const HANDLER_DEFAULT_TIMEOUT_MS: Readonly<Record<string, number>> = {
   subagent_aggregator: THIRTY_MIN_MS,
   'embed-backfill': THIRTY_MIN_MS,
   'autopilot-cycle': THIRTY_MIN_MS,
-  // #2194 fix #3: brain-wide maintenance (embed-all/orphans/purge/…) can run
-  // longer than a single source cycle; give it the same 30-min budget.
-  'autopilot-global-maintenance': THIRTY_MIN_MS,
+  // #2194 fix #3 + 2026-08-24 production audit: brain-wide maintenance runs
+  // eleven mixed/global phases once, while one source cycle runs a much
+  // smaller freshness set. Giving both the same 30-min anchor produced three
+  // exact-30:00 dead letters during transient embed degradation. Keep a hard
+  // deadline, but size this aggregate lane independently.
+  'autopilot-global-maintenance': SIXTY_MIN_MS,
   // v0.42.x (#2390) — Life Chronicle: one page = one LLM extraction call + a
   // few writes. Generous 10-min budget (vs the tight null-default) covers a
   // slow gateway without the 30-min loop budget.

@@ -2712,7 +2712,26 @@ export async function registerBuiltinHandlers(
     const requested = Array.isArray(job.data.phases)
       ? (job.data.phases as string[]).filter((p) => maintenanceSet.has(p))
       : MAINTENANCE_PHASES;
-    const phases = (requested.length > 0 ? requested : MAINTENANCE_PHASES) as typeof MAINTENANCE_PHASES;
+    // runCycle executes phase blocks in canonical ALL_PHASES order regardless
+    // of payload order. Canonicalize here so persisted progress identifies the
+    // phase that is actually running rather than the next payload entry.
+    const requestedSet = new Set(requested.length > 0 ? requested : MAINTENANCE_PHASES);
+    const phases = MAINTENANCE_PHASES.filter((phase) => requestedSet.has(phase));
+    let completedPhases = 0;
+    const publishProgress = async (currentPhase: string): Promise<void> => {
+      try {
+        await job.updateProgress?.({
+          phase: currentPhase,
+          completed_phases: completedPhases,
+          total_phases: phases.length,
+          last_completed_phase: completedPhases > 0 ? phases[completedPhases - 1] : null,
+        });
+      } catch {
+        // Progress is diagnostic. A transient/fenced update failure must not
+        // turn otherwise successful maintenance into a failed cycle.
+      }
+    };
+    await publishProgress(phases[0] ?? 'complete');
 
     const report = await runCycle(engine, {
       brainDir: repoPath,
@@ -2726,7 +2745,11 @@ export async function registerBuiltinHandlers(
       privateQueueOwnerJobId: job.id,
       phases,
       forceGlobalOrphans: true,
-      yieldBetweenPhases: async () => { await new Promise<void>((r) => setImmediate(r)); },
+      yieldBetweenPhases: async () => {
+        completedPhases++;
+        await publishProgress(phases[completedPhases] ?? 'complete');
+        await new Promise<void>((r) => setImmediate(r));
+      },
     });
 
     // Stamp last_global_at only on a non-failed run so a failed pass stays stale

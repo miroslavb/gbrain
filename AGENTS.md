@@ -73,6 +73,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   explicit scratch root. Changing `HOME` alone is insufficient under Bun because
   `os.homedir()` can remain cached. Never let an install test resolve
   `$GBRAIN_HOME/.gbrain/autopilot-run.sh` to the operator's live wrapper.
+- **Global-maintenance observability:** the brain-wide maintenance job owns a
+  60-minute aggregate deadline (distinct from a 30-minute source cycle) and
+  persists canonical `current/last-completed` phase progress at every phase
+  boundary. Keep progress aggregate-only and best-effort so diagnostics never
+  become a new cycle failure mode.
 - **Conversation-facts epoch safety:** stage every page in bounded memory and
   publish extractor-owned rows plus the terminal marker in one reconcile
   transaction. Lock/recheck page identity; for `raw_transcript`, use the

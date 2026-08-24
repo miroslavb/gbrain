@@ -343,10 +343,12 @@ describe('autopilot-global-maintenance handler stamps last_global_at (PGLite)', 
 
     // id present so the handler threads a real privateQueueOwnerJobId into
     // runCycle (worker jobs always carry one).
+    const progress: Array<Record<string, unknown>> = [];
     const result = await handler!({
       id: 4102,
       data: { phases: ['orphans', 'embed'], repoPath },
       signal: undefined,
+      updateProgress: async (value: Record<string, unknown>) => { progress.push(value); },
     });
     // The cycle ran the requested global phases (DB-only on an empty brain).
     const orphans = result.report.phases.find((p: any) => p.phase === 'orphans');
@@ -357,5 +359,8 @@ describe('autopilot-global-maintenance handler stamps last_global_at (PGLite)', 
     const stamped = await engine.getConfig(LAST_GLOBAL_AT_KEY);
     expect(stamped).not.toBeNull();
     expect(Number.isFinite(new Date(stamped!).getTime())).toBe(true);
+    expect(progress[0]).toMatchObject({ phase: 'embed', completed_phases: 0, total_phases: 2 });
+    expect(progress.at(-1)).toMatchObject({ phase: 'complete', completed_phases: 2, total_phases: 2 });
+    expect(progress.at(-1)?.last_completed_phase).toBe('orphans');
   });
 });

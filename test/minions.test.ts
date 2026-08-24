@@ -354,6 +354,11 @@ describe('MinionQueue: #1737 per-handler default timeout', () => {
     expect(sub.timeout_ms).toBe(30 * 60 * 1000);
   });
 
+  test('brain-wide global maintenance gets an independent 60-min aggregate budget', async () => {
+    const global = await queue.add('autopilot-global-maintenance', {});
+    expect(global.timeout_ms).toBe(60 * 60 * 1000);
+  });
+
   // #3207 — facts-absorb is one LLM extraction call per page (same shape as
   // chronicle_extract) but was missing from HANDLER_DEFAULT_TIMEOUT_MS, so it
   // inherited the tight null-default wall-clock and was dead-lettered
