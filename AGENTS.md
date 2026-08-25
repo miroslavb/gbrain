@@ -260,6 +260,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   live inbound endpoints. Reranker failures and extract rollups are immutable
   history: later recovery is append-only and source/model scoped. Schema v146
   stores extraction current state separately from seven-calendar-day rollups.
+  A successful full-source atoms scan with zero eligible pages publishes only
+  source-scoped current completion; it must not add a historical completed
+  round, and targeted/test-seam empties or failed discovery publish no recovery.
   Oversized/flagged inventories stay visible and warn only on unacknowledged
   actionable rows. Home/worktree detection must use Git's resolved worktree,
   never mere `.git` existence. The legacy facts-fence migration writes the

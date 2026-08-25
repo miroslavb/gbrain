@@ -112,6 +112,36 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
     const result = await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [] });
     expect(result.status).toBe('skipped');
     expect(result.details?.reason).toBe('no_work');
+    expect(result.details?.current_state_written).toBe(false);
+    const states = await engine.executeRaw(
+      `SELECT 1 FROM extract_health_state WHERE kind='atoms' AND source_id='default'`,
+    );
+    expect(states).toHaveLength(0);
+  });
+
+  test('full-source no-work scan publishes current completion without diluting rollup history', async () => {
+    const result = await runPhaseExtractAtoms(engine, {
+      sourceId: 'default',
+      _transcripts: [],
+    });
+    expect(result.status).toBe('skipped');
+    expect(result.details?.reason).toBe('no_work');
+    expect(result.details?.current_state_written).toBe(true);
+
+    const states = await engine.executeRaw<{
+      last_outcome: string;
+      consecutive_completions: number;
+    }>(
+      `SELECT last_outcome, consecutive_completions
+         FROM extract_health_state
+        WHERE kind='atoms' AND source_id='default'`,
+    );
+    expect(states).toEqual([{ last_outcome: 'completed', consecutive_completions: 1 }]);
+
+    const rollups = await engine.executeRaw(
+      `SELECT 1 FROM extract_rollup_7d WHERE kind='atoms' AND source_id='default'`,
+    );
+    expect(rollups).toHaveLength(0);
   });
 
   test('extracts atoms from transcript via stub chat', async () => {

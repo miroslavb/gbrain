@@ -51,6 +51,12 @@ export interface RollupUpsertInput {
   failure_delta?: number;
 }
 
+export interface ExtractHealthStateInput {
+  kind: string;
+  source_id: string;
+  outcome: 'halt' | 'completed';
+}
+
 function today(): string {
   // ISO YYYY-MM-DD in UTC. Matches Postgres CURRENT_DATE behavior for
   // UTC servers; for local-time servers there's a slight drift at midnight
@@ -129,6 +135,51 @@ export async function upsertExtractRollup(
     const msg = (err as Error).message || String(err);
     // Don't spam: log once per process per (kind, day) error class.
     rollupErrorLogOnce(input.kind, day, msg);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Publish source-scoped current extractor health without rewriting immutable
+ * seven-day history. This is deliberately separate from upsertExtractRollup:
+ * a full source scan that proves there is no work is a valid current
+ * completion, but it is not a historical extraction round and must not dilute
+ * the halt-rate denominator.
+ */
+export async function updateExtractHealthState(
+  engine: BrainEngine,
+  input: ExtractHealthStateInput,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await engine.executeRaw(
+      `INSERT INTO extract_health_state (
+         kind, source_id, last_outcome, last_outcome_at,
+         consecutive_halts, consecutive_completions
+       )
+       VALUES (
+         $1, $2, $3, now(),
+         CASE WHEN $3 = 'halt' THEN 1 ELSE 0 END,
+         CASE WHEN $3 = 'completed' THEN 1 ELSE 0 END
+       )
+       ON CONFLICT (kind, source_id) DO UPDATE SET
+         last_outcome = EXCLUDED.last_outcome,
+         last_outcome_at = EXCLUDED.last_outcome_at,
+         consecutive_halts = CASE
+           WHEN EXCLUDED.last_outcome = 'halt'
+             THEN extract_health_state.consecutive_halts + 1
+           ELSE 0
+         END,
+         consecutive_completions = CASE
+           WHEN EXCLUDED.last_outcome = 'completed'
+             THEN extract_health_state.consecutive_completions + 1
+           ELSE 0
+         END`,
+      [input.kind, input.source_id, input.outcome],
+    );
+    return { ok: true };
+  } catch (err) {
+    const msg = (err as Error).message || String(err);
+    rollupErrorLogOnce(input.kind, today(), msg);
     return { ok: false, error: msg };
   }
 }

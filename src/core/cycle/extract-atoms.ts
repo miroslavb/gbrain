@@ -65,7 +65,7 @@ import {
   type PricingOverrides,
 } from '../budget/budget-tracker.ts';
 import { writeReceipt } from '../extract/receipt-writer.ts';
-import { upsertExtractRollup } from '../extract/rollup-writer.ts';
+import { updateExtractHealthState, upsertExtractRollup } from '../extract/rollup-writer.ts';
 import { createHash, randomUUID } from 'crypto';
 import { slugifySegment } from '../sync.ts';
 import {
@@ -566,6 +566,7 @@ export async function runPhaseExtractAtoms(
   //     v0.41.2.1: config loader switched to loadConfigWithEngine() so the
   //     dream.* DB-plane merge from Phase 1 reaches this phase.
   let transcripts: Array<{ filePath: string; content: string; contentHash: string }> = opts._transcripts ?? [];
+  let transcriptDiscoveryFailed = false;
   // Configured transcript corpus paths are brain-global, so only default discovers them.
   if (
     sourceId === 'default'
@@ -598,6 +599,7 @@ export async function runPhaseExtractAtoms(
       }
     } catch {
       // No transcripts available — phase no-ops cleanly.
+      transcriptDiscoveryFailed = true;
     }
   }
 
@@ -682,14 +684,47 @@ export async function runPhaseExtractAtoms(
 
   // Phase-level no-op: nothing to extract today.
   if (work.length === 0 && transcripts.length === 0 && pages.length === 0) {
+    // A successful full-source empty scan is a current completion, not a new
+    // historical extraction round. Publish only extract_health_state so stale
+    // migration-seeded unknown/halt rows can recover without diluting the
+    // immutable seven-day rollup. Targeted/test-seam empties prove nothing
+    // about the rest of the source and must not update current health.
+    const fullSourceScan =
+      opts._pages === undefined
+      && (!Array.isArray(opts.affectedSlugs) || opts.affectedSlugs.length === 0);
+    let currentStateError: string | null = null;
+    let currentStateWritten = false;
+    if (!opts.dryRun && fullSourceScan) {
+      if (transcriptDiscoveryFailed) {
+        currentStateError = 'transcript_discovery_failed';
+      } else {
+        const pageBacklog = await countExtractAtomsBacklog(engine, sourceId);
+        if (pageBacklog === null) {
+          currentStateError = 'page_backlog_unavailable';
+        } else if (pageBacklog === 0) {
+          const state = await updateExtractHealthState(engine, {
+            kind: 'atoms',
+            source_id: sourceId,
+            outcome: 'completed',
+          });
+          currentStateWritten = state.ok;
+          if (!state.ok) currentStateError = 'current_state_write_failed';
+        } else {
+          currentStateError = 'discovery_backlog_mismatch';
+        }
+      }
+    }
     return {
       phase: 'extract_atoms',
-      status: 'skipped',
+      status: currentStateError ? 'warn' : 'skipped',
       duration_ms: 0,
-      summary: 'extract_atoms: no transcripts or pages to process',
+      summary: currentStateError
+        ? `extract_atoms: empty scan could not publish current health (${currentStateError})`
+        : 'extract_atoms: no transcripts or pages to process',
       details: {
-        reason: 'no_work',
+        reason: currentStateError ?? 'no_work',
         source_id: sourceId,
+        current_state_written: currentStateWritten,
         atoms_extracted: 0,
         transcripts_processed: 0,
         transcripts_total: 0,
