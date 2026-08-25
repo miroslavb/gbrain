@@ -208,7 +208,7 @@ describe('buildChecks — orchestrator against PGLite', () => {
     expect(connection!.status).toBe('warn');
   });
 
-  test('content-sanity checks run on PGLite — oversized page warns, none die on the dead postgres singleton (#1871)', async () => {
+  test('content-sanity checks run on PGLite — acknowledged oversized page is retained, none die on the dead postgres singleton (#1871)', async () => {
     // Pre-fix these three checks reached the DB via db.getConnection() —
     // the postgres.js singleton, which is never connected on the default
     // PGLite engine — so every run reported
@@ -219,20 +219,36 @@ describe('buildChecks — orchestrator against PGLite', () => {
       title: 'Oversized Probe 1871',
       compiled_truth: big,
       timeline: '',
-      frontmatter: {},
+      frontmatter: { embed_skip: { reason: 'oversized', bytes: big.length } },
+    });
+    await engine.putPage('projects/gbrain', {
+      type: 'concept',
+      title: 'GBrain',
+      compiled_truth: '# GBrain\n\n<!--- gbrain:facts:begin -->\n<!--- gbrain:facts:end -->',
+      timeline: '',
+      frontmatter: { content_flag: { reason: 'markup_heavy' } },
     });
 
     const checks = await buildChecks(engine, []);
 
     const oversized = checks.find(c => c.name === 'oversized_pages');
     expect(oversized).toBeDefined();
-    expect(oversized!.status).toBe('warn');
-    expect(oversized!.message).toContain('oversized-probe-1871');
+    expect(oversized!.status).toBe('ok');
+    expect(oversized!.message).not.toContain('Skipped');
 
     // The sibling checks now execute for real on PGLite too.
     const junk = checks.find(c => c.name === 'scraper_junk_pages');
     expect(junk).toBeDefined();
     expect(junk!.message).not.toContain('Skipped');
+    const flagged = checks.find(c => c.name === 'flagged_pages');
+    expect(flagged?.status).toBe('ok');
+    const flaggedInventory = (flagged?.details as {
+      inventory?: Array<{ slug: string; accepted: boolean; reason: string }>;
+    } | undefined)?.inventory ?? [];
+    expect(flaggedInventory.find(row => row.slug === 'projects/gbrain')).toMatchObject({
+      accepted: true,
+      reason: 'managed_facts_page',
+    });
     const mbc = checks.find(c => c.name === 'markdown_body_completeness');
     expect(mbc).toBeDefined();
 

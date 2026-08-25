@@ -8,11 +8,10 @@
  * through in RRF order); the audit row is the cross-process signal that
  * `gbrain doctor reranker_health` reads.
  *
- * Success events are intentionally NOT logged here. Per the plan (CDX2-F22):
- *   1) writing once per tokenmax search is hot-path I/O churn — the
- *      slug-fallback pattern is rare-event-only.
- *   2) success events leak query volume + timing into a local audit file
- *      that previously held only failures.
+ * Ordinary success events are intentionally NOT logged here. A bounded
+ * recovery marker is written only when a later real rerank proves that one
+ * or more earlier failures are no longer current. This preserves the
+ * rare-event-only posture without making doctor warn forever on history.
  * The doctor check reads `search.reranker.enabled` first to interpret
  * "no events in window" correctly (enabled + no events = healthy;
  * disabled = no failures expected).
@@ -58,9 +57,23 @@ export interface RerankFailureEvent {
   severity: 'warn';
 }
 
+export interface RerankRecoveryEvent {
+  ts: string;
+  /** Must match the failed provider:model before it can clear that signal. */
+  model: string;
+  /** Successful document count. Capacity failures require >= failed count. */
+  doc_count: number;
+  severity: 'info';
+}
+
 /** ISO-week-rotated filename: `rerank-failures-YYYY-Www.jsonl`. */
 export function computeRerankAuditFilename(now: Date = new Date()): string {
   return computeIsoWeekFilename('rerank-failures', now);
+}
+
+/** ISO-week-rotated filename: `rerank-recoveries-YYYY-Www.jsonl`. */
+export function computeRerankRecoveryFilename(now: Date = new Date()): string {
+  return computeIsoWeekFilename('rerank-recoveries', now);
 }
 
 /**
@@ -76,6 +89,13 @@ const writer = createAuditWriter<RerankFailureEvent>({
   featureName: 'rerank-failures',
   errorLabel: 'gbrain',
   errorMessagePrefix: 'rerank-failure audit ',
+  errorTrailer: '; search continues',
+});
+
+const recoveryWriter = createAuditWriter<RerankRecoveryEvent>({
+  featureName: 'rerank-recoveries',
+  errorLabel: 'gbrain',
+  errorMessagePrefix: 'rerank-recovery audit ',
   errorTrailer: '; search continues',
 });
 
@@ -98,6 +118,51 @@ export function logRerankFailure(event: Omit<RerankFailureEvent, 'ts' | 'severit
  */
 export function readRecentRerankFailures(days = 7, now: Date = new Date()): RerankFailureEvent[] {
   return writer.readRecent(days, now);
+}
+
+/** Append a rare recovery marker after a real production rerank succeeds. */
+export function logRerankRecovery(event: Omit<RerankRecoveryEvent, 'ts' | 'severity'>): void {
+  recoveryWriter.log({ severity: 'info', ...event } as Omit<RerankRecoveryEvent, 'ts'>);
+}
+
+export function readRecentRerankRecoveries(days = 7, now: Date = new Date()): RerankRecoveryEvent[] {
+  return recoveryWriter.readRecent(days, now);
+}
+
+/**
+ * Old llama.cpp physical-batch failures landed as network/unknown before the
+ * gateway learned that error dialect. Normalize them at read time so old
+ * evidence remains useful without rewriting the append-only audit trail.
+ */
+export function normalizedRerankFailureReason(event: RerankFailureEvent): RerankFailureReason {
+  if (
+    event.reason !== 'budget' &&
+    /physical[- ]batch|input[_ -]?too[_ -]?large|payload[_ -]?too[_ -]?large|context[^\n]{0,40}too large/i.test(
+      event.error_summary ?? '',
+    )
+  ) {
+    return 'payload_too_large';
+  }
+  return event.reason;
+}
+
+/** Return only failures that have no qualifying later same-model recovery. */
+export function unrecoveredRerankFailures(
+  failures: RerankFailureEvent[],
+  recoveries: RerankRecoveryEvent[],
+): RerankFailureEvent[] {
+  return failures.filter((failure) => {
+    const reason = normalizedRerankFailureReason(failure);
+    // A successful wire call says nothing about exhausted or missing pricing.
+    if (reason === 'budget') return true;
+    const failureAt = Date.parse(failure.ts);
+    return !recoveries.some((recovery) => {
+      if (recovery.model !== failure.model) return false;
+      const recoveryAt = Date.parse(recovery.ts);
+      if (!Number.isFinite(failureAt) || !Number.isFinite(recoveryAt) || recoveryAt <= failureAt) return false;
+      return reason !== 'payload_too_large' || recovery.doc_count >= failure.doc_count;
+    });
+  });
 }
 
 // stderr label "gbrain" + qualifier "rerank-failure audit " preserve the

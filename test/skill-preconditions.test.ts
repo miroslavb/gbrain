@@ -21,6 +21,7 @@ function fakeCtx(overrides: Partial<PreconditionContext> = {}): PreconditionCont
   return {
     countPages: async () => 0,
     countPagesInDir: async () => 0,
+    countPagesByType: async () => 0,
     listSourceIds: async () => [],
     getConfig: async () => undefined,
     ...overrides,
@@ -207,6 +208,27 @@ describe('checkPreconditions — pages', () => {
   });
 });
 
+describe('checkPreconditions — type', () => {
+  test('matches exact live page type through the injected counter', async () => {
+    const [r] = await checkPreconditions(
+      ['type:conversation'],
+      fakeCtx({ countPagesByType: async type => type === 'conversation' ? 12_936 : 0 }),
+    );
+    expect(r.met).toBe(true);
+    expect(r.detail).toContain('12936');
+  });
+
+  test('empty and malformed types fail closed without invoking a broad count', async () => {
+    let calls = 0;
+    const results = await checkPreconditions(
+      ['type:', 'type:conversation/'],
+      fakeCtx({ countPagesByType: async () => { calls++; return 10; } }),
+    );
+    expect(results.every(r => !r.met)).toBe(true);
+    expect(calls).toBe(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // checkPreconditions — unknown + ordering
 // ---------------------------------------------------------------------------
@@ -220,12 +242,13 @@ describe('checkPreconditions — unknown + ordering', () => {
   });
 
   test('returns one result per input, in order, all with non-empty hints', async () => {
-    const reqs = ['source', 'dir:conversations/', 'config:x', 'pages:10', 'nope'];
+    const reqs = ['source', 'dir:conversations/', 'type:conversation', 'config:x', 'pages:10', 'nope'];
     const results = await checkPreconditions(
       reqs,
       fakeCtx({
         listSourceIds: async () => ['wiki'],
         countPagesInDir: async () => 1,
+        countPagesByType: async () => 1,
         getConfig: async () => 'set',
         countPages: async () => 50,
       }),
@@ -235,6 +258,7 @@ describe('checkPreconditions — unknown + ordering', () => {
     // The first four are satisfied; the unknown one is not.
     expect(byRaw(results, 'source').met).toBe(true);
     expect(byRaw(results, 'dir:conversations/').met).toBe(true);
+    expect(byRaw(results, 'type:conversation').met).toBe(true);
     expect(byRaw(results, 'config:x').met).toBe(true);
     expect(byRaw(results, 'pages:10').met).toBe(true);
     expect(byRaw(results, 'nope').met).toBe(false);

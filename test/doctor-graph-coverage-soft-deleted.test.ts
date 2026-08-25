@@ -43,11 +43,11 @@ async function seedSoftDeletedEntities(eng: PGLiteEngine): Promise<void> {
   await sql`
     INSERT INTO pages (slug, source_id, type, title, compiled_truth, frontmatter, content_hash, created_at, updated_at)
     VALUES
-      ('acme-example', 'default', 'company', 'Acme', '', '{}', 'sd1', now(), now()),
-      ('alice-example', 'default', 'person', 'Alice', '', '{}', 'sd2', now(), now()),
+      ('companies/acme-example', 'default', 'company', 'Acme', '', '{}', 'sd1', now(), now()),
+      ('people/alice-example', 'default', 'person', 'Alice', '', '{}', 'sd2', now(), now()),
       ('technical-a', 'default', 'note', 'Tech A', '', '{}', 'sd3', now(), now())
   `;
-  await sql`UPDATE pages SET deleted_at = now() WHERE slug IN ('acme-example', 'alice-example')`;
+  await sql`UPDATE pages SET deleted_at = now() WHERE slug IN ('companies/acme-example', 'people/alice-example')`;
 }
 
 /** Same shape, but the entity pages stay live — the control. */
@@ -56,8 +56,8 @@ async function seedLiveEntities(eng: PGLiteEngine): Promise<void> {
   await sql`
     INSERT INTO pages (slug, source_id, type, title, compiled_truth, frontmatter, content_hash, created_at, updated_at)
     VALUES
-      ('acme-example', 'default', 'company', 'Acme', '', '{}', 'lv1', now(), now()),
-      ('alice-example', 'default', 'person', 'Alice', '', '{}', 'lv2', now(), now()),
+      ('companies/acme-example', 'default', 'company', 'Acme', '', '{}', 'lv1', now(), now()),
+      ('people/alice-example', 'default', 'person', 'Alice', '', '{}', 'lv2', now(), now()),
       ('technical-a', 'default', 'note', 'Tech A', '', '{}', 'lv3', now(), now())
   `;
 }
@@ -89,7 +89,7 @@ describe('graph_coverage counts live entity pages only (#3754, doctor surface)',
     await seedLiveEntities(engine);
     await sql`
       INSERT INTO pages (slug, source_id, type, title, compiled_truth, frontmatter, content_hash, created_at, updated_at, deleted_at)
-      VALUES ('ghost-example', 'default', 'person', 'Ghost', '', '{}', 'gh1', now(), now(), now())
+      VALUES ('people/ghost-example', 'default', 'person', 'Ghost', '', '{}', 'gh1', now(), now(), now())
     `;
     const checks = await buildChecks(engine, [], null);
     const graph = checks.find((c) => c.name === 'graph_coverage');

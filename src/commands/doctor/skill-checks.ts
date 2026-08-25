@@ -238,6 +238,15 @@ export async function skillPreconditionsCheck(
         return rows[0]?.n ?? 0;
       } catch { return 0; }
     },
+    async countPagesByType(pageType: string) {
+      try {
+        const rows = await engine.executeRaw<{ n: number }>(
+          `SELECT COUNT(*)::int AS n FROM pages WHERE type = $1 AND deleted_at IS NULL`,
+          [pageType],
+        );
+        return rows[0]?.n ?? 0;
+      } catch { return 0; }
+    },
     async listSourceIds() {
       try {
         const rows = await engine.executeRaw<{ id: string }>(`SELECT id FROM sources WHERE id <> 'default'`);

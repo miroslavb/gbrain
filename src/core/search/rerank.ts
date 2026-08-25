@@ -21,7 +21,19 @@ import { createHash } from 'crypto';
 import type { SearchResult } from '../types.ts';
 import { rerank as gatewayRerank, RerankError, type RerankInput, type RerankResult } from '../ai/gateway.ts';
 import { BudgetExhausted } from '../budget/budget-tracker.ts';
-import { logRerankFailure, type RerankFailureReason } from '../rerank-audit.ts';
+import {
+  logRerankFailure,
+  logRerankRecovery,
+  readRecentRerankFailures,
+  readRecentRerankRecoveries,
+  normalizedRerankFailureReason,
+  unrecoveredRerankFailures,
+  type RerankFailureReason,
+} from '../rerank-audit.ts';
+
+// Rare-event guard: at most one recovery-ledger read and one marker per
+// process. Test-seam rerankers never touch the production audit trail.
+let recoveryAuditChecked = false;
 
 export interface RerankerOpts {
   enabled: boolean;
@@ -114,6 +126,23 @@ export async function applyReranker(
   // Defensive: if the reranker returned a malformed shape, pass through.
   if (!Array.isArray(reranked) || reranked.length === 0) return results;
 
+  if (!opts.rerankerFn && !recoveryAuditChecked) {
+    recoveryAuditChecked = true;
+    try {
+      const model = opts.model ?? 'unknown';
+      const failures = readRecentRerankFailures(7);
+      const recoveries = readRecentRerankRecoveries(7);
+      const active = unrecoveredRerankFailures(failures, recoveries);
+      const clearsFailure = active.some((failure) => {
+        if (failure.model !== model || normalizedRerankFailureReason(failure) === 'budget') return false;
+        return normalizedRerankFailureReason(failure) !== 'payload_too_large' || documents.length >= failure.doc_count;
+      });
+      if (clearsFailure) logRerankRecovery({ model, doc_count: documents.length });
+    } catch {
+      // Recovery accounting must never break search.
+    }
+  }
+
   // Build the reordered head. We keep ONLY indices the reranker returned
   // (so a top_n response with fewer items than head.length naturally
   // drops the missing ones — but since we don't pass top_n by default,
@@ -146,4 +175,9 @@ export async function applyReranker(
   return opts.topNOut !== null && opts.topNOut > 0
     ? combined.slice(0, opts.topNOut)
     : combined;
+}
+
+/** Test seam for process-local recovery marker suppression. */
+export function _resetRerankRecoveryAuditForTests(): void {
+  recoveryAuditChecked = false;
 }

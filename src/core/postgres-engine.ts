@@ -91,7 +91,7 @@ import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defa
 import { DELETE_BATCH_SIZE } from './engine-constants.ts';
 import { SOURCE_CONFIG_OBJECT_SQL } from './source-config-sql.ts';
 import { shouldExcludeFromOrphanReporting, loadOrphanPolicyOverrides } from './orphan-policy.ts';
-import { summarizeGraphHealthScope, type GraphHealthRow } from './graph-health-scope.ts';
+import { canonicalEntitySqlPredicate, canonicalGraphSqlPredicate, resolvableCanonicalProjectHintSqlPredicate, summarizeGraphHealthScope, type GraphHealthRow } from './graph-health-scope.ts';
 import { LINK_EXTRACTOR_VERSION_TS } from './link-extraction.ts';
 import { EMBED_SKIP_FILTER_FRAGMENT } from './embed-skip.ts';
 import { QUARANTINE_FILTER_FRAGMENT } from './quarantine.ts';
@@ -5425,9 +5425,11 @@ export class PostgresEngine implements BrainEngine {
     // getStats, and destructive-removal counts elsewhere deliberately stay raw.
     // S2: coverage + missing_embeddings key on the registry-ACTIVE column.
     const colId = await this.activeEmbeddingColId({ fallbackToLegacy: true });
+    const canonicalEntity = sql.unsafe(canonicalEntitySqlPredicate('p'));
+    const canonicalOther = sql.unsafe(canonicalGraphSqlPredicate('other')), resolvableProjectHint = sql.unsafe(resolvableCanonicalProjectHintSqlPredicate('p', 'target'));
     const [h] = await sql`
       WITH entity_pages AS (
-        SELECT id, slug FROM pages WHERE type IN ('entity', 'person', 'company') AND deleted_at IS NULL
+        SELECT p.id, p.slug FROM pages p WHERE ${canonicalEntity} AND p.deleted_at IS NULL
       )
       SELECT
         (SELECT count(*) FROM pages WHERE deleted_at IS NULL) as page_count,
@@ -5490,7 +5492,7 @@ export class PostgresEngine implements BrainEngine {
       SELECT p.slug,
              (SELECT count(*) FROM links l WHERE l.from_page_id = p.id OR l.to_page_id = p.id)::int as link_count
       FROM pages p
-      WHERE p.type IN ('entity', 'person', 'company') AND p.deleted_at IS NULL
+      WHERE ${canonicalEntity} AND p.deleted_at IS NULL
       ORDER BY link_count DESC
       LIMIT 5
     `;
@@ -5515,8 +5517,8 @@ export class PostgresEngine implements BrainEngine {
              EXISTS (SELECT 1 FROM timeline_entries te WHERE te.page_id = p.id) AS has_timeline,
              EXISTS (SELECT 1 FROM links l JOIN pages other ON
                (l.from_page_id = p.id AND other.id = l.to_page_id) OR (l.to_page_id = p.id AND other.id = l.from_page_id)
-               WHERE other.deleted_at IS NULL AND other.type IN
-                 ('concept','project','analysis','guide','person','company','entity','organization')) AS has_entity_link
+               WHERE other.deleted_at IS NULL AND ${canonicalOther}) AS has_entity_link,
+             ${resolvableProjectHint} AS has_resolvable_entity_hint
       FROM pages p
       WHERE p.deleted_at IS NULL
     `;

@@ -42,16 +42,16 @@ async function seedFourPages(eng: PGLiteEngine): Promise<void> {
   await sql`
     INSERT INTO pages (slug, source_id, type, title, compiled_truth, frontmatter, content_hash, created_at, updated_at)
     VALUES
-      ('acme-example', 'default', 'company', 'Acme', '', '{}', 'h1', now(), now()),
-      ('alice-example', 'default', 'person', 'Alice', '', '{}', 'h2', now(), now()),
-      ('bob-example', 'default', 'person', 'Bob', '', '{}', 'h5', now(), now()),
-      ('carol-example', 'default', 'person', 'Carol', '', '{}', 'h6', now(), now()),
-      ('widget-co-example', 'default', 'company', 'Widget Co', '', '{}', 'h7', now(), now()),
-      ('dana-example', 'default', 'person', 'Dana', '', '{}', 'h8', now(), now()),
+      ('companies/acme-example', 'default', 'company', 'Acme', '', '{}', 'h1', now(), now()),
+      ('people/alice-example', 'default', 'person', 'Alice', '', '{}', 'h2', now(), now()),
+      ('people/bob-example', 'default', 'person', 'Bob', '', '{}', 'h5', now(), now()),
+      ('people/carol-example', 'default', 'person', 'Carol', '', '{}', 'h6', now(), now()),
+      ('companies/widget-co-example', 'default', 'company', 'Widget Co', '', '{}', 'h7', now(), now()),
+      ('people/dana-example', 'default', 'person', 'Dana', '', '{}', 'h8', now(), now()),
       ('technical-a', 'default', 'note', 'Tech A', '', '{}', 'h3', now(), now()),
       ('technical-b', 'default', 'note', 'Tech B', '', '{}', 'h4', now(), now())
   `;
-  for (const slug of ['acme-example', 'alice-example', 'bob-example']) {
+  for (const slug of ['companies/acme-example', 'people/alice-example', 'people/bob-example']) {
     const pid = (await sql`SELECT id FROM pages WHERE slug=${slug}`)[0].id as number;
     await sql`INSERT INTO timeline_entries (page_id, date, source, summary, detail)
       VALUES (${pid}, CURRENT_DATE, 'test', 'milestone', '{}')`;

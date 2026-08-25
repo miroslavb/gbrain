@@ -277,6 +277,10 @@ function staticPreconditionHint(pre: Precondition): string {
       return pre.arg
         ? `populate ${pre.arg} (>=1 page), then re-run`
         : 'specify a directory: dir:<path> — see skillpack/preconditions.ts vocabulary';
+    case 'type':
+      return pre.arg
+        ? `ingest at least one live type=${pre.arg} page, then re-run`
+        : 'specify a page type: type:<page_type> — see skillpack/preconditions.ts vocabulary';
     case 'config':
       return pre.arg
         ? `set it: gbrain config set ${pre.arg} <value>`

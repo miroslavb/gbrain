@@ -16,14 +16,15 @@ import { rankIssues, type RankedIssue } from '../core/doctor-cause-rank.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import type { DbUrlSource } from '../core/config.ts';
 import { gbrainPath, loadConfig } from '../core/config.ts';
-import { dirname, join } from 'path';
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { join } from 'path';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { resolveEnvNumber, resolveHoursEnv } from '../core/env-number.ts';
 import { computeEffectiveDate } from '../core/effective-date.ts';
 import { parseFrontmatter } from '../core/backfill-effective-date.ts';
 import { hnswIndexExpected, hnswMaxDimsForType } from '../core/vector-index.ts';
 import { VERSION as GBRAIN_BINARY_VERSION } from '../version.ts';
 import { zeroTotalContradictionsCheck } from '../core/eval-contradictions/run-health.ts';
+import { canonicalEntitySqlPredicate } from '../core/graph-health-scope.ts';
 // Peeled doctor modules (containment sprint): each is a verbatim move out of
 // this file. doctor.ts re-exports every moved public symbol under its
 // original name so existing importers (tests, scripts/live-brain-first-check.ts,
@@ -1422,45 +1423,12 @@ export async function buildChecks(
     // Best-effort; audit-log read failure shouldn't stop doctor.
   }
 
-  // 3e. home_dir_in_worktree (v0.35.8.0). Walks up from `gbrainPath()`
-  // looking for a `.git` directory OR file. If found, warns: `~/.gbrain/`
-  // lives inside a git worktree, so an accidental `git add` from the
-  // worktree root could stage the brain. Pairs with the retroactive
-  // `~/.gbrain/.gitignore` (single-line `*`) laid down by saveConfig +
-  // post-upgrade. Honest scope: the .gitignore covers casual `git add`
-  // but NOT already-tracked files, screenshots, backups, or `git add -f`.
-  //
-  // Walk termination: stops at $HOME (don't keep walking into / on a user
-  // who set GBRAIN_HOME=/tmp/something). Handles `.git` as both a directory
-  // (main repo) and a file (linked worktree pointing at parent's worktrees/).
-  // Honors GBRAIN_HOME via gbrainPath().
+  // 3e. Ask Git for semantic worktree truth; orphaned/malformed raw .git must not trigger a
+  // home relocation. realpath + path.relative prevent prefix/symlink errors.
   try {
     const gbrainHome = gbrainPath();
-    const home = process.env.HOME || '';
-    let worktreeRoot: string | null = null;
-    if (gbrainHome && home && gbrainHome.startsWith(home + '/')) {
-      // Walk up from gbrainHome's parent toward $HOME, stopping at $HOME.
-      // We don't check gbrainHome itself: a `.git` directly inside ~/.gbrain
-      // isn't a containing-worktree, it would be a brain repo cloned there.
-      let cur = dirname(gbrainHome);
-      while (cur && cur.length >= home.length) {
-        const gitPath = join(cur, '.git');
-        try {
-          const st = statSync(gitPath);
-          // Either a directory (main repo) or a file (linked worktree pointer).
-          if (st.isDirectory() || st.isFile()) {
-            worktreeRoot = cur;
-            break;
-          }
-        } catch {
-          // No .git at this level; continue.
-        }
-        if (cur === home) break;
-        const parent = dirname(cur);
-        if (parent === cur) break;
-        cur = parent;
-      }
-    }
+    const { containingGitWorktree } = await import('../core/home-worktree.ts');
+    const worktreeRoot = containingGitWorktree(gbrainHome);
     if (worktreeRoot) {
       const homeEnvHint = process.env.GBRAIN_HOME
         ? `# Or move \`~/.gbrain\` outside the worktree by setting GBRAIN_HOME elsewhere.`
@@ -2371,47 +2339,34 @@ export async function buildChecks(
   progress.heartbeat('graph_coverage');
   try {
     const health = await engine.getHealth();
-    const entityCount = (await engine.executeRaw<{ count: number }>(
-      // deleted_at IS NULL: a brain whose only entity pages are soft-deleted has
-      // zero LIVE entities, and must take the short-circuit below rather than
-      // warn about coverage on pages the rest of the system treats as gone.
-      // buildGazetteer (src/core/by-mention.ts) already filters this way, so
-      // without it the two disagree about whether entity pages exist at all.
-      "SELECT COUNT(*)::int AS count FROM pages WHERE deleted_at IS NULL AND type IN ('entity', 'person', 'company', 'organization')",
-    ))[0]?.count ?? 0;
-
-    // Compute coverage against eligible entities only — exclude test fixtures
-    // (`tools/gbrain/test/*`) and template stubs (`templates/new-person`) so
-    // that brains seeded only with code sources don't get spurious warnings
-    // about missing link/timeline coverage on pages that are test fixtures, not
-    // real knowledge entities.
-    // #4191: an entity counts as CONNECTED with an inbound OR outbound link.
-    // Counting outbound only (from_page_id) contradicted onboard's
-    // entity_link_coverage (inbound EXISTS, target 70%): a brain of
-    // inbound-only entities (meetings link TO people) read ok there and
-    // warn here. Same in/out predicate + 70% target both places now.
+    // The local doctor, engines and onboard must score the exact same entity
+    // cards. Type-only denominators silently admitted nested/generated rows;
+    // use the canonical slug+type predicate and the same live-source inbound
+    // endpoint rule as onboard's entity_link_coverage.
+    const canonicalEntity = canonicalEntitySqlPredicate('p');
     const eligibleStats = (await engine.executeRaw<{ entities: number; connected: number; timeline: number }>(
       `WITH eligible AS (
-        SELECT id FROM pages
-        WHERE deleted_at IS NULL
-          AND type IN ('entity','person','company','organization')
-          AND slug NOT LIKE 'tools/gbrain/test/%'
-          AND slug <> 'templates/new-person'
+        SELECT p.id FROM pages p
+        WHERE p.deleted_at IS NULL
+          AND ${canonicalEntity}
       )
       SELECT
         (SELECT count(*)::int FROM eligible) AS entities,
         (SELECT count(*)::int FROM eligible e
-           WHERE EXISTS (SELECT 1 FROM links l WHERE l.from_page_id = e.id)
-              OR EXISTS (SELECT 1 FROM links l WHERE l.to_page_id = e.id)) AS connected,
+           WHERE EXISTS (
+             SELECT 1 FROM links l
+             JOIN pages src ON src.id = l.from_page_id
+             WHERE l.to_page_id = e.id AND src.deleted_at IS NULL
+           )) AS connected,
         (SELECT count(DISTINCT page_id)::int FROM timeline_entries WHERE page_id IN (SELECT id FROM eligible)) AS timeline`,
-    ))[0] ?? { entities: entityCount, connected: 0, timeline: 0 };
+    ))[0] ?? { entities: 0, connected: 0, timeline: 0 };
 
-    const eligibleEntityCount = Number(eligibleStats.entities ?? entityCount);
+    const eligibleEntityCount = Number(eligibleStats.entities ?? 0);
     const linkCoverage = eligibleEntityCount > 0 ? Number(eligibleStats.connected ?? 0) / eligibleEntityCount : 0;
     const timelineCoverage = eligibleEntityCount > 0 ? Number(eligibleStats.timeline ?? 0) / eligibleEntityCount : 0;
     const linkPct = (linkCoverage * 100).toFixed(0);
     const timelinePct = (timelineCoverage * 100).toFixed(0);
-    if (entityCount === 0) {
+    if (eligibleEntityCount === 0) {
       // Markdown-only / journal / wiki brain — no entity pages to compute
       // coverage against. Coverage formula is structurally inapplicable.
       checks.push({
@@ -2419,19 +2374,13 @@ export async function buildChecks(
         status: 'ok',
         message: 'No entity pages — graph_coverage not applicable (markdown-only brain)',
       });
-    } else if (eligibleEntityCount === 0) {
-      checks.push({
-        name: 'graph_coverage',
-        status: 'ok',
-        message: `Only code/test fixture entity pages found (${entityCount}); graph_coverage not applicable`,
-      });
     } else if (linkCoverage >= 0.7 && timelineCoverage >= 0.5) {
-      checks.push({ name: 'graph_coverage', status: 'ok', message: `Entity connected coverage (in/out) ${linkPct}%, entity timeline coverage ${timelinePct}%` });
+      checks.push({ name: 'graph_coverage', status: 'ok', message: `Canonical entity inbound coverage ${linkPct}%, entity timeline coverage ${timelinePct}% (${eligibleEntityCount} entity pages)` });
     } else {
       checks.push({
         name: 'graph_coverage',
         status: 'warn',
-        message: `Entity connected coverage (in/out) ${linkPct}% (target 70%), entity timeline coverage ${timelinePct}% (${eligibleEntityCount} entity pages). Run: gbrain extract all`,
+        message: `Canonical entity inbound coverage ${linkPct}% (target 70%), entity timeline coverage ${timelinePct}% (${eligibleEntityCount} entity pages). Run: gbrain extract all`,
       });
     }
 
@@ -2839,12 +2788,25 @@ export async function buildChecks(
     const _cfg = _loadCfg();
     const bytesBlock = _cfg?.content_sanity?.bytes_block ?? 500_000;
     // #1871: engine.executeRaw, not the dead-on-PGLite postgres singleton.
-    const rows = await engine.executeRaw<{ slug: string; source_id: string; bytes: number }>(
-      `SELECT p.slug, p.source_id,
-              octet_length(p.compiled_truth) + octet_length(COALESCE(p.timeline, '')) AS bytes
+    const { resolveActiveEmbeddingColumnFromEngine, quoteIdentifier } =
+      await import('../core/search/embedding-column.ts');
+    const { classifyOversizedPage } = await import('../core/content-health.ts');
+    const active = await resolveActiveEmbeddingColumnFromEngine(engine, { fallbackToLegacy: true });
+    const col = quoteIdentifier(active.name);
+    const rows = await engine.executeRaw<{
+      slug: string; source_id: string; bytes: number; page_kind: string;
+      chunk_count: number; missing_active_embeddings: number; embed_skip: boolean;
+    }>(
+      `SELECT p.slug, p.source_id, p.page_kind,
+              octet_length(p.compiled_truth) + octet_length(COALESCE(p.timeline, '')) AS bytes,
+              COUNT(cc.id)::int AS chunk_count,
+              COUNT(cc.id) FILTER (WHERE cc.${col} IS NULL)::int AS missing_active_embeddings,
+              (p.frontmatter ? 'embed_skip') AS embed_skip
        FROM pages p
+       LEFT JOIN content_chunks cc ON cc.page_id = p.id
        WHERE p.deleted_at IS NULL
          AND (octet_length(p.compiled_truth) + octet_length(COALESCE(p.timeline, ''))) > $1
+       GROUP BY p.id, p.slug, p.source_id, p.page_kind, p.compiled_truth, p.timeline, p.frontmatter
        ORDER BY bytes DESC
        LIMIT 100`,
       [bytesBlock],
@@ -2856,14 +2818,25 @@ export async function buildChecks(
         message: `No pages exceed ${bytesBlock} bytes`,
       });
     } else {
-      const oversizeRows = rows as unknown as Array<{ slug: string; source_id: string; bytes: number }>;
-      const top = oversizeRows.slice(0, 3)
-        .map(r => `${r.slug} (${r.bytes}b, src=${r.source_id})`)
+      const classified = rows.map(row => ({ row, classification: classifyOversizedPage(row) }));
+      const actionable = classified.filter(item => !item.classification.accepted);
+      const acceptedByReason = Object.fromEntries(
+        [...new Set(classified.filter(i => i.classification.accepted).map(i => i.classification.reason))]
+          .map(reason => [reason, classified.filter(i => i.classification.reason === reason).length]),
+      );
+      const top = actionable.slice(0, 3).map(({ row: r }) =>
+        `${r.slug} (${r.bytes}b, src=${r.source_id})`)
         .join('; ');
       checks.push({
         name: 'oversized_pages',
-        status: 'warn',
-        message: `${rows.length} page(s) exceed ${bytesBlock}-byte block threshold. Top: ${top}. New ingests with the same shape get frontmatter.embed_skip set automatically; existing oversized pages can be split or accepted as non-embeddable.`,
+        status: actionable.length > 0 ? 'warn' : 'ok',
+        message: actionable.length > 0
+          ? `${actionable.length}/${rows.length} oversized page(s) remain actionable. Top: ${top}.`
+          : `${rows.length} oversized page(s) retained and classified as accepted operational contours; 0 actionable.`,
+        details: { total: rows.length, accepted: rows.length - actionable.length,
+          actionable: actionable.length, accepted_by_reason: acceptedByReason,
+          active_embedding_column: active.name,
+          inventory: classified.map(({ row, classification }) => ({ ...row, ...classification })) },
       });
     }
   } catch (err) {
@@ -2980,13 +2953,12 @@ export async function buildChecks(
       const hardBlocked =
         summary.by_type.hard_block + summary.by_type.reject + summary.by_type.quarantine;
       const softBlocked = summary.by_type.soft_block + summary.by_type.flag;
-      const status: 'ok' | 'warn' | 'fail' =
-        hardBlocked > 0 ? 'fail' :
-          (softBlocked > 0 || events.length >= 10) ? 'warn' : 'ok';
+      const status: 'ok' | 'fail' = hardBlocked > 0 ? 'fail' : 'ok';
       checks.push({
         name: 'content_sanity_audit_recent',
         status,
-        message: `${events.length} events (hard=${hardBlocked} [hard_block=${summary.by_type.hard_block} reject=${summary.by_type.reject} quarantine=${summary.by_type.quarantine}] soft=${softBlocked} [soft_block=${summary.by_type.soft_block} flag=${summary.by_type.flag}] warn=${summary.by_type.warn})${topPatterns ? ', patterns: ' + topPatterns : ''}${topSources ? ', sources: ' + topSources : ''}. (Local audit only — multi-host operators set GBRAIN_AUDIT_DIR.)`,
+        message: `${events.length} events (hard=${hardBlocked} [hard_block=${summary.by_type.hard_block} reject=${summary.by_type.reject} quarantine=${summary.by_type.quarantine}] informational=${softBlocked + summary.by_type.warn} [soft_block=${summary.by_type.soft_block} flag=${summary.by_type.flag} warn=${summary.by_type.warn}])${topPatterns ? ', patterns: ' + topPatterns : ''}${topSources ? ', sources: ' + topSources : ''}. Current actionability is reported by oversized_pages/flagged_pages. (Local audit only — multi-host operators set GBRAIN_AUDIT_DIR.)`,
+        details: { total: events.length, hard: hardBlocked, soft: softBlocked, summary },
       });
     }
   } catch (err) {
@@ -3024,18 +2996,46 @@ export async function buildChecks(
 
   progress.heartbeat('flagged_pages');
   try {
-    const rows = await engine.executeRaw<{ n: string | number }>(
-      `SELECT COUNT(*)::int AS n FROM pages p WHERE p.deleted_at IS NULL AND p.frontmatter ? 'content_flag'`,
+    const { resolveActiveEmbeddingColumnFromEngine, quoteIdentifier } =
+      await import('../core/search/embedding-column.ts');
+    const { classifyFlaggedPage } = await import('../core/content-health.ts');
+    const active = await resolveActiveEmbeddingColumnFromEngine(engine, { fallbackToLegacy: true });
+    const col = quoteIdentifier(active.name);
+    const rows = await engine.executeRaw<{
+      slug: string; source_id: string; page_kind: string; chunk_count: number;
+      missing_active_embeddings: number; embed_skip: boolean;
+      content_flag_reason: string | null; has_managed_facts_fence: boolean;
+    }>(
+      `SELECT p.slug, p.source_id, p.page_kind,
+              COUNT(cc.id)::int AS chunk_count,
+              COUNT(cc.id) FILTER (WHERE cc.${col} IS NULL)::int AS missing_active_embeddings,
+              (p.frontmatter ? 'embed_skip') AS embed_skip,
+              p.frontmatter->'content_flag'->>'reason' AS content_flag_reason,
+              (POSITION('<!--- gbrain:facts:begin -->' IN p.compiled_truth) > 0) AS has_managed_facts_fence
+         FROM pages p
+         LEFT JOIN content_chunks cc ON cc.page_id = p.id
+        WHERE p.deleted_at IS NULL AND p.frontmatter ? 'content_flag'
+        GROUP BY p.id, p.slug, p.source_id, p.page_kind, p.frontmatter, p.compiled_truth
+        ORDER BY p.slug`,
     );
-    const n = Number(rows[0]?.n ?? 0);
-    // Flagged pages are "examine me", not "broken" — warn so they're visible
-    // but the message is non-alarming.
+    const classified = rows.map(row => ({ row, classification: classifyFlaggedPage(row) }));
+    const actionable = classified.filter(item => !item.classification.accepted);
+    const acceptedByReason = Object.fromEntries(
+      [...new Set(classified.filter(i => i.classification.accepted).map(i => i.classification.reason))]
+        .map(reason => [reason, classified.filter(i => i.classification.reason === reason).length]),
+    );
     checks.push({
       name: 'flagged_pages',
-      status: n > 0 ? 'warn' : 'ok',
-      message: n > 0
-        ? `${n} page(s) flagged (markup-heavy or oversize) — still searchable, agent warned on retrieval. Review with 'gbrain quarantine list --include-flagged'.`
-        : 'No flagged pages',
+      status: actionable.length > 0 ? 'warn' : 'ok',
+      message: actionable.length > 0
+        ? `${actionable.length}/${rows.length} flagged page(s) remain unclassified/actionable. Review with 'gbrain quarantine list --include-flagged'.`
+        : rows.length > 0
+          ? `${rows.length} flag marker(s) retained as retrieval warnings; all accepted by explicit operational category, 0 actionable.`
+          : 'No flagged pages',
+      details: { total: rows.length, accepted: rows.length - actionable.length,
+        actionable: actionable.length, accepted_by_reason: acceptedByReason,
+        active_embedding_column: active.name,
+        inventory: classified.map(({ row, classification }) => ({ ...row, ...classification })) },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

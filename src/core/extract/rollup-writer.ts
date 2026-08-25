@@ -81,7 +81,8 @@ export async function upsertExtractRollup(
 
   try {
     await engine.executeRaw(
-      `INSERT INTO extract_rollup_7d (
+      `WITH rollup_write AS (
+       INSERT INTO extract_rollup_7d (
          kind, source_id, day,
          cost_usd, halt_count, eval_fail_count, eval_pass_count,
          round_completed_count, rollup_write_failures, updated_at
@@ -94,7 +95,33 @@ export async function upsertExtractRollup(
          eval_pass_count        = extract_rollup_7d.eval_pass_count        + EXCLUDED.eval_pass_count,
          round_completed_count  = extract_rollup_7d.round_completed_count  + EXCLUDED.round_completed_count,
          rollup_write_failures  = extract_rollup_7d.rollup_write_failures  + EXCLUDED.rollup_write_failures,
-         updated_at             = now()`,
+         updated_at             = now()
+       RETURNING 1
+       )
+       INSERT INTO extract_health_state (
+         kind, source_id, last_outcome, last_outcome_at,
+         consecutive_halts, consecutive_completions
+       )
+       SELECT $1, $2,
+              CASE WHEN $5 > 0 THEN 'halt' ELSE 'completed' END,
+              now(),
+              CASE WHEN $5 > 0 THEN 1 ELSE 0 END,
+              CASE WHEN $5 = 0 AND $8 > 0 THEN 1 ELSE 0 END
+         FROM rollup_write
+        WHERE $5 > 0 OR $8 > 0
+       ON CONFLICT (kind, source_id) DO UPDATE SET
+         last_outcome = EXCLUDED.last_outcome,
+         last_outcome_at = EXCLUDED.last_outcome_at,
+         consecutive_halts = CASE
+           WHEN EXCLUDED.last_outcome = 'halt'
+             THEN extract_health_state.consecutive_halts + 1
+           ELSE 0
+         END,
+         consecutive_completions = CASE
+           WHEN EXCLUDED.last_outcome = 'completed'
+             THEN extract_health_state.consecutive_completions + 1
+           ELSE 0
+         END`,
       [input.kind, input.source_id, day, cost, halts, evalFails, evalPasses, completed, failures],
     );
     return { ok: true };

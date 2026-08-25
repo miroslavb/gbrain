@@ -56,6 +56,15 @@ async function seedLegacyFact(input: {
   visibility?: 'private' | 'world';
   notability?: 'high' | 'medium' | 'low';
 }): Promise<number> {
+  if (input.entity_slug) {
+    await engine.putPage(input.entity_slug, {
+      type: input.entity_slug.startsWith('people/') ? 'person' : 'concept',
+      title: input.entity_slug,
+      compiled_truth: `# ${input.entity_slug}`,
+      timeline: '',
+      frontmatter: {},
+    }, { sourceId: input.source_id ?? 'default' });
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = await (engine as any).db.query(
     `INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability,
@@ -102,8 +111,7 @@ describe('phaseBFenceFacts — dry-run reporting', () => {
     const r = await __testing.phaseBFenceFacts(engine, DRY_OPTS);
     expect(r.status).toBe('skipped');
     expect(r.detail).toContain('dry-run');
-    expect(r.detail).toContain('would fence 2 rows');  // 3 total - 1 unparented
-    expect(r.detail).toContain('1 unfenceable');
+    expect(r.detail).toContain('would fence 2 guarded row(s)');
 
     // No files created.
     expect(existsSync(join(brainDir, 'people/alice.md'))).toBe(false);
@@ -141,6 +149,14 @@ describe('phaseBFenceFacts — happy path backfill', () => {
     );
     expect(rows.rows[0]).toMatchObject({ id: id1, row_num: 1, source_markdown_slug: 'people/alice' });
     expect(rows.rows[1]).toMatchObject({ id: id2, row_num: 2, source_markdown_slug: 'people/alice' });
+
+    // The DB projection is a write-through mirror of the canonical file.
+    // A later extract-facts reconciliation reads compiled_truth; leaving the
+    // old body here would make it delete the freshly fenced rows.
+    const page = await engine.getPage('people/alice', { sourceId: 'default' });
+    expect(page?.compiled_truth).toContain('Founded Acme in 2017');
+    expect(page?.compiled_truth).toContain('Prefers async over meetings');
+    expect(parseFactsFence(page?.compiled_truth ?? '').facts).toHaveLength(2);
   });
 
   test('groups by entity page — multi-entity batch touches multiple files', async () => {
@@ -205,6 +221,35 @@ describe('phaseBFenceFacts — happy path backfill', () => {
     expect(rows.rows.map((r: { row_num: number }) => r.row_num)).toEqual([1, 2]);
   });
 
+  test('rebuilds a stale file fence around occupied DB row numbers without losing indexed facts', async () => {
+    await engine.putPage('companies/acme', {
+      type: 'company', title: 'Acme', compiled_truth: '# Acme', timeline: '', frontmatter: {},
+    });
+    // Indexed fact #1 exists in DB but the source file has no fence yet.
+    await (engine as any).db.query(
+      `INSERT INTO facts
+        (source_id, entity_slug, fact, kind, visibility, notability, valid_from,
+         source, confidence, row_num, source_markdown_slug)
+       VALUES ('default','companies/acme','Existing indexed','fact','world','medium',
+               now(),'sync:import',1.0,1,'companies/acme')`,
+    );
+    await seedLegacyFact({ entity_slug: 'companies/acme', fact: 'Legacy pending' });
+
+    const r = await __testing.phaseBFenceFacts(engine, OPTS);
+    expect(r.status).toBe('complete');
+    const parsed = parseFactsFence(readFileSync(join(brainDir, 'companies/acme.md'), 'utf-8'));
+    expect(parsed.facts.map(f => [f.rowNum, f.claim])).toEqual([
+      [1, 'Existing indexed'],
+      [2, 'Legacy pending'],
+    ]);
+    expect(await engine.executeRaw(
+      `SELECT row_num, fact FROM facts WHERE entity_slug='companies/acme' ORDER BY row_num`,
+    )).toEqual([
+      { row_num: 1, fact: 'Existing indexed' },
+      { row_num: 2, fact: 'Legacy pending' },
+    ]);
+  });
+
   test('skips facts with NULL entity_slug (unfenceable)', async () => {
     await seedLegacyFact({ entity_slug: 'people/alice', fact: 'Fenceable' });
     await seedLegacyFact({ entity_slug: null, fact: 'Unfenceable' });
@@ -212,7 +257,7 @@ describe('phaseBFenceFacts — happy path backfill', () => {
     const r = await __testing.phaseBFenceFacts(engine, OPTS);
     expect(r.status).toBe('complete');
     expect(r.detail).toContain('fenced=1');
-    expect(r.detail).toContain('skipped_no_entity=1');
+    expect(r.detail).toContain('skipped_no_entity=0');
 
     // The unparented fact's row_num remains NULL.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -231,7 +276,7 @@ describe('phaseBFenceFacts — happy path backfill', () => {
 
     const r = await __testing.phaseBFenceFacts(engine, OPTS);
     expect(r.status).toBe('complete');
-    expect(r.detail).toContain('skipped_no_local_path=1');
+    expect(r.detail).toContain('scanned=0');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = await (engine as any).db.query('SELECT row_num FROM facts');

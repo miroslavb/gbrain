@@ -40,7 +40,14 @@ import type {
 import type { BrainEngine } from '../../core/engine.ts';
 import { loadConfig, toEngineConfig } from '../../core/config.ts';
 import { createEngine } from '../../core/engine-factory.ts';
-import { upsertFactRow, parseFactsFence } from '../../core/facts-fence.ts';
+import {
+  FACTS_FENCE_BEGIN,
+  FACTS_FENCE_END,
+  parseFactsFence,
+  renderFactsTable,
+  type ParsedFact,
+} from '../../core/facts-fence.ts';
+import { importFromContent } from '../../core/import-file.ts';
 
 let testEngineOverride: BrainEngine | null = null;
 export function __setTestEngineOverride(engine: BrainEngine | null): void {
@@ -114,6 +121,12 @@ interface LegacyFactRow {
   valid_until: Date | null;
   source: string;
   confidence: number;
+  row_num?: number | null;
+  expired_at?: Date | null;
+  claim_metric?: string | null;
+  claim_value?: number | null;
+  claim_unit?: string | null;
+  claim_period?: string | null;
 }
 
 interface SourceLookup {
@@ -159,17 +172,22 @@ async function phaseBFenceFacts(
     if (!engine) return { name: 'fence_facts', status: 'skipped', detail: 'no_brain_configured' };
     try {
       const counts = await engine.executeRaw<{ n: string }>(
-        `SELECT COUNT(*) AS n FROM facts WHERE row_num IS NULL`,
+        `SELECT COUNT(*) AS n
+           FROM facts f
+           JOIN sources s ON s.id = f.source_id AND s.local_path IS NOT NULL
+          WHERE f.row_num IS NULL
+            AND f.entity_slug IS NOT NULL
+            AND f.expired_at IS NULL
+            AND EXISTS (
+              SELECT 1 FROM pages p
+               WHERE p.source_id=f.source_id AND p.slug=f.entity_slug AND p.deleted_at IS NULL
+            )`,
       );
       const total = parseInt(counts[0]?.n ?? '0', 10);
-      const noEntity = await engine.executeRaw<{ n: string }>(
-        `SELECT COUNT(*) AS n FROM facts WHERE row_num IS NULL AND entity_slug IS NULL`,
-      );
-      const noEntityCount = parseInt(noEntity[0]?.n ?? '0', 10);
       return {
         name: 'fence_facts',
         status: 'skipped',
-        detail: `dry-run: would fence ${total - noEntityCount} rows; ${noEntityCount} unfenceable (NULL entity_slug)`,
+        detail: `dry-run: would fence ${total} guarded row(s) with a live backing page and writable source`,
       };
     } catch (e) {
       return { name: 'fence_facts', status: 'failed', detail: e instanceof Error ? e.message : String(e) };
@@ -193,8 +211,18 @@ async function phaseBFenceFacts(
     const legacy = await engine.executeRaw<LegacyFactRow>(
       `SELECT id, source_id, entity_slug, fact, kind, visibility, notability,
               context, valid_from, valid_until, source, confidence
-         FROM facts
-        WHERE row_num IS NULL
+         FROM facts f
+        WHERE f.row_num IS NULL
+          AND f.entity_slug IS NOT NULL
+          AND f.expired_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM pages p
+             WHERE p.source_id=f.source_id AND p.slug=f.entity_slug AND p.deleted_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM sources s
+             WHERE s.id=f.source_id AND s.local_path IS NOT NULL
+          )
         ORDER BY source_id, entity_slug, id`,
     );
 
@@ -232,12 +260,18 @@ async function phaseBFenceFacts(
     const targetSourceIds = new Set([...groups.keys()].map(k => k.split('\0')[0]));
     for (const id of targetSourceIds) {
       const localPath = localPathById.get(id);
-      if (localPath && isLocalPathDirty(localPath)) {
+      const dirty = localPath ? isLocalPathDirty(localPath) : false;
+      if (localPath && dirty && process.env.GBRAIN_MIGRATION_ALLOW_DIRTY_SOURCE !== '1') {
         return {
           name: 'fence_facts',
           status: 'failed',
           detail: `source "${id}" has uncommitted changes in ${localPath}. Commit or stash, then re-run.`,
         };
+      }
+      if (localPath && dirty) {
+        console.warn(
+          `[v0.32.2] explicit GBRAIN_MIGRATION_ALLOW_DIRTY_SOURCE=1: preserving current bytes and appending guarded facts in ${localPath}`,
+        );
       }
     }
 
@@ -265,52 +299,82 @@ async function phaseBFenceFacts(
           body = `---\ntype: ${type}\ntitle: ${title}\nslug: ${entitySlug}\n---\n\n# ${title}\n`;
         }
 
-        // Append each legacy row, collecting the assigned row_nums.
-        // Already-fenced rows (row_num already set) are skipped at the
-        // DB-row level by the WHERE clause, but if the SAME (entity,
-        // source, claim, source-text) tuple was previously appended in
-        // a partial-completion re-run, parseFactsFence will see the
-        // existing row and append a duplicate. We dedup on (claim,
-        // source) before append to handle this.
+        // Reconcile the complete non-CLI fence inventory before assigning
+        // legacy row numbers. Earlier versions considered only the markdown
+        // fence, so a DB-indexed row whose file copy was stale could already
+        // occupy #1 while the migration also assigned #1 to a legacy row.
+        // The unique constraint then failed after the file rename. Include
+        // indexed rows, reserve CLI row numbers, and rebuild one canonical
+        // collision-free fence while preserving every current file row.
         const existingFence = parseFactsFence(body);
-        const existingKeySet = new Set(existingFence.facts.map(f => `${f.claim}\0${f.source ?? ''}`));
-
-        const assignments: Array<{ id: string; row_num: number }> = [];
+        const indexed = await engine.executeRaw<LegacyFactRow>(
+          `SELECT id, source_id, entity_slug, fact, kind, visibility, notability,
+                  context, valid_from, valid_until, source, confidence, row_num,
+                  expired_at, claim_metric, claim_value, claim_unit, claim_period
+             FROM facts
+            WHERE source_id=$1 AND source_markdown_slug=$2 AND row_num IS NOT NULL
+              AND COALESCE(source, '') NOT LIKE 'cli:%'
+            ORDER BY row_num, id`,
+          [sourceId, entitySlug],
+        );
+        const occupied = await engine.executeRaw<{ row_num: number }>(
+          `SELECT row_num FROM facts
+            WHERE source_id=$1 AND source_markdown_slug=$2 AND row_num IS NOT NULL`,
+          [sourceId, entitySlug],
+        );
+        const occupiedNums = new Set(occupied.map(r => Number(r.row_num)));
+        const indexedByKey = new Map(indexed.map(r => [`${r.fact}\0${r.source ?? ''}`, r]));
+        const union = new Map<string, ParsedFact>();
+        for (const fact of existingFence.facts) union.set(`${fact.claim}\0${fact.source ?? ''}`, fact);
+        const toParsed = (row: LegacyFactRow): ParsedFact => ({
+          rowNum: Number(row.row_num ?? 0),
+          claim: row.fact,
+          kind: row.kind,
+          confidence: Number(row.confidence),
+          visibility: row.visibility,
+          notability: row.notability,
+          validFrom: new Date(row.valid_from).toISOString().slice(0, 10),
+          validUntil: row.valid_until ? new Date(row.valid_until).toISOString().slice(0, 10) : undefined,
+          source: row.source || undefined,
+          context: row.context ?? undefined,
+          active: row.expired_at == null,
+          claimMetric: row.claim_metric ?? undefined,
+          claimValue: row.claim_value ?? undefined,
+          claimUnit: row.claim_unit ?? undefined,
+          claimPeriod: row.claim_period ?? undefined,
+        });
+        for (const row of indexed) {
+          const key = `${row.fact}\0${row.source ?? ''}`;
+          if (!union.has(key)) union.set(key, toParsed(row));
+        }
         for (const row of group) {
           const key = `${row.fact}\0${row.source ?? ''}`;
-          if (existingKeySet.has(key)) {
-            // Already fenced (idempotent re-run). Find the existing
-            // row_num and assign it to this DB row.
-            const existing = existingFence.facts.find(f =>
-              f.claim === row.fact && (f.source ?? '') === (row.source ?? ''),
-            );
-            if (existing) {
-              assignments.push({ id: row.id, row_num: existing.rowNum });
-              continue;
-            }
-          }
-          // Append a new row.
-          const validFromStr = (row.valid_from instanceof Date ? row.valid_from : new Date(row.valid_from))
-            .toISOString().slice(0, 10);
-          const validUntilStr = row.valid_until
-            ? (row.valid_until instanceof Date ? row.valid_until : new Date(row.valid_until))
-                .toISOString().slice(0, 10)
-            : undefined;
-          const { body: updated, rowNum } = upsertFactRow(body, {
-            claim:      row.fact,
-            kind:       row.kind,
-            confidence: row.confidence,
-            visibility: row.visibility,
-            notability: row.notability,
-            validFrom:  validFromStr,
-            validUntil: validUntilStr,
-            source:     row.source,
-            context:    row.context ?? undefined,
-          });
-          body = updated;
-          existingKeySet.add(key);
-          assignments.push({ id: row.id, row_num: rowNum });
+          if (!union.has(key)) union.set(key, toParsed(row));
         }
+
+        const used = new Set<number>();
+        let next = Math.max(0, ...occupiedNums, ...[...union.values()].map(f => f.rowNum)) + 1;
+        for (const [key, fact] of union) {
+          const indexedRow = indexedByKey.get(key);
+          if (indexedRow?.row_num != null) {
+            fact.rowNum = Number(indexedRow.row_num);
+          } else if (fact.rowNum <= 0 || occupiedNums.has(fact.rowNum) || used.has(fact.rowNum)) {
+            while (occupiedNums.has(next) || used.has(next)) next += 1;
+            fact.rowNum = next++;
+          }
+          used.add(fact.rowNum);
+        }
+        const canonicalFacts = [...union.values()].sort((a, b) => a.rowNum - b.rowNum);
+        const rendered = renderFactsTable(canonicalFacts);
+        const begin = body.indexOf(FACTS_FENCE_BEGIN);
+        const end = body.indexOf(FACTS_FENCE_END, begin + FACTS_FENCE_BEGIN.length);
+        body = begin >= 0 && end >= 0
+          ? body.slice(0, begin) + rendered + body.slice(end + FACTS_FENCE_END.length)
+          : `${body.trimEnd()}\n\n## Facts\n\n${rendered}\n`;
+        const assignments = group.map(row => ({
+          id: row.id,
+          row_num: union.get(`${row.fact}\0${row.source ?? ''}`)!.rowNum,
+        }));
 
         // Atomic write: .tmp + parse + rename.
         writeFileSync(tmpPath, body, 'utf-8');
@@ -322,6 +386,31 @@ async function phaseBFenceFacts(
           continue;
         }
         renameSync(tmpPath, filePath);
+
+        // Markdown is canonical, but the production read/reconciliation path
+        // consumes pages.compiled_truth. Keep that projection in lock-step
+        // with the just-renamed file before publishing row_num ownership.
+        // noEmbed deliberately avoids unbounded provider work inside a data
+        // migration; changed chunks are left honestly stale for the normal
+        // bounded `gbrain embed --stale` lane.
+        const imported = await importFromContent(engine, entitySlug, body, {
+          noEmbed: true,
+          sourceId,
+          sourcePath: `${entitySlug}.md`,
+        });
+        if (imported.status === 'error' || !imported.parsedPage) {
+          throw new Error(
+            `page projection write-through failed (${imported.status}): ${imported.error ?? 'unknown error'}`,
+          );
+        }
+        const projected = await engine.getPage(entitySlug, { sourceId });
+        if (
+          !projected ||
+          projected.compiled_truth !== imported.parsedPage.compiled_truth ||
+          projected.timeline !== imported.parsedPage.timeline
+        ) {
+          throw new Error('page projection write-through read-back mismatch');
+        }
 
         // UPDATE the DB rows with their new row_nums + source_markdown_slug.
         for (const a of assignments) {

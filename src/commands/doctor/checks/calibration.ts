@@ -578,18 +578,35 @@ export async function checkVoiceGateHealth(engine: BrainEngine): Promise<Check> 
  */
 export async function checkRerankerHealth(engine: BrainEngine): Promise<Check> {
   try {
-    const { readRecentRerankFailures } = await import('../../../core/rerank-audit.ts');
+    const {
+      readRecentRerankFailures,
+      readRecentRerankRecoveries,
+      normalizedRerankFailureReason,
+      unrecoveredRerankFailures,
+    } = await import('../../../core/rerank-audit.ts');
     const cfg = await engine.getConfig('search.reranker.enabled');
     const rerankerEnabled = cfg === 'true' || cfg === '1';
 
-    const failures = readRecentRerankFailures(7);
+    const allFailures = readRecentRerankFailures(7);
+    const recoveries = readRecentRerankRecoveries(7);
+    const failures = unrecoveredRerankFailures(allFailures, recoveries).map((failure) => ({
+      ...failure,
+      reason: normalizedRerankFailureReason(failure),
+    }));
     if (failures.length === 0) {
       return {
         name: 'reranker_health',
         status: 'ok',
-        message: rerankerEnabled
-          ? 'No rerank failures in last 7 days'
-          : 'Reranker disabled — no failures expected',
+        message: allFailures.length > 0
+          ? `${allFailures.length} historical rerank failure(s) in last 7 days; all recovered by later same-model production reranks`
+          : rerankerEnabled
+            ? 'No rerank failures in last 7 days'
+            : 'Reranker disabled — no failures expected',
+        details: {
+          historical_failures_7d: allFailures.length,
+          recovery_markers_7d: recoveries.length,
+          active_failures_7d: 0,
+        },
       };
     }
 
@@ -656,7 +673,12 @@ export async function checkRerankerHealth(engine: BrainEngine): Promise<Check> {
     return {
       name: 'reranker_health',
       status: 'ok',
-      message: `${failures.length} reranker failure(s) in last 7 days (below threshold)`,
+      message: `${failures.length} active reranker failure(s) in last 7 days (below threshold; ${allFailures.length - failures.length} recovered)`,
+      details: {
+        historical_failures_7d: allFailures.length,
+        recovery_markers_7d: recoveries.length,
+        active_failures_7d: failures.length,
+      },
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -667,4 +689,3 @@ export async function checkRerankerHealth(engine: BrainEngine): Promise<Check> {
     };
   }
 }
-

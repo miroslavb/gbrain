@@ -667,6 +667,7 @@ export async function computeExtractHealthCheck(
   try {
     type RollupRow = {
       kind: string;
+      source_id: string;
       cost_7d_usd: number;
       eval_pass_count: number;
       eval_fail_count: number;
@@ -678,7 +679,7 @@ export async function computeExtractHealthCheck(
 
     const rows = await engine.executeRaw<RollupRow>(
       `SELECT
-         kind,
+         kind, source_id,
          SUM(cost_usd) AS cost_7d_usd,
          SUM(eval_pass_count) AS eval_pass_count,
          SUM(eval_fail_count) AS eval_fail_count,
@@ -687,9 +688,9 @@ export async function computeExtractHealthCheck(
          SUM(rollup_write_failures) AS rollup_write_failures,
          MAX(updated_at) AS last_updated_at
        FROM extract_rollup_7d
-       WHERE day >= CURRENT_DATE - 7
-       GROUP BY kind
-       ORDER BY kind`,
+       WHERE day >= CURRENT_DATE - 6
+       GROUP BY kind, source_id
+       ORDER BY kind, source_id`,
       [],
     );
 
@@ -699,7 +700,7 @@ export async function computeExtractHealthCheck(
         status: 'ok',
         message: 'no extractions in last 7 days',
         details: {
-          schema_version: 1,
+          schema_version: 2,
           kinds: [],
         },
       };
@@ -716,21 +717,26 @@ export async function computeExtractHealthCheck(
       last_updated_at: string | null;
     };
 
-    const kinds: KindAggregate[] = rows.map(r => {
-      const halts = Number(r.halt_count) || 0;
-      const completed = Number(r.round_completed_count) || 0;
+    const byKind = new Map<string, RollupRow[]>();
+    for (const row of rows) byKind.set(row.kind, [...(byKind.get(row.kind) ?? []), row]);
+    const kinds: KindAggregate[] = [...byKind.entries()].map(([kind, sourceRows]) => {
+      const halts = sourceRows.reduce((n, r) => n + (Number(r.halt_count) || 0), 0);
+      const completed = sourceRows.reduce((n, r) => n + (Number(r.round_completed_count) || 0), 0);
       const total = halts + completed;
+      const latest = sourceRows
+        .map(r => r.last_updated_at)
+        .filter((v): v is Date | string => v != null)
+        .map(v => new Date(v))
+        .sort((a, b) => b.getTime() - a.getTime())[0];
       return {
-        kind: r.kind,
-        cost_7d_usd: Number(r.cost_7d_usd) || 0,
-        eval_pass_count: Number(r.eval_pass_count) || 0,
-        eval_fail_count: Number(r.eval_fail_count) || 0,
+        kind,
+        cost_7d_usd: sourceRows.reduce((n, r) => n + (Number(r.cost_7d_usd) || 0), 0),
+        eval_pass_count: sourceRows.reduce((n, r) => n + (Number(r.eval_pass_count) || 0), 0),
+        eval_fail_count: sourceRows.reduce((n, r) => n + (Number(r.eval_fail_count) || 0), 0),
         halt_count: halts,
         round_completed_count: completed,
         halt_rate: total > 0 ? halts / total : 0,
-        last_updated_at: r.last_updated_at
-          ? new Date(r.last_updated_at).toISOString()
-          : null,
+        last_updated_at: latest?.toISOString() ?? null,
       };
     });
 
@@ -741,10 +747,30 @@ export async function computeExtractHealthCheck(
 
     // High halt rates: per F-OUT-19 doctor surfaces extractor health
     // distinctly from rollup write health.
+    type StateRow = {
+      kind: string;
+      source_id: string;
+      last_outcome: 'halt' | 'completed' | 'unknown';
+      last_outcome_at: Date | string;
+      consecutive_halts: number;
+      consecutive_completions: number;
+    };
+    const states = await engine.executeRaw<StateRow>(
+      `SELECT kind, source_id, last_outcome, last_outcome_at,
+              consecutive_halts, consecutive_completions
+         FROM extract_health_state`,
+      [],
+    );
+    const stateByKey = new Map(states.map(s => [`${s.kind}\u0000${s.source_id}`, s]));
     const highHaltKinds = kinds.filter(k => k.halt_rate > 0.10);
+    const unresolvedHighHaltKinds = highHaltKinds.filter(k =>
+      (byKind.get(k.kind) ?? []).some(r =>
+        stateByKey.get(`${r.kind}\u0000${r.source_id}`)?.last_outcome !== 'completed',
+      ),
+    );
 
-    if (highHaltKinds.length > 0) {
-      const top3 = [...highHaltKinds]
+    if (unresolvedHighHaltKinds.length > 0) {
+      const top3 = [...unresolvedHighHaltKinds]
         .sort((a, b) => b.halt_rate - a.halt_rate)
         .slice(0, 3)
         .map(k => `${k.kind}=${(k.halt_rate * 100).toFixed(1)}%`)
@@ -752,10 +778,13 @@ export async function computeExtractHealthCheck(
       return {
         name,
         status: 'warn',
-        message: `${highHaltKinds.length} kind(s) with halt rate > 10% (top: ${top3})`,
+        message: `${unresolvedHighHaltKinds.length} kind(s) with halt rate > 10% and unresolved current halt/unknown state (top: ${top3})`,
         details: {
-          schema_version: 1,
+          schema_version: 2,
           kinds,
+          current_states: states,
+          historical_high_halt_kinds: highHaltKinds.map(k => k.kind),
+          unresolved_high_halt_kinds: unresolvedHighHaltKinds.map(k => k.kind),
           rollup_write_failures_7d: totalRollupFailures,
         },
       };
@@ -771,8 +800,9 @@ export async function computeExtractHealthCheck(
         // operator to a usage error.
         message: `${totalRollupFailures} rollup write failure(s) in last 7d. The rollup table is a best-effort cache — the audit JSONL under ~/.gbrain/audit/ is the source of truth, and counts here may undercount until the 7-day window rolls past the failures. No action needed unless failures keep accumulating (then check DB connectivity/permissions).`,
         details: {
-          schema_version: 1,
+          schema_version: 2,
           kinds,
+          current_states: states,
           rollup_write_failures_7d: totalRollupFailures,
         },
       };
@@ -781,10 +811,15 @@ export async function computeExtractHealthCheck(
     return {
       name,
       status: 'ok',
-      message: `${kinds.length} kind(s) tracked, all halt rates below 10%`,
+      message: highHaltKinds.length > 0
+        ? `${kinds.length} kind(s) tracked; ${highHaltKinds.length} historical high-halt kind(s) recovered by later completed current state`
+        : `${kinds.length} kind(s) tracked, all halt rates below 10%`,
       details: {
-        schema_version: 1,
+        schema_version: 2,
         kinds,
+        current_states: states,
+        historical_high_halt_kinds: highHaltKinds.map(k => k.kind),
+        unresolved_high_halt_kinds: [],
         rollup_write_failures_7d: totalRollupFailures,
       },
     };

@@ -22,7 +22,7 @@ triggers:
   - "verify the eval panel"
   - "did all providers return"
 requires:
-  - dir:conversations/
+  - type:conversation
 mutating: true
 writes_pages: false
 writes_to:

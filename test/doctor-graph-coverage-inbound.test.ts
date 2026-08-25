@@ -6,9 +6,8 @@
  * counts INBOUND links (to_page_id EXISTS, target 70%). A brain of
  * inbound-only entities — the normal shape: meeting/note pages link TO
  * people and companies — read healthy in onboard and warned in doctor on
- * the same data. graph_coverage now counts CONNECTED entities (inbound OR
- * outbound) with the same 70% target, so the two checks can't contradict
- * each other on inbound-only brains.
+ * the same data. graph_coverage now uses the same canonical entity contour,
+ * live inbound endpoint rule and 70% target as onboard.
  */
 
 import { describe, expect, test, beforeAll, afterAll, beforeEach } from 'bun:test';
@@ -43,8 +42,8 @@ async function seedInboundOnlyEntities(eng: PGLiteEngine): Promise<void> {
   await sql`
     INSERT INTO pages (slug, source_id, type, title, compiled_truth, frontmatter, content_hash, created_at, updated_at)
     VALUES
-      ('alice-example', 'default', 'person', 'Alice', '', '{}', 'in1', now(), now()),
-      ('acme-example', 'default', 'company', 'Acme', '', '{}', 'in2', now(), now()),
+      ('people/alice-example', 'default', 'person', 'Alice', '', '{}', 'in1', now(), now()),
+      ('companies/acme-example', 'default', 'company', 'Acme', '', '{}', 'in2', now(), now()),
       ('meetings/2026-04-03', 'default', 'note', 'Standup', '', '{}', 'in3', now(), now())
   `;
   // Inbound-only: the note links TO both entities; the entities link to nothing.
@@ -52,11 +51,11 @@ async function seedInboundOnlyEntities(eng: PGLiteEngine): Promise<void> {
     INSERT INTO links (from_page_id, to_page_id, link_type)
     SELECT n.id, e.id, 'mentions'
     FROM pages n, pages e
-    WHERE n.slug = 'meetings/2026-04-03' AND e.slug IN ('alice-example', 'acme-example')
+    WHERE n.slug = 'meetings/2026-04-03' AND e.slug IN ('people/alice-example', 'companies/acme-example')
   `;
   await sql`
     INSERT INTO timeline_entries (page_id, date, summary)
-    SELECT id, '2026-04-03', 'met at standup' FROM pages WHERE slug IN ('alice-example', 'acme-example')
+    SELECT id, '2026-04-03', 'met at standup' FROM pages WHERE slug IN ('people/alice-example', 'companies/acme-example')
   `;
 }
 
@@ -68,7 +67,7 @@ describe('graph_coverage counts inbound-connected entities (#4191)', () => {
     expect(graph, 'graph_coverage check must be present').toBeDefined();
     // Both entities have inbound links → 100% connected coverage, ok.
     expect(graph!.status).toBe('ok');
-    expect(graph!.message).toContain('connected coverage (in/out)');
+    expect(graph!.message).toContain('Canonical entity inbound coverage');
     expect(graph!.message).toContain('100%');
   });
 
@@ -77,13 +76,13 @@ describe('graph_coverage counts inbound-connected entities (#4191)', () => {
     await sql`
       INSERT INTO pages (slug, source_id, type, title, compiled_truth, frontmatter, content_hash, created_at, updated_at)
       VALUES
-        ('bob-example', 'default', 'person', 'Bob', '', '{}', 'un1', now(), now()),
-        ('widget-co', 'default', 'company', 'Widget Co', '', '{}', 'un2', now(), now())
+        ('people/bob-example', 'default', 'person', 'Bob', '', '{}', 'un1', now(), now()),
+        ('companies/widget-co', 'default', 'company', 'Widget Co', '', '{}', 'un2', now(), now())
     `;
     const checks = await buildChecks(engine, [], null);
     const graph = checks.find((c) => c.name === 'graph_coverage');
     expect(graph!.status).toBe('warn');
-    expect(graph!.message).toContain('connected coverage (in/out) 0%');
+    expect(graph!.message).toContain('Canonical entity inbound coverage 0%');
     expect(graph!.message).toContain('target 70%');
   });
 });

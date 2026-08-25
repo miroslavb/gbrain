@@ -21,8 +21,12 @@ import * as os from 'node:os';
 import { withEnv } from './helpers/with-env.ts';
 import {
   logRerankFailure,
+  logRerankRecovery,
   readRecentRerankFailures,
+  readRecentRerankRecoveries,
   computeRerankAuditFilename,
+  computeRerankRecoveryFilename,
+  unrecoveredRerankFailures,
 } from '../src/core/rerank-audit.ts';
 
 /**
@@ -142,6 +146,33 @@ describe('CDX2-F22 — logRerankSuccess MUST NOT exist', () => {
   test('module does not export logRerankSuccess', async () => {
     const mod: any = await import('../src/core/rerank-audit.ts');
     expect(mod.logRerankSuccess).toBeUndefined();
+  });
+});
+
+describe('bounded recovery markers', () => {
+  test('round-trips on a separate rare-event ledger', async () => {
+    await withFreshAuditDir(() => {
+      logRerankRecovery({ model: 'local:reranker', doc_count: 30 });
+      expect(readRecentRerankRecoveries(7)).toMatchObject([
+        { model: 'local:reranker', doc_count: 30, severity: 'info' },
+      ]);
+      expect(computeRerankRecoveryFilename()).toMatch(/^rerank-recoveries-/);
+    });
+  });
+
+  test('requires later same-model recovery and sufficient capacity; budget never clears', () => {
+    const failures = [
+      { ts: '2026-08-25T10:00:00Z', model: 'm1', reason: 'network' as const, query_hash: 'a', doc_count: 10, error_summary: 'socket', severity: 'warn' as const },
+      { ts: '2026-08-25T10:00:00Z', model: 'm1', reason: 'network' as const, query_hash: 'b', doc_count: 30, error_summary: 'physical batch size exceeded', severity: 'warn' as const },
+      { ts: '2026-08-25T10:00:00Z', model: 'm1', reason: 'budget' as const, query_hash: 'c', doc_count: 10, error_summary: 'budget', severity: 'warn' as const },
+      { ts: '2026-08-25T10:00:00Z', model: 'm2', reason: 'auth' as const, query_hash: 'd', doc_count: 1, error_summary: 'key', severity: 'warn' as const },
+    ];
+    const recoveries = [
+      { ts: '2026-08-25T09:59:00Z', model: 'm1', doc_count: 50, severity: 'info' as const },
+      { ts: '2026-08-25T10:01:00Z', model: 'm1', doc_count: 20, severity: 'info' as const },
+      { ts: '2026-08-25T10:02:00Z', model: 'other', doc_count: 100, severity: 'info' as const },
+    ];
+    expect(unrecoveredRerankFailures(failures, recoveries).map(f => f.query_hash)).toEqual(['b', 'c', 'd']);
   });
 });
 

@@ -120,7 +120,7 @@ async function withPack<T>(packName: string | undefined, fn: () => Promise<T>): 
 
 async function seedEntities(n: number) {
   for (let i = 0; i < n; i++) {
-    await engine.putPage(`person-${i}`, {
+    await engine.putPage(`people/person-${i}`, {
       title: `Person ${i}`,
       type: 'person' as never,
       compiled_truth: 'body that is long enough to pass any minimum-length guards in the codebase',

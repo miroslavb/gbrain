@@ -23,7 +23,7 @@ beforeEach(async () => {
 
 const row = (slug: string, type: string, overrides: Partial<GraphHealthRow> = {}): GraphHealthRow => ({
   slug, type, link_count: 0, has_inbound: false, has_timeline: false,
-  has_entity_link: false, ...overrides,
+  has_entity_link: false, has_resolvable_entity_hint: false, ...overrides,
 });
 
 describe('curated graph health scope', () => {
@@ -31,12 +31,15 @@ describe('curated graph health scope', () => {
     const scope = summarizeGraphHealthScope([
       row('concepts/island', 'concept'),
       row('projects/linked', 'project', { link_count: 2, has_inbound: true, has_timeline: true }),
+      row('website/concepts/generated', 'concept'),
       row('sessions/claude/parent', 'conversation', { link_count: 1, has_inbound: true, has_entity_link: true }),
       row('sessions/claude/parent/segments/0001', 'conversation-segment'),
       row('raw/archive-note', 'note'),
     ]);
 
     expect(scope).toEqual({
+      typed_curated_pages: 3,
+      curated_excluded_pages: 1,
       curated_pages: 2,
       curated_link_endpoints: 2,
       curated_islands: 1,
@@ -45,6 +48,8 @@ describe('curated graph health scope', () => {
       session_pages: 2,
       session_islands: 1,
       session_parents: 1,
+      session_parents_entity_eligible: 1,
+      session_parents_entity_hinted: 0,
       session_parents_entity_linked: 1,
     });
   });
@@ -53,7 +58,8 @@ describe('curated graph health scope', () => {
     const graph_scope = summarizeGraphHealthScope([
       row('concepts/island', 'concept'),
       row('sessions/claude/linked', 'conversation', { link_count: 1, has_entity_link: true }),
-      row('sessions/claude/unlinked', 'conversation'),
+      row('sessions/claude/unlinked', 'conversation', { has_resolvable_entity_hint: true }),
+      row('sessions/claude/unresolved', 'conversation'),
     ]);
     const checks = buildGraphScopeChecks({ graph_scope } as BrainHealth);
 
@@ -62,7 +68,7 @@ describe('curated graph health scope', () => {
       .toContain('excluded from brain-score graph denominators');
     expect(checks.find((check) => check.name === 'parent_session_entity_coverage')).toMatchObject({
       status: 'warn',
-      message: 'Parent-session curated entity links: 1/2 (50%).',
+      message: 'Eligible parent-session curated links: 1/2 (50%); 3 raw parent session(s), 1 with independently resolvable project metadata.',
     });
   });
 
@@ -77,5 +83,23 @@ describe('curated graph health scope', () => {
 
     const health = await engine.getHealth();
     expect(health.graph_scope?.session_parents_entity_linked).toBe(1);
+  }, 60_000);
+
+  test('engine resolves project metadata independently without counting unresolved hints', async () => {
+    await engine.putPage('sessions/claude/hinted', {
+      type: 'conversation', title: 'hinted', compiled_truth: 'session', frontmatter: { project: 'gbrain' },
+    });
+    await engine.putPage('sessions/claude/unresolved', {
+      type: 'conversation', title: 'unresolved', compiled_truth: 'session', frontmatter: { project: 'root' },
+    });
+    await engine.putPage('projects/gbrain', {
+      type: 'project', title: 'GBrain', compiled_truth: 'project', frontmatter: {},
+    });
+
+    const health = await engine.getHealth();
+    expect(health.graph_scope?.session_parents).toBe(2);
+    expect(health.graph_scope?.session_parents_entity_eligible).toBe(1);
+    expect(health.graph_scope?.session_parents_entity_hinted).toBe(1);
+    expect(health.graph_scope?.session_parents_entity_linked).toBe(0);
   }, 60_000);
 });

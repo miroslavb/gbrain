@@ -4438,8 +4438,8 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
           ? 'auth'
           : resp.status === 429
           ? 'rate_limit'
-          : resp.status >= 500
-          ? 'network'
+          : /physical[- ]batch|input[_ -]?too[_ -]?large|payload[_ -]?too[_ -]?large|context[^\n]{0,40}too large/i.test(msg) ? 'payload_too_large'
+          : resp.status >= 500 ? 'network'
           : 'unknown';
       throw new RerankError(msg, reason, resp.status);
     }

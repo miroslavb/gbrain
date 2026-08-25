@@ -5,7 +5,7 @@
 //   - Per-kind halt rate > 10% → WARN with top-3 kinds in message
 //   - rollup_write_failures > 0 → WARN (when halt rates are clean)
 //   - Pre-v106 brain (no extract_rollup_7d table) → OK (best-effort)
-//   - JSON envelope stamps schema_version: 1
+//   - JSON envelope stamps schema_version: 2 with current per-source state
 //   - last_updated_at coerces to ISO string regardless of engine
 
 import { describe, expect, test, beforeAll, afterAll } from 'bun:test';
@@ -26,6 +26,7 @@ afterAll(async () => {
 
 async function clearRollup() {
   await engine.executeRaw('DELETE FROM extract_rollup_7d', []);
+  await engine.executeRaw('DELETE FROM extract_health_state', []);
 }
 
 describe('computeExtractHealthCheck — empty + happy paths', () => {
@@ -35,7 +36,7 @@ describe('computeExtractHealthCheck — empty + happy paths', () => {
     expect(check.name).toBe('extract_health');
     expect(check.status).toBe('ok');
     expect(check.message).toBe('no extractions in last 7 days');
-    expect((check.details as any)?.schema_version).toBe(1);
+    expect((check.details as any)?.schema_version).toBe(2);
     expect((check.details as any)?.kinds).toEqual([]);
   });
 
@@ -119,6 +120,25 @@ describe('computeExtractHealthCheck — WARN paths', () => {
     // rollup failures still in details for forensic recovery
     expect((check.details as any)?.rollup_write_failures_7d).toBe(3);
   });
+
+  test('historical high halt rate is OK after a later completed current state', async () => {
+    await clearRollup();
+    await engine.executeRaw(
+      `INSERT INTO extract_rollup_7d (kind, source_id, day, cost_usd, eval_pass_count, eval_fail_count, halt_count, round_completed_count, rollup_write_failures, updated_at)
+       VALUES ('facts.conversation', 'default', CURRENT_DATE, 0.50, 0, 0, 9, 1, 0, NOW())`,
+      [],
+    );
+    await engine.executeRaw(
+      `INSERT INTO extract_health_state
+         (kind, source_id, last_outcome, consecutive_halts, consecutive_completions)
+       VALUES ('facts.conversation', 'default', 'completed', 0, 1)`,
+      [],
+    );
+    const check = await computeExtractHealthCheck(engine);
+    expect(check.status).toBe('ok');
+    expect(check.message).toContain('historical high-halt');
+    expect((check.details as any).unresolved_high_halt_kinds).toEqual([]);
+  });
 });
 
 describe('computeExtractHealthCheck — 7-day window', () => {
@@ -136,11 +156,11 @@ describe('computeExtractHealthCheck — 7-day window', () => {
     expect(check.message).toBe('no extractions in last 7 days');
   });
 
-  test('rows exactly at day = CURRENT_DATE - 7 ARE included', async () => {
+  test('rows exactly at day = CURRENT_DATE - 6 ARE included (seven calendar dates)', async () => {
     await clearRollup();
     await engine.executeRaw(
       `INSERT INTO extract_rollup_7d (kind, source_id, day, cost_usd, eval_pass_count, eval_fail_count, halt_count, round_completed_count, rollup_write_failures, updated_at)
-       VALUES ('atoms', 'default', CURRENT_DATE - 7, 0.50, 5, 0, 0, 10, 0, NOW())`,
+       VALUES ('atoms', 'default', CURRENT_DATE - 6, 0.50, 5, 0, 0, 10, 0, NOW())`,
       [],
     );
     const check = await computeExtractHealthCheck(engine);

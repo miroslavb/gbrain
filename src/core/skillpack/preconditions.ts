@@ -14,6 +14,7 @@
  *   - `source:<id>`   — a source with that id exists.
  *   - `dir:<path>`    — a brain page-directory (e.g. `conversations/`) has
  *                       >=1 page.
+ *   - `type:<type>`   — at least one live page has that exact page type.
  *   - `config:<key>`  — a config key resolves to a non-empty value.
  *   - `pages:<n>`     — the brain has >= n total pages.
  *
@@ -31,7 +32,7 @@ export interface Precondition {
   /** The original `requires:` token, verbatim. */
   raw: string;
   /** Parsed precondition kind; `unknown` when the token isn't recognized. */
-  kind: 'source' | 'dir' | 'config' | 'pages' | 'unknown';
+  kind: 'source' | 'dir' | 'type' | 'config' | 'pages' | 'unknown';
   /** The `:arg` portion, when present (source id, dir path, config key, count). */
   arg?: string;
 }
@@ -56,6 +57,8 @@ export interface PreconditionContext {
   countPages(): Promise<number>;
   /** Pages filed under a given brain directory prefix (e.g. `conversations/`). */
   countPagesInDir(dir: string): Promise<number>;
+  /** Live pages with an exact page type. */
+  countPagesByType(type: string): Promise<number>;
   /** Non-default source ids that hold at least one page. */
   listSourceIds(): Promise<string[]>;
   /** Optional: pages for a specific source id. */
@@ -68,7 +71,7 @@ export interface PreconditionContext {
 // Parsing
 // ---------------------------------------------------------------------------
 
-const KNOWN_KINDS = new Set<Precondition['kind']>(['source', 'dir', 'config', 'pages']);
+const KNOWN_KINDS = new Set<Precondition['kind']>(['source', 'dir', 'type', 'config', 'pages']);
 
 /**
  * Parse a single `requires:` token into a {@link Precondition}. The token is
@@ -116,6 +119,8 @@ async function checkOne(req: Precondition, ctx: PreconditionContext): Promise<Pr
       return req.arg ? checkSpecificSource(req, ctx) : checkAnySource(req, ctx);
     case 'dir':
       return checkDir(req, ctx);
+    case 'type':
+      return checkType(req, ctx);
     case 'config':
       return checkConfig(req, ctx);
     case 'pages':
@@ -129,6 +134,28 @@ async function checkOne(req: Precondition, ctx: PreconditionContext): Promise<Pr
         hint: `unrecognized precondition '${req.raw}' — see skillpack/preconditions.ts vocabulary`,
       };
   }
+}
+
+async function checkType(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
+  const pageType = req.arg;
+  if (!pageType || !/^[a-z0-9][a-z0-9._-]*$/i.test(pageType)) {
+    return {
+      req,
+      met: false,
+      detail: `type: requires a page-type argument (e.g. type:conversation)`,
+      hint: `specify a page type: type:<page_type> — see skillpack/preconditions.ts vocabulary`,
+    };
+  }
+  const count = await ctx.countPagesByType(pageType);
+  const met = count > 0;
+  return {
+    req,
+    met,
+    detail: met ? `${count} live page(s) with type=${pageType}` : `no live pages with type=${pageType}`,
+    hint: met
+      ? `type=${pageType} populated (${count} live page(s))`
+      : `ingest at least one type=${pageType} page, then re-run`,
+  };
 }
 
 async function checkAnySource(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {

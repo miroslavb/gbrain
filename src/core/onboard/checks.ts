@@ -18,6 +18,7 @@
 import type { BrainEngine } from '../engine.ts';
 import type { RemediationStep } from '../remediation-step.ts';
 import { makeRemediationStep } from '../remediation-step.ts';
+import { canonicalEntitySqlPredicate } from '../graph-health-scope.ts';
 
 /** Shared shape returned by all four checks. */
 export interface OnboardCheckResult {
@@ -152,12 +153,13 @@ async function resolveNerInferenceCapability(
 export async function checkEntityLinkCoverage(
   engine: BrainEngine,
 ): Promise<OnboardCheckResult> {
+  const canonicalEntity = canonicalEntitySqlPredicate('p');
   // Total entity pages
   const totalEntities = await safeCount(
     engine,
-    `SELECT COUNT(*) AS count FROM pages
-       WHERE type IN ('person', 'company', 'organization', 'entity')
-         AND deleted_at IS NULL`,
+    `SELECT COUNT(*) AS count FROM pages p
+       WHERE ${canonicalEntity}
+         AND p.deleted_at IS NULL`,
   );
 
   if (totalEntities === 0) {
@@ -179,9 +181,13 @@ export async function checkEntityLinkCoverage(
     engine,
     `SELECT COUNT(*) AS count FROM (
        SELECT p.id FROM pages p ${sampleClause}
-       WHERE p.type IN ('person', 'company', 'organization', 'entity')
+       WHERE ${canonicalEntity}
          AND p.deleted_at IS NULL
-         AND EXISTS (SELECT 1 FROM links l WHERE l.to_page_id = p.id)
+         AND EXISTS (
+           SELECT 1 FROM links l
+           JOIN pages src ON src.id = l.from_page_id
+           WHERE l.to_page_id = p.id AND src.deleted_at IS NULL
+         )
      ) sub`,
   );
   const sampleSize = useSample
@@ -252,11 +258,12 @@ export async function checkEntityLinkCoverage(
 export async function checkTimelineCoverage(
   engine: BrainEngine,
 ): Promise<OnboardCheckResult> {
+  const canonicalEntity = canonicalEntitySqlPredicate('p');
   const totalEntities = await safeCount(
     engine,
-    `SELECT COUNT(*) AS count FROM pages
-       WHERE type IN ('person', 'company', 'organization', 'entity')
-         AND deleted_at IS NULL`,
+    `SELECT COUNT(*) AS count FROM pages p
+       WHERE ${canonicalEntity}
+         AND p.deleted_at IS NULL`,
   );
 
   if (totalEntities === 0) {
@@ -276,7 +283,7 @@ export async function checkTimelineCoverage(
     engine,
     `SELECT COUNT(*) AS count FROM (
        SELECT p.id FROM pages p ${sampleClause}
-       WHERE p.type IN ('person', 'company', 'organization', 'entity')
+       WHERE ${canonicalEntity}
          AND p.deleted_at IS NULL
          AND EXISTS (SELECT 1 FROM timeline_entries t WHERE t.page_id = p.id)
      ) sub`,

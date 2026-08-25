@@ -254,6 +254,18 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   v141 repairs legacy `*_key` constraints and retains the earliest duplicate.
 - **Private documents:** ordinary search excludes `docs/inbox/`; uploaded
   documents are read only through the caller-aware document ACL surface.
+- **Operational-health semantics (2026-08-25):** graph scoring uses canonical
+  slug+type contours; session-parent coverage keeps the raw archive denominator
+  visible but scores only independently eligible parents; entity coverage uses
+  live inbound endpoints. Reranker failures and extract rollups are immutable
+  history: later recovery is append-only and source/model scoped. Schema v146
+  stores extraction current state separately from seven-calendar-day rollups.
+  Oversized/flagged inventories stay visible and warn only on unacknowledged
+  actionable rows. Home/worktree detection must use Git's resolved worktree,
+  never mere `.git` existence. The legacy facts-fence migration writes the
+  canonical markdown body through to `pages.compiled_truth` before publishing
+  row ownership; its no-embed projection intentionally leaves changed chunks
+  for a bounded stale-embedding pass.
 
 - **Configure:** [`docs/ENGINES.md`](./docs/ENGINES.md),
   [`docs/guides/live-sync.md`](./docs/guides/live-sync.md),

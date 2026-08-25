@@ -218,6 +218,18 @@ describe('gateway.rerank() — error classification', () => {
     }
   });
 
+  test('llama physical-batch HTTP 500 → payload_too_large', async () => {
+    __setRerankTransportForTests(async () =>
+      new Response('the request exceeds the physical batch size', { status: 500 }));
+    try {
+      await rerank({ query: 'q', documents: ['d'] });
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(RerankError);
+      expect((err as RerankError).reason).toBe('payload_too_large');
+    }
+  });
+
   test('400 (non-classified) → unknown', async () => {
     __setRerankTransportForTests(async () => new Response('Bad request', { status: 400 }));
     try {
