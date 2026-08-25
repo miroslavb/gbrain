@@ -73,7 +73,7 @@ test/cycle-drain-renewal.test.ts	drain-loop wiring (structural — the shape gua
 test/cycle-pack-gating.test.ts	#2117: pack-gated skip summaries are actionable	2	readFileSync
 test/cycle-pack-gating.test.ts	v0.41 T9 R-GATE: NEEDS_LOCK_PHASES contract (source-shape)	2	readFileSync
 test/cycle-pack-gating.test.ts	v0.41 T9 R-GATE: dispatch result envelope	2	readFileSync
-test/cycle-pack-gating.test.ts	v0.41 T9 R-GATE: orchestrator dispatch wires the pack-gate	5	readFileSync
+test/cycle-pack-gating.test.ts	v0.41 T9 R-GATE: orchestrator dispatch wires the pack-gate	6	readFileSync
 test/cycle-pack-gating.test.ts	v0.41 T9 R-GATE: pre-existing 17 core phases always run	3	readFileSync
 test/cycle-patterns-deadline-budget.test.ts	deadline plumbing wiring (structural)	7	readFileSync
 test/cycle-patterns.test.ts	patterns phase wiring	9	readFileSync

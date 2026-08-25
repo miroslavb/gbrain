@@ -218,6 +218,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Drain containment:** `cycle.propose_takes.enabled` is default-off; only an
   explicit true value or trusted one-shot `--once` runs it. Keep atom auto-drain
   and conversation-facts bulk drain disabled until bounded quality canaries pass.
+  Pack-gated cycle phases must resolve the active pack through the DB-aware local
+  engine loader; a stale file-plane `schema_pack` must never shadow a brain-wide
+  DB-plane activation in cycle, doctor, or autopilot decisions. Preserve the
+  conflicting DB/file regression in `test/cycle-pack-gating.test.ts`.
 - **Atom population containment:** pack-extractable `note` and `conversation`
   pages require frontmatter `atom_extract: true`; `atom_extract: false` denies
   any otherwise extractable page. Discovery, backlog/doctor, drain, and

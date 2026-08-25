@@ -22,10 +22,18 @@
 // still passing happy-path runtime tests.
 
 import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { ALL_PHASES, PHASE_SCOPE, type CyclePhase } from '../src/core/cycle.ts';
+import {
+  ALL_PHASES,
+  PHASE_SCOPE,
+  packDeclaresPhase,
+  type CyclePhase,
+} from '../src/core/cycle.ts';
+import type { BrainEngine } from '../src/core/engine.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cycleTsSrc = readFileSync(
@@ -131,6 +139,32 @@ describe('v0.41 T9 R-GATE: orchestrator dispatch wires the pack-gate', () => {
     const helperBody = cycleTsSrc.slice(helperStart, helperEnd);
     expect(helperBody).toContain('catch');
     expect(helperBody).toContain('return false');
+  });
+
+  test('packDeclaresPhase resolves the DB-plane pack ahead of file config', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'gbrain-cycle-pack-gate-'));
+    mkdirSync(join(home, '.gbrain'), { recursive: true });
+    writeFileSync(
+      join(home, '.gbrain', 'config.json'),
+      JSON.stringify({ engine: 'pglite', schema_pack: 'gbrain-base-v2' }),
+      'utf8',
+    );
+
+    const engine = {
+      getConfig: async (key: string) => key === 'schema_pack' ? 'gbrain-creator' : null,
+    } as unknown as BrainEngine;
+
+    try {
+      await withEnv(
+        { GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined },
+        async () => {
+          expect(await packDeclaresPhase(engine, 'extract_atoms')).toBe(true);
+          expect(await packDeclaresPhase(engine, 'synthesize_concepts')).toBe(true);
+        },
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

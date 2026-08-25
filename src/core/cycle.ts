@@ -1230,10 +1230,9 @@ export async function packDeclaresPhase(
   phase: CyclePhase,
 ): Promise<boolean> {
   try {
-    const { loadActivePack } = await import('./schema-pack/load-active.ts');
-    const { loadConfig } = await import('./config.ts');
-    const cfg = loadConfig();
-    const resolved = await loadActivePack({ cfg, remote: false });
+    const { loadActivePackForLocalEngine } = await import('./schema-pack/best-effort.ts');
+    const resolved = await loadActivePackForLocalEngine(engine);
+    if (!resolved) return false;
     const phases = resolved.manifest.phases ?? [];
     return phases.includes(phase);
   } catch {
