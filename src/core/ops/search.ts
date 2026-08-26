@@ -323,7 +323,12 @@ const query: Operation = {
   },
   handler: async (ctx, p) => {
     const startedAt = Date.now();
-    const expand = p.expand !== false;
+    // Leave UNDEFINED when the caller did not specify, so the documented
+    // resolution chain (per-call SearchOpts -> per-key config -> MODE_BUNDLES)
+    // actually applies. Defaulting to `true` here forced expansion on for every
+    // query call, making the `search.expansion` config key and every mode bundle
+    // that sets expansion:false a silent no-op on the primary retrieval path.
+    const expand = p.expand === undefined ? undefined : p.expand !== false;
     const detail = (p.detail as 'low' | 'medium' | 'high') || undefined;
     const queryText = p.query as string | undefined;
     // #3985: validated multi-type filter (text path; the image-similarity
@@ -403,7 +408,9 @@ const query: Operation = {
       offset: (p.offset as number) || 0,
       excludePrivate,
       expansion: expand,
-      expandFn: expand ? expandQuery : undefined,
+      // Supply the expander unless explicitly disabled; hybridSearch gates the
+      // actual firing on resolvedMode.expansion (see `expansionAllowed`).
+      expandFn: expand === false ? undefined : expandQuery,
       // T4/D5 — per-call mode (local/trusted only; remote ignored).
       ...((): { mode?: string } => { const m = resolvePerCallMode(ctx, p.mode); return m ? { mode: m } : {}; })(),
       detail,
@@ -562,7 +569,7 @@ const query: Operation = {
           meta,
           latency_ms,
           remote: ctx.remote ?? false,
-          expand_enabled: expand,
+          expand_enabled: expand ?? null, // null = resolved from config/mode
           detail: detail ?? null,
           job_id: ctx.jobId ?? null,
           subagent_id: ctx.subagentId ?? null,
