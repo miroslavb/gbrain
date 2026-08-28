@@ -1005,7 +1005,14 @@ class ProposeTakesPhase extends BaseCyclePhase {
     const dryRun = ctx.dryRun || opts.dryRun === true;
     const proposalRunId = `propose-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}-${randomUUID().slice(0, 8)}`;
 
-    const modelId = opts.model ?? getChatModel();
+    // Per-phase model, matching the patterns/synthesize/extract_atoms pattern.
+    // Before this, propose_takes was the only cycle phase with NO per-phase key:
+    // it took the global `chat_model`, so routing it to a cheap lane meant
+    // moving every other phase with it. Precedence: explicit opts.model >
+    // models.dream.propose_takes > global chat_model (unchanged default).
+    const configuredProposeModel = await engine.getConfig?.('models.dream.propose_takes')
+      .catch(() => null) ?? null;
+    const modelId = opts.model ?? configuredProposeModel ?? getChatModel();
 
     // With the default (gateway) extractor, skip cheaply when the resolved
     // model's provider can't run — same probe semantics as patterns.ts /
