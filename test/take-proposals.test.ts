@@ -22,7 +22,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import {
@@ -55,7 +55,10 @@ async function insertProposal(opts: {
     { sourceId },
   );
   if (sourceId === 'default') {
-    mkdirSync(join(repo, 'companies'), { recursive: true });
+    // Create the slug's OWN parent dir, not a hardcoded `companies/`:
+    // upstream's wave-g stranded-claim test seeds people/strand-example, which
+    // ENOENT'd against the hardcoded path.
+    mkdirSync(dirname(join(repo, `${opts.slug}.md`)), { recursive: true });
     writeFileSync(join(repo, `${opts.slug}.md`), `# ${opts.slug}\n\n${pageBody}\n`, 'utf-8');
   }
   const evidenceSpan = opts.claim;
@@ -180,6 +183,37 @@ describe('acceptProposal', () => {
     expect(row.acted_at).not.toBeNull();
   });
 
+  test('#4480 TOCTOU: concurrent accepts — exactly one wins, one fence write, loser gets not_pending', async () => {
+    const id = await insertProposal({
+      slug: 'companies/acme-example', claim: 'Acme signs exactly one concurrent deal', kind: 'take',
+    });
+    // Pre-fix (fence write first, status flip after, rowcount ignored) BOTH
+    // callers passed the pending check, BOTH appended the take to the .md,
+    // and BOTH reported success. Post-fix the claim CAS runs first, so only
+    // the winner touches the fence.
+    const results = await Promise.allSettled([
+      acceptProposal({ engine, brainDir: repo, sourceId: 'default', actedBy: 'racer-a' }, id),
+      acceptProposal({ engine, brainDir: repo, sourceId: 'default', actedBy: 'racer-b' }, id),
+    ]);
+    const wins = results.filter((r) => r.status === 'fulfilled');
+    const losses = results.filter((r) => r.status === 'rejected');
+    expect(wins.length).toBe(1);
+    expect(losses.length).toBe(1);
+    const lossReason = (losses[0] as PromiseRejectedResult).reason;
+    expect(lossReason).toBeInstanceOf(TakeProposalError);
+    expect((lossReason as TakeProposalError).code).toBe('not_pending');
+
+    // Exactly ONE copy of the claim in the markdown fence.
+    const fence = parseTakesFence(readFileSync(join(repo, 'companies/acme-example.md'), 'utf-8'));
+    const copies = fence.takes.filter((t) => t.claim === 'Acme signs exactly one concurrent deal');
+    expect(copies.length).toBe(1);
+
+    // Row is stamped once, with the winner's identity + promoted_row_num.
+    const row = await proposalRow(id);
+    expect(row.status).toBe('accepted');
+    expect(row.promoted_row_num).not.toBeNull();
+  });
+
   test('double-accept refuses with not_pending', async () => {
     const id = await insertProposal({ slug: 'companies/widget-co', claim: 'Widget-co raises fund-a next year' });
     await acceptProposal({ engine, brainDir: repo, sourceId: 'default' }, id);
@@ -191,40 +225,21 @@ describe('acceptProposal', () => {
     }
   });
 
-  test('fault after canonical write leaves proposal pending and retry converges without a duplicate take', async () => {
-    const claim = 'Acme keeps the synthetic fault-test commitment through Q4';
-    const id = await insertProposal({
-      slug: 'companies/acme-example', claim, kind: 'bet', weight: 0.75,
-    });
-
-    await expect(acceptProposal(
-      {
-        engine,
-        brainDir: repo,
-        sourceId: 'default',
-        actedBy: 'test:fault-injection',
-        afterCanonicalWrite: async () => { throw new Error('synthetic crash after canonical write'); },
-      },
-      id,
-    )).rejects.toThrow('synthetic crash after canonical write');
-
-    // The canonical write is durable, but the queue row was not falsely
-    // acknowledged. A restarted consumer therefore sees it as retryable.
-    expect((await proposalRow(id)).status).toBe('pending');
-    let takes = await engine.listTakes({ page_slug: 'companies/acme-example', active: true });
-    expect(takes.filter((take) => take.claim === claim)).toHaveLength(1);
-
-    const retry = await acceptProposal(
-      { engine, brainDir: repo, sourceId: 'default', actedBy: 'test:retry' },
-      id,
-    );
-    expect((await proposalRow(id))).toMatchObject({
-      status: 'accepted',
-      promoted_row_num: retry.rowNum,
-      acted_by: 'test:retry',
-    });
-    takes = await engine.listTakes({ page_slug: 'companies/acme-example', active: true });
-    expect(takes.filter((take) => take.claim === claim)).toHaveLength(1);
+  test('wave-g: stranded claim (accepted, no promoted take) surfaces the repair SQL on retry', async () => {
+    // The crash-between-CAS-and-fence-write shape (#4480 residual): the row
+    // is status='accepted' with promoted_row_num NULL — invisible in the
+    // pending list, so the retry path must name it and print the repair.
+    const id = await insertProposal({ slug: 'people/strand-example', claim: 'stranded claim', status: 'accepted' });
+    try {
+      await acceptProposal({ engine, brainDir: repo }, id);
+      throw new Error('expected acceptProposal to throw for the stranded row');
+    } catch (e) {
+      expect(e).toBeInstanceOf(TakeProposalError);
+      expect((e as TakeProposalError).code).toBe('not_pending');
+      expect((e as Error).message).toContain('stranded');
+      expect((e as Error).message).toContain(`SET status='pending'`);
+      expect((e as Error).message).toContain(String(id));
+    }
   });
 
   test('source scope: accepting an out-of-scope proposal reads as not_found', async () => {
@@ -277,6 +292,20 @@ describe('rejectProposal', () => {
       expect((err as TakeProposalError).code).toBe('not_pending');
     }
   });
+
+  test('#4480 TOCTOU: concurrent rejects — exactly one wins the CAS', async () => {
+    const id = await insertProposal({ slug: 'companies/widget-co', claim: 'reject: raced claim' });
+    const results = await Promise.allSettled([
+      rejectProposal({ engine, sourceId: 'default', actedBy: 'racer-a' }, id),
+      rejectProposal({ engine, sourceId: 'default', actedBy: 'racer-b' }, id),
+    ]);
+    // Pre-fix both resolved (the loser's no-op UPDATE went unchecked).
+    expect(results.filter((r) => r.status === 'fulfilled').length).toBe(1);
+    const loss = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect((loss.reason as TakeProposalError).code).toBe('not_pending');
+    const row = await proposalRow(id);
+    expect(row.status).toBe('rejected');
+  });
 });
 
 describe('coerceProposalKind', () => {
@@ -318,5 +347,44 @@ describe('CLI dispatcher (#2411 no-fallthrough)', () => {
     const out = await captureStdout(() => runTakes(engine, ['propose', '--reject', String(id)]));
     expect(out).toContain(`Rejected proposal #${id}`);
     expect((await proposalRow(id)).status).toBe('rejected');
+  });
+  // Fork: the post-canonical-write fault contract. Still valid under
+  // upstream's claim-first CAS — afterCanonicalWrite now throws inside the
+  // compensation window, so the claim is released and the row goes back to
+  // 'pending', which is exactly what this asserts.
+  test('fault after canonical write leaves proposal pending and retry converges without a duplicate take', async () => {
+    const claim = 'Acme keeps the synthetic fault-test commitment through Q4';
+    const id = await insertProposal({
+      slug: 'companies/acme-example', claim, kind: 'bet', weight: 0.75,
+    });
+
+    await expect(acceptProposal(
+      {
+        engine,
+        brainDir: repo,
+        sourceId: 'default',
+        actedBy: 'test:fault-injection',
+        afterCanonicalWrite: async () => { throw new Error('synthetic crash after canonical write'); },
+      },
+      id,
+    )).rejects.toThrow('synthetic crash after canonical write');
+
+    // The canonical write is durable, but the queue row was not falsely
+    // acknowledged. A restarted consumer therefore sees it as retryable.
+    expect((await proposalRow(id)).status).toBe('pending');
+    let takes = await engine.listTakes({ page_slug: 'companies/acme-example', active: true });
+    expect(takes.filter((take) => take.claim === claim)).toHaveLength(1);
+
+    const retry = await acceptProposal(
+      { engine, brainDir: repo, sourceId: 'default', actedBy: 'test:retry' },
+      id,
+    );
+    expect((await proposalRow(id))).toMatchObject({
+      status: 'accepted',
+      promoted_row_num: retry.rowNum,
+      acted_by: 'test:retry',
+    });
+    takes = await engine.listTakes({ page_slug: 'companies/acme-example', active: true });
+    expect(takes.filter((take) => take.claim === claim)).toHaveLength(1);
   });
 });

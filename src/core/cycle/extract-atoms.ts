@@ -57,6 +57,7 @@ import { chat as gatewayChat, withBudgetTracker, isAvailable } from '../ai/gatew
 import { createGlobalLlmHaltTracker, haltedClassOf, type GlobalLlmErrorClass } from '../ai/errors.ts';
 import { importFromContent } from '../import-file.ts';
 import { serializeMarkdown } from '../markdown.ts';
+import { truncateUtf8 } from '../text-safe.ts';
 import {
   BudgetExhausted,
   BudgetTracker,
@@ -78,12 +79,21 @@ import {
   type AtomSemanticBatchResult,
   type AtomSemanticValidator,
 } from './atom-safety.ts';
+import { resolveTierDefault } from '../model-config.ts';
 
 const DEFAULT_BUDGET_USD = 0.3;
-const DEFAULT_EXTRACT_ATOMS_MODEL = 'anthropic:claude-haiku-4-5';
+// Fork's DEFAULT_EXTRACT_ATOMS_MODEL is intentionally gone: upstream #3813
+// replaces its only use with a key-aware tier default, so an install with no
+// Anthropic key no longer routes atom extraction to an unservable provider.
 const DEFAULT_ATOM_VALIDATOR_MODEL = 'anthropic:claude-haiku-4-5';
 const DEFAULT_ATOM_VALIDATOR_TIMEOUT_MS = 30_000;
 const MAX_DRY_RUN_WORK_ITEMS = 10;
+// #4529 + #4540: per-item extractor caps, overridable via
+// cycle.extract_atoms.* config keys (max_input_chars — with the #4529
+// legacy alias max_source_chars — plus max_output_tokens / pacing_ms).
+// Exported so tests pin the defaults instead of re-hardcoding the literals.
+export const DEFAULT_EXTRACT_MAX_INPUT_CHARS = 50_000;
+export const DEFAULT_EXTRACT_MAX_OUTPUT_TOKENS = 4096;
 
 /**
  * gbrain#4148: consecutive same-content failures of a content-deterministic
@@ -362,6 +372,7 @@ export async function discoverExtractablePages(
   engine: BrainEngine,
   sourceId: string,
   affectedSlugs?: string[],
+  limit: number = PAGE_DISCOVERY_BUDGET,
 ): Promise<DiscoveredPage[]> {
   const hasFilter = Array.isArray(affectedSlugs) && affectedSlugs.length > 0;
   const sql = `
@@ -395,7 +406,7 @@ export async function discoverExtractablePages(
     sourceId,
     await resolveExtractableTypes(),
     MIN_PAGE_CHARS_FOR_EXTRACTION,
-    PAGE_DISCOVERY_BUDGET,
+    limit,
   ];
   if (hasFilter) params.push(affectedSlugs);
 
@@ -487,6 +498,19 @@ export async function countExtractAtomsBacklog(
     console.error(`[extract_atoms] backlog count failed: ${msg}`);
     return null;
   }
+}
+
+async function resolvePageDiscoveryLimit(engine: BrainEngine): Promise<number> {
+  try {
+    const configured = await engine.getConfig('cycle.extract_atoms.page_discovery_budget');
+    if (configured) {
+      const n = Number(configured);
+      // Ceiling: discovery selects full compiled_truth bodies per row, so an
+      // oversized budget materializes that many pages in one result set.
+      if (Number.isFinite(n) && n > 0) return Math.min(Math.floor(n), 10_000);
+    }
+  } catch { /* keep default */ }
+  return PAGE_DISCOVERY_BUDGET;
 }
 
 /**
@@ -610,7 +634,12 @@ export async function runPhaseExtractAtoms(
   if (opts._pages !== undefined) {
     pages = opts._pages;
   } else {
-    pages = await discoverExtractablePages(engine, sourceId, opts.affectedSlugs);
+    pages = await discoverExtractablePages(
+      engine,
+      sourceId,
+      opts.affectedSlugs,
+      await resolvePageDiscoveryLimit(engine),
+    );
   }
 
   // 2. Apply transcript-side source-hash idempotency in ONE batch query
@@ -765,13 +794,25 @@ export async function runPhaseExtractAtoms(
   const validatorActualRoutes = new Set<string>();
   let estimatedSpendUsd = 0;
   let budgetExhausted = false;
-  let extractModel = DEFAULT_EXTRACT_ATOMS_MODEL;
+  // #3813: key-aware tier default, not a hardcoded Anthropic model — an
+  // OPENAI_API_KEY-only install must not route to an unservable provider.
+  let extractModel = resolveTierDefault('utility');
   let validatorModel = DEFAULT_ATOM_VALIDATOR_MODEL;
   let budgetCap = DEFAULT_BUDGET_USD;
   let sensitivePatternConfig = parseConfiguredSensitivePatterns(null);
+  // #4529/#4540: the per-item input/output caps were hardcoded (slice(0, 50_000) +
+  // maxTokens: 4096). Operators on small-context or thinking models need to
+  // shrink/grow both without a code change; defaults are unchanged.
+  let maxInputChars = DEFAULT_EXTRACT_MAX_INPUT_CHARS;
+  let maxOutputTokens = DEFAULT_EXTRACT_MAX_OUTPUT_TOKENS;
+  let pacingMs = 0;
   try {
     const configuredModel = await engine.getConfig('models.dream.extract_atoms');
     if (configuredModel) extractModel = configuredModel;
+    // `models.dream.extract_atoms` is DB-plane/operator-selected config.
+    // The gateway no longer has a model allowlist/extended-model registry:
+    // configured per-task chat models resolve like `models.default`, so local
+    // user-managed providers (e.g. Ollama tags) need no registration here.
     const configuredValidatorModel = await engine.getConfig('models.dream.extract_atoms_validator');
     if (configuredValidatorModel) validatorModel = configuredValidatorModel;
     sensitivePatternConfig = parseConfiguredSensitivePatterns(
@@ -782,8 +823,38 @@ export async function runPhaseExtractAtoms(
       const n = Number(configuredBudget);
       if (Number.isFinite(n) && n > 0) budgetCap = n;
     }
+    // #4529: legacy input-cap key (its own floor of 500 chars, as landed).
+    // Read FIRST so the newer #4540 max_input_chars key below wins when
+    // both are set — they name the same knob.
+    const configuredMaxSourceChars = await engine.getConfig('cycle.extract_atoms.max_source_chars');
+    if (configuredMaxSourceChars) {
+      const n = Number(configuredMaxSourceChars);
+      if (Number.isFinite(n) && n >= 500) maxInputChars = Math.floor(n);
+    }
+    const configuredMaxInput = await engine.getConfig('cycle.extract_atoms.max_input_chars');
+    if (configuredMaxInput) {
+      const n = Number(configuredMaxInput);
+      // Floor of 1000 chars: below that the extractor sees a fragment too
+      // small to yield atoms and every page burns budget for nothing.
+      if (Number.isFinite(n) && n >= 1_000) maxInputChars = Math.floor(n);
+    }
+    const configuredMaxOutput = await engine.getConfig('cycle.extract_atoms.max_output_tokens');
+    if (configuredMaxOutput) {
+      const n = Number(configuredMaxOutput);
+      // Floor of 256 tokens mirrors dream.triage.max_tokens: a smaller cap
+      // truncates every response into the malformed-output failure path.
+      if (Number.isFinite(n) && n >= 256) maxOutputTokens = Math.floor(n);
+    }
+    // Optional per-item pacing sleep (ms) so a large backlog doesn't hammer
+    // a local/self-hosted provider back-to-back. 0 (default) = no pacing.
+    const configuredPacing = await engine.getConfig('cycle.extract_atoms.pacing_ms');
+    if (configuredPacing) {
+      const n = Number(configuredPacing);
+      if (Number.isFinite(n) && n > 0) pacingMs = Math.min(60_000, Math.floor(n));
+    }
   } catch {
-    // Keep safe defaults: Haiku + $0.30.
+    // Keep safe defaults on any config-read failure: key-aware utility-tier
+    // model, $0.30 cap, default max_source_chars.
   }
   // A cost cap is only meaningful when BOTH calls the tracker covers can be
   // priced. #4312 operator overrides are part of that decision and are also
@@ -864,6 +935,11 @@ export async function runPhaseExtractAtoms(
   // chat call resets the streak.
   const llmHalt = createGlobalLlmHaltTracker();
   let abortedGlobalError: GlobalLlmErrorClass | null = null;
+  // Rollup/doctor-health signal only. `failures` (below) stays inclusive of
+  // transient entries for CLI/receipt reporting; this counts everything
+  // EXCEPT the ones TRANSIENT_EXTRACT_ERROR_RE + the rate_limit abort class
+  // say are "retryable, never counted" — see that regex's doc comment.
+  let hardFailureCount = 0;
 
   /** Stamp the zero-yield/complete tombstone (hash-keyed; edits re-eligibilize). */
   async function stampAtomsScanHash(item: { slug: string; contentHash: string }): Promise<void> {
@@ -956,10 +1032,12 @@ export async function runPhaseExtractAtoms(
         messages: [
           {
             role: 'user',
-            content: `Source: ${originLabel}\n\n---\n\n${item.content.slice(0, 50_000)}`,
+            // #4529/#4540: configurable input cap, cut UTF-8-safely (a bare
+            // .slice() can split a surrogate pair at the boundary).
+            content: `Source: ${originLabel}\n\n---\n\n${truncateUtf8(item.content, maxInputChars)}`,
           },
         ],
-        maxTokens: 4096,
+        maxTokens: maxOutputTokens,
       });
       extractionActualModels.add(result.model);
       extractionActualRoutes.add(result.providerId);
@@ -968,6 +1046,9 @@ export async function runPhaseExtractAtoms(
       // actual refresh rate so this is cheap when calls are fast.
       await maybeYield();
       llmHalt.reset();
+      // #4540: optional per-item pacing between successful LLM calls.
+      // setTimeout (not setImmediate) so the lock-refresh interval fires.
+      if (pacingMs > 0) await new Promise<void>((r) => setTimeout(r, pacingMs));
 
       estimatedSpendUsd = budgetTracker.totalSpent;
 
@@ -976,6 +1057,7 @@ export async function runPhaseExtractAtoms(
       const parseOutcome = parseAtomsOutcome(result.text, item.content);
       if (!parseOutcome.ok) {
         malformedOutputs++;
+        hardFailureCount++;
         const failCount = await recordPageFailureCount(item);
         failures.push({
           source: originLabel,
@@ -1225,6 +1307,7 @@ export async function runPhaseExtractAtoms(
       const decision = llmHalt.observe(err);
       if (decision !== 'continue') {
         abortedGlobalError = haltedClassOf(decision);
+        if (abortedGlobalError !== 'rate_limit') hardFailureCount++;
         failures.push({
           source: originLabel,
           error: `aborting phase: ${llmHalt.note()} (${message})`,
@@ -1233,7 +1316,10 @@ export async function runPhaseExtractAtoms(
       }
       const transient =
         llmHalt.lastClass() === 'rate_limit' || TRANSIENT_EXTRACT_ERROR_RE.test(message);
-      if (!transient) await recordPageFailureCount(item);
+      if (!transient) {
+        await recordPageFailureCount(item);
+        hardFailureCount++;
+      }
       failures.push({
         source: originLabel,
         error: transient ? `${message} [transient — retried next run]` : message,
@@ -1274,12 +1360,18 @@ export async function runPhaseExtractAtoms(
     }
   }
   if (!opts.dryRun) {
+    // gbrain#4148 / TRANSIENT_EXTRACT_ERROR_RE: transient provider/infra
+    // failures (rate limits, timeouts, 5xx, network) are "retryable, never
+    // counted" by design — count only hardFailureCount here, not
+    // failures.length (which stays inclusive, for CLI/receipt reporting),
+    // so a heavy run that only ever hit transient errors doesn't trip the
+    // doctor extract_health halt-rate warning.
     await upsertExtractRollup(engine, {
       kind: 'atoms',
       source_id: sourceId,
       cost_delta: estimatedSpendUsd,
-      round_completed_delta: failures.length === 0 ? 1 : 0,
-      halt_delta: failures.length > 0 ? 1 : 0,
+      round_completed_delta: hardFailureCount === 0 ? 1 : 0,
+      halt_delta: hardFailureCount > 0 ? 1 : 0,
     });
   }
 

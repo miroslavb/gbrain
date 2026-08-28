@@ -673,11 +673,16 @@ export async function computeExtractHealthCheck(
       eval_fail_count: number;
       halt_count: number;
       round_completed_count: number;
+      expected_limit_count: number;
       rollup_write_failures: number;
       last_updated_at: Date | string | null;
     };
 
-    const rows = await engine.executeRaw<RollupRow>(
+    // #4482: expected_limit_count (migration v141) counts runs that stopped
+    // at an EXPECTED budget/deadline cap — successful partial progress, not
+    // failures. Pre-v141 brains lack the column; retry without it (caps read
+    // as 0, i.e. "unknown" — old conflated halt rows keep today's semantics).
+    const rollupQuery = (withExpected: boolean) =>
       `SELECT
          kind, source_id,
          SUM(cost_usd) AS cost_7d_usd,
@@ -685,14 +690,25 @@ export async function computeExtractHealthCheck(
          SUM(eval_fail_count) AS eval_fail_count,
          SUM(halt_count) AS halt_count,
          SUM(round_completed_count) AS round_completed_count,
+         ${withExpected ? 'SUM(expected_limit_count)' : '0'} AS expected_limit_count,
          SUM(rollup_write_failures) AS rollup_write_failures,
          MAX(updated_at) AS last_updated_at
        FROM extract_rollup_7d
        WHERE day >= CURRENT_DATE - 6
        GROUP BY kind, source_id
-       ORDER BY kind, source_id`,
-      [],
-    );
+       ORDER BY kind, source_id`;
+    // Fork: grouped per (kind, source_id) over SEVEN calendar days
+    // (CURRENT_DATE - 6 inclusive of today) so one source's stall cannot be
+    // averaged away by its siblings. Upstream's pre-v141 column fallback is
+    // kept as-is: the column is this fork's v147.
+    let rows: RollupRow[];
+    try {
+      rows = await engine.executeRaw<RollupRow>(rollupQuery(true), []);
+    } catch (err) {
+      const msg = (err as Error).message || String(err);
+      if (!/expected_limit_count/i.test(msg)) throw err;
+      rows = await engine.executeRaw<RollupRow>(rollupQuery(false), []);
+    }
 
     if (rows.length === 0) {
       return {
@@ -713,6 +729,7 @@ export async function computeExtractHealthCheck(
       eval_fail_count: number;
       halt_count: number;
       round_completed_count: number;
+      expected_limit_count: number;
       halt_rate: number;
       last_updated_at: string | null;
     };
@@ -722,7 +739,12 @@ export async function computeExtractHealthCheck(
     const kinds: KindAggregate[] = [...byKind.entries()].map(([kind, sourceRows]) => {
       const halts = sourceRows.reduce((n, r) => n + (Number(r.halt_count) || 0), 0);
       const completed = sourceRows.reduce((n, r) => n + (Number(r.round_completed_count) || 0), 0);
-      const total = halts + completed;
+      const expectedLimits = sourceRows.reduce((n, r) => n + (Number(r.expected_limit_count) || 0), 0);
+      // #4482: cap stops join the DENOMINATOR (they are runs, and successful
+      // ones) but not the numerator — the failure rate measures failures,
+      // not self-imposed capacity limits. A backlog-bigger-than-budget brain
+      // whose every run banks progress and stops at the cap reads 0%.
+      const total = halts + completed + expectedLimits;
       const latest = sourceRows
         .map(r => r.last_updated_at)
         .filter((v): v is Date | string => v != null)
@@ -735,6 +757,7 @@ export async function computeExtractHealthCheck(
         eval_fail_count: sourceRows.reduce((n, r) => n + (Number(r.eval_fail_count) || 0), 0),
         halt_count: halts,
         round_completed_count: completed,
+        expected_limit_count: expectedLimits,
         halt_rate: total > 0 ? halts / total : 0,
         last_updated_at: latest?.toISOString() ?? null,
       };
@@ -808,12 +831,19 @@ export async function computeExtractHealthCheck(
       };
     }
 
+    // #4482: cap-hits stay observable as a capacity signal (backlog bigger
+    // than the per-run budget — will drain over future runs), without being
+    // conflated with the failure-rate warning above.
+    const totalExpectedLimits = kinds.reduce((acc, k) => acc + k.expected_limit_count, 0);
+    const capNote = totalExpectedLimits > 0
+      ? `; ${totalExpectedLimits} run(s) stopped at expected budget/deadline caps (capacity, not failures)`
+      : '';
     return {
       name,
       status: 'ok',
       message: highHaltKinds.length > 0
-        ? `${kinds.length} kind(s) tracked; ${highHaltKinds.length} historical high-halt kind(s) recovered by later completed current state`
-        : `${kinds.length} kind(s) tracked, all halt rates below 10%`,
+        ? `${kinds.length} kind(s) tracked; ${highHaltKinds.length} historical high-halt kind(s) recovered by later completed current state${capNote}`
+        : `${kinds.length} kind(s) tracked, all halt rates below 10%${capNote}`,
       details: {
         schema_version: 2,
         kinds,

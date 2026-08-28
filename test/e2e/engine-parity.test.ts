@@ -655,6 +655,32 @@ describeBoth('Engine parity — Postgres vs PGLite', () => {
     }
   });
 
+  test('#3754 soft-deleted pages hidden from traverseGraph on both engines', async () => {
+    for (const engine of [pgEngine, pgliteEngine]) {
+      await engine.putPage('notes/sdg-from', {
+        type: 'note', title: 'sdg-from', compiled_truth: 'links out', timeline: '',
+      });
+      await engine.putPage('notes/sdg-to', {
+        type: 'note', title: 'sdg-to', compiled_truth: 'target', timeline: '',
+      });
+      await engine.addLink('notes/sdg-from', 'notes/sdg-to', 'ctx', 'wikilink');
+
+      const before = await engine.traverseGraph('notes/sdg-from', 1);
+      expect(before.map((n) => n.slug).sort()).toEqual(['notes/sdg-from', 'notes/sdg-to']);
+
+      await engine.softDeletePage('notes/sdg-to', { sourceId: 'default' });
+
+      // Node set, displayed links array, capped recursive variant, and the
+      // deleted-seed case all filter identically on both engines.
+      const after = await engine.traverseGraph('notes/sdg-from', 1);
+      expect(after.map((n) => n.slug)).toEqual(['notes/sdg-from']);
+      expect(after[0].links.map((l) => l.to_slug)).toEqual([]);
+      const capped = await engine.traverseGraph('notes/sdg-from', 1, { frontierCap: 10 });
+      expect(capped.map((n) => n.slug)).toEqual(['notes/sdg-from']);
+      expect(await engine.traverseGraph('notes/sdg-to', 1)).toEqual([]);
+    }
+  });
+
   test('v0.41.19.0 deletePages parity: both engines return same confirmed-deleted slugs', async () => {
     const realSlugs = ['wiki/dpp-1', 'wiki/dpp-2', 'wiki/dpp-3'];
     for (const slug of realSlugs) {
@@ -791,27 +817,46 @@ describeBoth('Engine parity — Postgres vs PGLite', () => {
       );
     }
 
-    const scoped = async (eng: BrainEngine, opts: { sourceId?: string; sourceIds?: string[] }) =>
+    const scoped = async (
+      eng: BrainEngine,
+      opts: { sourceId?: string; sourceIds?: string[]; mode?: 'inbound' | 'islanded' },
+    ) =>
       (await eng.findOrphanPages(opts)).map(r => r.slug).filter(s => s.startsWith('people/op-')).sort();
 
-    // Scalar scope to src-a: op-orphan-a is an orphan; op-target-a is saved
-    // by the cross-source inbound (A2). Parity on both engines.
-    const pgA = await scoped(pgEngine, { sourceId: 'orphan-src-a' });
-    const pgliteA = await scoped(pgliteEngine, { sourceId: 'orphan-src-a' });
-    expect(pgA).toEqual(['people/op-orphan-a']);
-    expect(pgliteA).toEqual(pgA);
+    // #4524: the default mode is 'islanded' (no live inbound AND no live
+    // outbound — health's definition). op-linker-b has a live outbound link,
+    // so it is NOT an orphan by default; mode 'inbound' preserves the legacy
+    // no-inbound-only view where it IS one. Both modes pinned on both engines.
 
-    // Scalar scope to src-b.
+    // Scalar scope to src-a: op-orphan-a is an orphan in BOTH modes (no links
+    // at all); op-target-a is saved by the cross-source inbound (A2).
+    for (const mode of ['islanded', 'inbound'] as const) {
+      const pgA = await scoped(pgEngine, { sourceId: 'orphan-src-a', mode });
+      const pgliteA = await scoped(pgliteEngine, { sourceId: 'orphan-src-a', mode });
+      expect(pgA).toEqual(['people/op-orphan-a']);
+      expect(pgliteA).toEqual(pgA);
+    }
+
+    // Scalar scope to src-b: islanded default excludes op-linker-b (live
+    // outbound); legacy inbound mode includes it.
     const pgB = await scoped(pgEngine, { sourceId: 'orphan-src-b' });
     const pgliteB = await scoped(pgliteEngine, { sourceId: 'orphan-src-b' });
-    expect(pgB).toEqual(['people/op-linker-b']);
+    expect(pgB).toEqual([]);
     expect(pgliteB).toEqual(pgB);
+    const pgBIn = await scoped(pgEngine, { sourceId: 'orphan-src-b', mode: 'inbound' });
+    const pgliteBIn = await scoped(pgliteEngine, { sourceId: 'orphan-src-b', mode: 'inbound' });
+    expect(pgBIn).toEqual(['people/op-linker-b']);
+    expect(pgliteBIn).toEqual(pgBIn);
 
-    // Federated array scope (= ANY binding) → union.
+    // Federated array scope (= ANY binding) → union, in both modes.
     const pgFed = await scoped(pgEngine, { sourceIds: ['orphan-src-a', 'orphan-src-b'] });
     const pgliteFed = await scoped(pgliteEngine, { sourceIds: ['orphan-src-a', 'orphan-src-b'] });
-    expect(pgFed).toEqual(['people/op-linker-b', 'people/op-orphan-a']);
+    expect(pgFed).toEqual(['people/op-orphan-a']);
     expect(pgliteFed).toEqual(pgFed);
+    const pgFedIn = await scoped(pgEngine, { sourceIds: ['orphan-src-a', 'orphan-src-b'], mode: 'inbound' });
+    const pgliteFedIn = await scoped(pgliteEngine, { sourceIds: ['orphan-src-a', 'orphan-src-b'], mode: 'inbound' });
+    expect(pgFedIn).toEqual(['people/op-linker-b', 'people/op-orphan-a']);
+    expect(pgliteFedIn).toEqual(pgFedIn);
   });
 
   // v0.42.7 (#1696): stale-page extraction watermark parity. Isolated under a
@@ -1580,5 +1625,102 @@ describeBoth('Engine parity — CJK keyword fallback (#3986)', () => {
     const pglite = await pgliteEngine.searchKeyword('東京 会議', { limit: 5, sourceIds: ['nonexistent-source'] });
     expect(pg).toEqual([]);
     expect(pglite).toEqual([]);
+  });
+});
+
+describeBoth('Engine parity — open_loops loops-store round-trip', () => {
+  let pgEngine: BrainEngine;
+  let pgliteEngine: PGLiteEngine;
+
+  beforeAll(async () => {
+    pgEngine = await setupDB();
+    pgliteEngine = new PGLiteEngine();
+    await pgliteEngine.connect({});
+    await pgliteEngine.initSchema();
+  }, 90_000);
+
+  afterAll(async () => {
+    await pgliteEngine.disconnect();
+    await teardownDB();
+  }, 30_000);
+
+  // loops-store shares one SQL text across engines (parity by construction);
+  // this pins the round-trip on a REAL postgres.js connection, where the
+  // sanctioned `$N::text::jsonb` evidence binding is the load-bearing detail —
+  // PGLite structurally can't surface the double-encode class (#2339).
+  async function roundTrip(eng: BrainEngine) {
+    const { upsertOpenLoop, closeOpenLoop, listOpenLoops } = await import(
+      '../../src/core/loops/loops-store.ts'
+    );
+    await eng.executeRaw(
+      `INSERT INTO sources (id, name) VALUES ('lpsrc', 'lpsrc') ON CONFLICT (id) DO NOTHING`,
+      [],
+    );
+    const base = {
+      sourceId: 'lpsrc',
+      loopType: 'unanswered_inbound' as const,
+      counterpartyEmail: 'bob@example.com',
+      evidence: [{ message_id: '18c2f4a9b3d21e07', quote: 'Can you review the plan?' }],
+      threadId: '18c2f4a9b3d21e07',
+      detector: 'deterministic_thread' as const,
+    };
+    const first = await upsertOpenLoop(eng, {
+      ...base,
+      dedupKey: 'thread:18c2f4a9b3d21e07:unanswered_inbound',
+      summary: 'Reply owed to bob@example.com',
+      dueAt: '2026-09-01T23:59:59Z',
+    });
+    // Same dedup key: an upsert, not a new row; summary refreshes.
+    const again = await upsertOpenLoop(eng, {
+      ...base,
+      dedupKey: 'thread:18c2f4a9b3d21e07:unanswered_inbound',
+      summary: 'Reply owed to bob@example.com (updated)',
+    });
+    const open = await listOpenLoops(eng, { sourceIds: ['lpsrc'], status: 'open' });
+    const closed = await closeOpenLoop(eng, 'lpsrc', first.id, 'done', 'parity-test');
+    const openAfter = await listOpenLoops(eng, { sourceIds: ['lpsrc'], status: 'open' });
+    const doneAfter = await listOpenLoops(eng, { sourceIds: ['lpsrc'], status: 'done' });
+    return {
+      firstCreated: first.created,
+      againCreated: again.created,
+      sameRow: again.id === first.id,
+      openCount: open.length,
+      summary: open[0]?.summary,
+      // JSONB discipline: evidence must round-trip as a REAL array (a
+      // double-encoded jsonb string scalar would surface here on Postgres).
+      evidenceIsArray: Array.isArray(open[0]?.evidence),
+      quote: open[0]?.evidence?.[0]?.quote,
+      messageId: open[0]?.evidence?.[0]?.message_id,
+      // normalizeRow contract: timestamptz comes back as an ISO string.
+      dueAt: open[0]?.due_at,
+      openedAtIsString: typeof open[0]?.opened_at === 'string',
+      closedOk: closed !== null && closed.id === first.id,
+      closedStatus: closed?.status,
+      closedBy: closed?.closed_by,
+      openAfterCount: openAfter.length,
+      doneAfterCount: doneAfter.length,
+    };
+  }
+
+  test('upsert / dedup / list / close round-trip is identical on both engines', async () => {
+    const pg = await roundTrip(pgEngine);
+    const pglite = await roundTrip(pgliteEngine);
+    expect(pg).toEqual(pglite);
+    // Absolute expectations (not just cross-engine equality):
+    expect(pg.firstCreated).toBe(true);
+    expect(pg.againCreated).toBe(false);
+    expect(pg.sameRow).toBe(true);
+    expect(pg.openCount).toBe(1);
+    expect(pg.summary).toBe('Reply owed to bob@example.com (updated)');
+    expect(pg.evidenceIsArray).toBe(true);
+    expect(pg.quote).toBe('Can you review the plan?');
+    expect(pg.messageId).toBe('18c2f4a9b3d21e07');
+    expect(pg.dueAt).toBe('2026-09-01T23:59:59.000Z');
+    expect(pg.openedAtIsString).toBe(true);
+    expect(pg.closedOk).toBe(true);
+    expect(pg.closedStatus).toBe('done');
+    expect(pg.closedBy).toBe('parity-test');
+    expect(pg.openAfterCount).toBe(0);
+    expect(pg.doneAfterCount).toBe(1);
   });
 });

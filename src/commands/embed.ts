@@ -3,6 +3,7 @@ import { currentEmbeddingSignature } from '../core/embedding.ts';
 import type { ChunkInput } from '../core/types.ts';
 import { carryChunkMetadata, probeEmbedder } from '../core/embed-stale.ts';
 import { chunkText } from '../core/chunkers/recursive.ts';
+import { resolveMaxChunkTokens } from '../core/embedding-input-limit.ts';
 import { createProgress, type ProgressReporter } from '../core/progress.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import { assertEmbeddingEnabled } from '../core/embedding-dim-check.ts';
@@ -61,6 +62,43 @@ function recordFailure(result: EmbedResult, chunkCount: number, slug: string, e:
   result.failures += chunkCount;
   if (result.failure_samples.length < FAILURE_SAMPLE_CAP) {
     result.failure_samples.push(`${slug}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * #3622: failure quarantine for the --stale path. A page whose embed makes
+ * NO progress keeps all its NULL chunks, so every stale pass re-sends the
+ * identical request — a page that fails deterministically (e.g. always
+ * outlives a local server's timeout) is retried forever, and against a
+ * serial embedding server (ollama `-np 1`) the abandoned work compounds
+ * into congestion collapse. After GBRAIN_EMBED_QUARANTINE_AFTER consecutive
+ * zero-progress attempts (default 3) a page is skipped for the rest of this
+ * process; an attempt that embeds ANY chunk resets its counter (#3037
+ * partial progress shrinks the stale set, so the next pass sends a smaller
+ * request, not the identical doomed one). Process-lifetime by design: a
+ * long-lived autopilot stops re-sending doomed pages every cycle, while a
+ * restart (or frontmatter.embed_skip for a permanent block) lets the
+ * operator retry deliberately. Keyed `${source_id}::${slug}` to match the
+ * stale-batch grouping.
+ */
+const _embedFailureCounts = new Map<string, number>();
+
+/** Test seam: clear quarantine state between test runs. */
+export function _resetEmbedQuarantineForTest(): void {
+  _embedFailureCounts.clear();
+}
+
+function embedQuarantineThreshold(): number {
+  const raw = parseInt(process.env.GBRAIN_EMBED_QUARANTINE_AFTER || '3', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 3;
+}
+
+/** #3622: count a zero-progress attempt; announce the page's quarantine once. */
+function noteEmbedQuarantineFailure(key: string, slug: string): void {
+  const failures = (_embedFailureCounts.get(key) ?? 0) + 1;
+  _embedFailureCounts.set(key, failures);
+  if (failures === embedQuarantineThreshold()) {
+    serr(`\n  [embed] ${slug}: ${failures} consecutive failed attempt(s) — quarantined for the rest of this process`);
   }
 }
 export interface EmbedOpts {
@@ -783,13 +821,15 @@ async function embedPage(
   let chunks = await engine.getChunks(slug, opts);
   if (chunks.length === 0) {
     const inputs: ChunkInput[] = [];
+    // #4530: respect the active embedding model's per-input token limit.
+    const chunkOpts = { maxTokens: resolveMaxChunkTokens() };
     if (page.compiled_truth.trim()) {
-      for (const c of chunkText(page.compiled_truth)) {
+      for (const c of chunkText(page.compiled_truth, chunkOpts)) {
         inputs.push({ chunk_index: inputs.length, chunk_text: c.text, chunk_source: 'compiled_truth' });
       }
     }
     if (page.timeline.trim()) {
-      for (const c of chunkText(page.timeline)) {
+      for (const c of chunkText(page.timeline, chunkOpts)) {
         inputs.push({ chunk_index: inputs.length, chunk_text: c.text, chunk_source: 'timeline' });
       }
     }
@@ -1227,13 +1267,15 @@ async function healChunklessPages(
 
   const buildInputs = (compiledTruth: string, timeline: string): ChunkInput[] => {
     const inputs: ChunkInput[] = [];
+    // #4530: respect the active embedding model's per-input token limit.
+    const chunkOpts = { maxTokens: resolveMaxChunkTokens() };
     if (compiledTruth.trim()) {
-      for (const c of chunkText(compiledTruth)) {
+      for (const c of chunkText(compiledTruth, chunkOpts)) {
         inputs.push({ chunk_index: inputs.length, chunk_text: c.text, chunk_source: 'compiled_truth' });
       }
     }
     if (timeline.trim()) {
-      for (const c of chunkText(timeline)) {
+      for (const c of chunkText(timeline, chunkOpts)) {
         inputs.push({ chunk_index: inputs.length, chunk_text: c.text, chunk_source: 'timeline' });
       }
     }
@@ -1682,7 +1724,15 @@ async function embedAllStale(
         else byKey.set(key, [row]);
       }
 
-      const keys = Array.from(byKey.keys());
+      // #3622: keep quarantined pages out of the pool. The keyset cursor
+      // still advances past their rows, so a fully-quarantined batch can
+      // never spin the loop.
+      const QUARANTINE_AFTER = embedQuarantineThreshold();
+      const allKeys = Array.from(byKey.keys());
+      const keys = allKeys.filter(k => (_embedFailureCounts.get(k) ?? 0) < QUARANTINE_AFTER);
+      if (keys.length < allKeys.length) {
+        serr(`\n  [embed] skipping ${allKeys.length - keys.length} page(s) quarantined after ${QUARANTINE_AFTER} consecutive failed embed attempts (this process); set frontmatter.embed_skip to skip permanently, or restart to retry`);
+      }
       result.total_chunks += batch.length;
 
       async function embedOneKey(key: string) {
@@ -1749,6 +1799,9 @@ async function embedAllStale(
             serr(`\n  ${slug}: ${failed} chunk(s) failed to embed; embedded the other ${stale.length - failed}`);
           }
           providerCircuit.recordSuccess();
+          // #3622: reaching here means at least one chunk persisted (a total
+          // embed failure throws) — progress, so the quarantine counter resets.
+          _embedFailureCounts.delete(key);
         } catch (e: unknown) {
           // Budget/abort-fired cancellations are expected on the way out; don't
           // spam per-page "Error embedding" lines when we're shutting down.
@@ -1756,6 +1809,7 @@ async function embedAllStale(
           recordFailure(result, stale.length, slug, e);
           serr(`\n  Error embedding ${slug}: ${e instanceof Error ? e.message : e}`);
           providerCircuit.recordFailure(e);
+          noteEmbedQuarantineFailure(key, slug);
         }
         totalProcessedPages++;
         result.pages_processed++;

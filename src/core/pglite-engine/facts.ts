@@ -12,6 +12,7 @@ import { validateFactBatchReconcile, type FactBatchInsertOpts } from '../facts/r
 import { MAX_SEARCH_LIMIT, clampSearchLimit } from '../engine.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { resolveSupersededByRow, isInt4RowRef, type SupersedeTarget } from '../facts/supersede-resolve.ts';
+import { escapeLikePattern } from '../cjk.ts';
 
 /** Narrow slice of PGLiteEngine the facts operations use. */
 export interface PgliteFactsDeps {
@@ -482,6 +483,8 @@ export async function listSupersessions(
   }
 
 export async function countUnconsolidatedFacts(deps: PgliteFactsDeps, source_id: string): Promise<number> {
+    // Audit checkpoint rows never set consolidated_at, so without the source
+    // exclusion each one counts as forever-pending consolidation backlog.
     const r = await deps.db.query<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM facts
        WHERE source_id = $1 AND consolidated_at IS NULL AND expired_at IS NULL
@@ -536,7 +539,10 @@ export async function findTrajectory(deps: PgliteFactsDeps, opts: import('../eng
     const useArray = Array.isArray(opts.sourceIds) && opts.sourceIds.length > 0;
     const sourceIds = useArray ? opts.sourceIds! : null;
     const sourceId = opts.sourceId ?? 'default';
-    const remoteFilter = opts.remote === true;
+    // Fail-closed (CV6 / v0.26.9 F7b posture): anything not strictly local
+    // is remote. An omitted flag (cast-bypassed context, caller that forgot
+    // to thread it) degrades to world-only reads, never to a private-fact leak.
+    const remoteFilter = opts.remote !== false;
 
     // Build SQL dynamically. PGLite uses $N positional params; we
     // assemble the WHERE clauses + params array in tandem to keep them
@@ -695,6 +701,9 @@ async function _listFacts(
     if (opts.activeOnly !== false) {
       whereParts.push(`expired_at IS NULL`);
     }
+    if (opts.unconsolidatedOnly === true) {
+      whereParts.push(`consolidated_at IS NULL`);
+    }
     if (opts.kinds && opts.kinds.length > 0) {
       whereParts.push(`kind = ANY($kinds)`);
       params.kinds = opts.kinds;
@@ -702,6 +711,13 @@ async function _listFacts(
     if (opts.visibility && opts.visibility.length > 0) {
       whereParts.push(`visibility = ANY($visibility)`);
       params.visibility = opts.visibility;
+    }
+    if (opts.grep && opts.grep.trim()) {
+      // SQL-side substring filter (before limit) — a client-side post-limit
+      // grep silently misses matches outside the newest-N window on
+      // high-cardinality entities. Parity with the postgres engine.
+      whereParts.push(`fact ILIKE $grepPat ESCAPE '\\'`);
+      params.grepPat = '%' + escapeLikePattern(opts.grep.trim()) + '%';
     }
     for (const c of opts.whereClauses ?? []) whereParts.push(c);
     Object.assign(params, opts.whereParams ?? {});

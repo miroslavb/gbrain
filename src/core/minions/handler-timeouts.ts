@@ -57,6 +57,7 @@ export const HANDLER_DEFAULT_TIMEOUT_MS: Readonly<Record<string, number>> = {
   subagent: THIRTY_MIN_MS,
   subagent_aggregator: THIRTY_MIN_MS,
   'embed-backfill': THIRTY_MIN_MS,
+  'connector-sync': THIRTY_MIN_MS,
   'autopilot-cycle': THIRTY_MIN_MS,
   // #2194 fix #3 + 2026-08-24 production audit: brain-wide maintenance runs
   // eleven mixed/global phases once, while one source cycle runs a much
@@ -102,6 +103,7 @@ export const HANDLER_DEFAULT_LOCK_DURATION_MS: Readonly<Record<string, number>> 
   subagent: FIVE_MIN_MS,
   subagent_aggregator: FIVE_MIN_MS,
   'embed-backfill': FIVE_MIN_MS,
+  'connector-sync': FIVE_MIN_MS,
   'autopilot-cycle': FIVE_MIN_MS,
   'autopilot-global-maintenance': FIVE_MIN_MS,
   contextual_reindex_per_chunk: FIVE_MIN_MS,

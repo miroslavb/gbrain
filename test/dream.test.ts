@@ -55,12 +55,12 @@ describe('runDream — brainDir resolution', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000); // OAuth v25 + git init; needs breathing room under full-suite load
+  }, 300_000); // OAuth v25 + git init; needs breathing room under full-suite + parallel-agent load
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   test('explicit --dir takes precedence over engine config', async () => {
     await engine.setConfig('sync.repo_path', '/configured/dir');
@@ -112,12 +112,12 @@ describe('runDream — --phase <name> restricts the cycle', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000); // OAuth v25 + git init; needs breathing room under full-suite load
+  }, 300_000); // OAuth v25 + git init; needs breathing room under full-suite + parallel-agent load
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   test('--phase lint produces a report with exactly one phase = lint', async () => {
     const report = await runDream(engine, ['--dir', repo, '--phase', 'lint', '--json']);
@@ -150,6 +150,73 @@ describe('runDream — --phase <name> restricts the cycle', () => {
     errSpy.mockRestore();
   });
 
+  // #4493: repeated --phase flags all run (previously only the FIRST was
+  // read; the rest were silently dropped and the run still exited 0).
+  // runCycle executes named phases in canonical cycle order.
+  test('--phase lint --phase orphans runs BOTH phases', async () => {
+    const report = await runDream(engine, [
+      '--dir', repo, '--phase', 'lint', '--phase', 'orphans', '--json',
+    ]);
+    expect(report).toBeTruthy();
+    if (report) {
+      expect(report.phases.map(p => p.phase)).toEqual(['lint', 'orphans']);
+    }
+  });
+
+  test('#4493: repeated identical --phase values collapse to one run', async () => {
+    const report = await runDream(engine, [
+      '--dir', repo, '--phase', 'lint', '--phase', 'lint', '--json',
+    ]);
+    expect(report).toBeTruthy();
+    if (report) {
+      expect(report.phases.map(p => p.phase)).toEqual(['lint']);
+    }
+  });
+
+  test('#4493: an unknown value in ANY repeat position exits with an error', async () => {
+    const spy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
+    const errSpy = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runDream(null, ['--dir', repo, '--phase', 'lint', '--phase', 'garbage']);
+    } catch (e: any) {
+      expect(e.message).toBe('EXIT');
+    }
+    expect(errSpy.mock.calls.flat().join(' ')).toMatch(/Unknown phase "garbage"/);
+    spy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  test('#4493: --once with multiple phases exits 2 (single-target contract)', async () => {
+    const spy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
+    const errSpy = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runDream(null, ['--dir', repo, '--phase', 'lint', '--phase', 'orphans', '--once']);
+    } catch (e: any) {
+      expect(e.message).toBe('EXIT');
+    }
+    expect(spy).toHaveBeenCalledWith(2);
+    expect(errSpy.mock.calls.flat().join(' ')).toMatch(/--once supports a single --phase target/);
+    spy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  test('#4493: --phase with a missing value exits 2 instead of silently running the full cycle', async () => {
+    const spy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
+    const errSpy = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runDream(null, ['--dir', repo, '--phase']);
+    } catch (e: any) {
+      expect(e.message).toBe('EXIT');
+    }
+    expect(spy).toHaveBeenCalledWith(2);
+    expect(errSpy.mock.calls.flat().join(' ')).toMatch(/--phase <name>: missing value/);
+    spy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  // Fork: --max-pages (propose_takes canary bound). Rewritten as standalone
+  // blocks — upstream's #4493 tests share the same scaffolding, so the
+  // three-way merge interleaved them into each other.
   test('--max-pages rejects non-positive values', async () => {
     const spy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
     const errSpy = spyOn(console, 'error').mockImplementation(() => {});
@@ -190,12 +257,12 @@ describe('runDream — --once (issue #2860)', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000);
+  }, 300_000);
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   test('bare --once (no --phase) exits 2 with a usage hint', async () => {
     const exitSpy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
@@ -303,12 +370,12 @@ describe('runDream — output format', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000); // OAuth v25 + git init; needs breathing room under full-suite load
+  }, 300_000); // OAuth v25 + git init; needs breathing room under full-suite + parallel-agent load
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   test('--json emits parsable CycleReport JSON with schema_version', async () => {
     const lines: string[] = [];
@@ -368,12 +435,12 @@ describe('runDream — dry-run propagates through to runCycle', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000); // OAuth v25 + git init; needs breathing room under full-suite load
+  }, 300_000); // OAuth v25 + git init; needs breathing room under full-suite + parallel-agent load
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   test('--dry-run produces a report where no DB-mutating work happened', async () => {
     // Before: empty pages table.
@@ -397,12 +464,12 @@ describe('runDream — exit-code semantics', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000); // OAuth v25 + git init; needs breathing room under full-suite load
+  }, 300_000); // OAuth v25 + git init; needs breathing room under full-suite + parallel-agent load
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   test('clean/ok/partial statuses do not call process.exit', async () => {
     const spy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('UNEXPECTED_EXIT'); });
@@ -449,12 +516,12 @@ describe('runDream — --source / --source-id (v0.41.13)', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000);
+  }, 300_000);
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   // ─── parseArgs: --source missing / conflict / repetition ────────────
 
@@ -505,7 +572,7 @@ describe('runDream — --source / --source-id (v0.41.13)', () => {
     const report = await runDream(engine, ['--dir', repo, '--phase', 'lint', '--source', 'alpha', '--source', 'alpha', '--json']);
     expect(report).toBeTruthy();
     if (report) expect(['ok', 'clean']).toContain(report.status);
-  }, 60_000);
+  }, 300_000);
 
   test('--source X --source-id Y (conflict) exits 2', async () => {
     const exitSpy = spyOn(process, 'exit').mockImplementation(() => { throw new Error('EXIT'); });
@@ -619,7 +686,7 @@ describe('runDream — --source / --source-id (v0.41.13)', () => {
     const writtenMs = new Date(after!).getTime();
     expect(writtenMs).toBeGreaterThanOrEqual(t0);
     expect(writtenMs).toBeLessThanOrEqual(Date.now() + 1000);
-  }, 60_000);
+  }, 300_000);
 
   // ─── Back-compat: bare `gbrain dream` does NOT write per-source stamp ─
 
@@ -640,7 +707,7 @@ describe('runDream — --source / --source-id (v0.41.13)', () => {
     expect(report).toBeTruthy();
     expect(await readLastFullCycleAt('alpha')).not.toBeNull();
     expect(await readLastFullCycleAt('beta')).toBeNull();
-  }, 60_000);
+  }, 300_000);
 
   // ─── --source-id alias equivalence (D3) ─────────────────────────────
 
@@ -655,7 +722,7 @@ describe('runDream — --source / --source-id (v0.41.13)', () => {
 
     const after = await readLastFullCycleAt('beta');
     expect(after).not.toBeNull();
-  }, 60_000);
+  }, 300_000);
 
   // ─── T3: TypeError MUST propagate (not swallowed by predicate-gated catch) ─
 
@@ -704,12 +771,12 @@ describe('runDream → checkCycleFreshness end-to-end (D5)', () => {
   beforeEach(async () => {
     repo = makeGitRepo();
     engine = await makePGLite();
-  }, 60_000);
+  }, 300_000);
 
   afterEach(async () => {
     if (engine) await engine.disconnect();
     rmSync(repo, { recursive: true, force: true });
-  }, 60_000);
+  }, 300_000);
 
   test('stale source becomes fresh after dream --source (column-name drift guard)', async () => {
     // Seed source with last_full_cycle_at backdated 25h (above warn floor).
@@ -733,5 +800,5 @@ describe('runDream → checkCycleFreshness end-to-end (D5)', () => {
     // Doctor now sees fresh.
     const afterCheck = await checkCycleFreshness(engine);
     expect(afterCheck.status).toBe('ok');
-  }, 60_000);
+  }, 300_000);
 });

@@ -4,7 +4,7 @@
 <!-- Regenerate: bun run scripts/generate-tool-catalog.ts -->
 <!-- Freshness-guarded by scripts/check-tool-catalog-fresh.sh (bun run verify). -->
 
-Every non-localOnly operation on the MCP surface: 118 tools across 22 areas. **Starter** marks membership in the ~27-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
+Every non-localOnly operation on the MCP surface: 121 tools across 23 areas. **Starter** marks membership in the ~27-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
 
 ## admin
 
@@ -109,12 +109,20 @@ Every non-localOnly operation on the MCP surface: 118 tools across 22 areas. **S
 | Tool | Description | Scope | Starter | Gate |
 |---|---|---|---|---|
 | `add_link` | Create link between pages | write |  |  |
-| `find_orphans` | Find pages with no inbound wikilinks. | read |  |  |
+| `find_orphans` | Find disconnected pages. | read |  |  |
 | `get_backlinks` | List incoming links to a page | read | yes |  |
 | `get_links` | List outgoing links from a page | read |  |  |
 | `list_link_sources` | List distinct link_source provenances in the brain with edge counts (e.g. | read | yes |  |
 | `remove_link` | Remove link between pages | write |  |  |
 | `traverse_graph` | Traverse link graph from a page. | read | yes |  |
+
+## loops
+
+| Tool | Description | Scope | Starter | Gate |
+|---|---|---|---|---|
+| `loops_close` | Close an open loop by id: status 'done' (handled) or 'dropped' (not going to). | write |  |  |
+| `loops_mute` | Suppress a sender (email address) or thread id from opening NEW loops — the detector feedback primitive behind "never track this sender". | write |  |  |
+| `open_loops` | The open-loop engine's killer output: who is waiting on you, what you promised, and the context needed to respond. | read |  |  |
 
 ## memory
 

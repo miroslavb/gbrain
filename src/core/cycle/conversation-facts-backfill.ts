@@ -48,6 +48,7 @@ import { withBudgetTracker } from '../ai/gateway.ts';
 import { listSources } from '../sources-ops.ts';
 import {
   runExtractConversationFactsCore,
+  isAbortError,
   type ExtractConversationFactsResult,
 } from '../../commands/extract-conversation-facts.ts';
 // The type allowlist comes straight from the canonical leaf module (same
@@ -240,6 +241,9 @@ export async function runPhaseConversationFactsBackfill(
     quality_stop_reasons: [],
     quality_actual_models: [],
     quality_actual_routes: [],
+    // #4052: alias_exact resolution counters (required on the result type).
+    fallback_slugify_count: 0,
+    resolution_errors: 0,
   });
 
   // #3627: the per-source caps (max_cost_usd / max_walltime_min) were parsed
@@ -331,6 +335,12 @@ export async function runPhaseConversationFactsBackfill(
             budget_exhausted: true,
             error: err.message,
           };
+        } else if (isAbortError(err)) {
+          // #4052 wave abort-honesty fix: an abort that is neither our own
+          // per-source deadline (walltimeFired) nor a flagged caller signal
+          // is still cycle-runner control flow — propagate it rather than
+          // downgrading it to a per-source failure record.
+          throw err;
         } else {
           // Per-source failure: record + continue with next source.
           perSourceResults[src.id] = {
@@ -346,8 +356,10 @@ export async function runPhaseConversationFactsBackfill(
       }
     }
   } catch (err) {
-    if ((err as Error).message === 'aborted' || opts.signal?.aborted) {
-      // Propagate abort.
+    if (isAbortError(err) || opts.signal?.aborted) {
+      // Abort is control flow owned by the cycle runner; never downgrade it
+      // into a per-source warning or phase failure result. isAbortError also
+      // matches the loop-top `throw new Error('aborted')`.
       throw err;
     }
     // Unexpected error.
@@ -370,6 +382,8 @@ export async function runPhaseConversationFactsBackfill(
     pages_skipped_unrecognized_speaker: 0,
     pages_failed: 0,
     facts_inserted: 0,
+    fallback_slugify_count: 0,
+    resolution_errors: 0,
     sources_processed: 0,
   };
   for (const r of Object.values(perSourceResults)) {
@@ -382,6 +396,8 @@ export async function runPhaseConversationFactsBackfill(
     totals.pages_skipped_unrecognized_speaker += r.pages_skipped_unrecognized_speaker;
     totals.pages_failed += r.pages_failed;
     totals.facts_inserted += r.facts_inserted;
+    totals.fallback_slugify_count += r.fallback_slugify_count;
+    totals.resolution_errors += r.resolution_errors;
   }
 
   const anyError = Object.values(perSourceResults).some(
@@ -406,6 +422,8 @@ export async function runPhaseConversationFactsBackfill(
       pages_skipped_unrecognized_speaker: totals.pages_skipped_unrecognized_speaker,
       pages_failed: totals.pages_failed,
       facts_inserted: totals.facts_inserted,
+      fallback_slugify_count: totals.fallback_slugify_count,
+      resolution_errors: totals.resolution_errors,
       spent_usd: totalSpent,
       skipped_by_brain_wide_cap: skippedByBrainWideCap,
       skipped_by_brain_wide_walltime: skippedByBrainWideWalltime,

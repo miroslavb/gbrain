@@ -92,10 +92,17 @@ import { parseWorkers, resolveWorkersWithClamp } from '../core/sync-concurrency.
 import { withRefreshingLock, LockUnavailableError } from '../core/db-lock.ts';
 import { assertFactsEmbeddingDimMatchesConfig } from '../core/embedding-dim-check.ts';
 import { writeReceipt, shortRunId } from '../core/extract/receipt-writer.ts';
-import { upsertExtractRollup } from '../core/extract/rollup-writer.ts';
+import { upsertExtractRollup, classifyRunStop } from '../core/extract/rollup-writer.ts';
 import { ALLOWED_TYPES, type AllowedType } from '../core/facts/conversation-types.ts';
 import { TERMINAL_AUDIT_SOURCE, NON_EXTRACTABLE_AUDIT_SOURCE } from '../core/facts/audit-sources.ts';
 import { isHarnessInterruptionStatus } from '../core/facts/conversation-interruption.ts';
+import {
+  emptySaveTimeResolutionCounts,
+  formatSaveTimeResolutionCounts,
+  mergeSaveTimeResolutionCounts,
+  resolveExtractedEntitiesForSave,
+} from '../core/entities/resolve-on-save.ts';
+
 // Re-exported verbatim so existing importers (this file's own helpers below
 // and this file's tests) keep working unchanged; doctor.ts, jobs.ts,
 // sources.ts, and the cycle backfill phase import the leaf directly. Moved to
@@ -382,6 +389,10 @@ export interface ExtractConversationFactsResult {
   quality_stop_reasons: string[];
   quality_actual_models: string[];
   quality_actual_routes: string[];
+  /** Entity values that reached the shipped deterministic fallback slug path. */
+  fallback_slugify_count: number;
+  /** Entity values kept raw after a best-effort resolution failure. */
+  resolution_errors: number;
   budget_exhausted?: boolean;
   spent_usd?: number;
 }
@@ -413,7 +424,7 @@ import {
   readSummaryBody,
 } from '../core/conversation-parser/body.ts';
 import { runLlmFallback } from '../core/conversation-parser/llm-fallback.ts';
-import { resolveModel } from '../core/model-config.ts';
+import { resolveModel, resolveTierDefault } from '../core/model-config.ts';
 import {
   gatewayConversationFactSemanticValidator,
   loadConversationFactExisting,
@@ -1109,6 +1120,7 @@ async function processPage(
   let newestEnd: string | null = null;
   let segmentsThisPage = 0;
   let pageInsertedTotal = 0;
+  const pageResolution = emptySaveTimeResolutionCounts();
 
   for (const seg of segments) {
     if (state.segmentLimit > 0 && segmentsThisPage >= state.segmentLimit) break;
@@ -1185,12 +1197,46 @@ async function processPage(
       acceptedFacts = quality.accepted; extracted = acceptedFacts.map((entry) => entry.fact);
     }
 
+    // This bulk path bypasses writeSingleFact and writes through insertFacts.
+    // Canonicalize every extractor-provided entity via the shipped resolver
+    // (alias_exact / prefix / fuzzy / slugify) while source scope is known.
+    const segmentResolution = await resolveExtractedEntitiesForSave(
+      state.engine,
+      state.sourceId,
+      extracted,
+      (raw, message) => {
+        process.stderr.write(
+          `[extract-conversation-facts] ${page.slug} segment ${seg.startIso}..${seg.endIso} ` +
+          `entity resolution failed for ${JSON.stringify(raw)}: ${message}; keeping raw value\n`,
+        );
+      },
+    );
+    const commitSegmentResolutionTelemetry = () => {
+      mergeSaveTimeResolutionCounts(pageResolution, segmentResolution);
+      state.result.fallback_slugify_count += segmentResolution.fallback_slugify_count;
+      state.result.resolution_errors += segmentResolution.resolution_errors;
+    };
+
     if (extracted.length > 0) {
       // Page-global row_num. All rows stay staged until the complete page and
-      // its terminal marker can be committed in one atomic reconcile.
-      const rows = acceptedFacts.map(({ fact, supersedes_id }, i) => ({
+      // its terminal marker can be committed in one atomic reconcile (fork's
+      // snapshot-atomic epoch publication is kept over upstream's per-segment
+      // insertFacts — the atomicity is the point of that work).
+      // entity_slug is already canonical here — resolveExtractedEntitiesForSave
+      // (above) ran every fact through the shipped resolver cascade (#3729/#4052),
+      // so master's per-row resolveEntitySlug mapper (#4567's independent fix for
+      // the same issue) is superseded rather than layered on top.
+      // Build from `extracted`, NOT from acceptedFacts[].fact:
+      // resolveExtractedEntitiesForSave replaces ARRAY SLOTS
+      // (`facts[i] = { ...facts[i], entity_slug }`) rather than mutating the
+      // fact objects, so the quality gate's captured references still carry the
+      // pre-resolution entity_slug. `extracted` was re-derived from
+      // acceptedFacts above, so index i pairs them.
+      const rows = extracted.map((fact, i) => ({
         ...fact,
-        ...(supersedes_id !== undefined ? { supersedes_fact_id: supersedes_id } : {}),
+        ...(acceptedFacts[i]?.supersedes_id !== undefined
+          ? { supersedes_fact_id: acceptedFacts[i]!.supersedes_id }
+          : {}),
         row_num: rowNum + i,
         source_markdown_slug: page.slug,
         source: PER_SEGMENT_SOURCE_PREFIX,
@@ -1211,6 +1257,7 @@ async function processPage(
         stagedRows.push(...rows);
       }
       rowNum += extracted.length;
+      commitSegmentResolutionTelemetry();
     }
 
     newestEnd = seg.endIso;
@@ -1272,7 +1319,8 @@ async function processPage(
   }
 
   process.stderr.write(
-    `[extract-conversation-facts] ${page.slug}: ${pageInsertedTotal} facts inserted across ${segmentsThisPage} segments\n`,
+    `[extract-conversation-facts] ${page.slug}: ${pageInsertedTotal} facts inserted across ${segmentsThisPage} segments ` +
+    `entity_resolution_counts=${formatSaveTimeResolutionCounts(pageResolution.counts)}\n`,
   );
 
   state.result.pages_processed++;
@@ -1369,6 +1417,8 @@ export async function runExtractConversationFactsCore(
     quality_stop_reasons: [],
     quality_actual_models: [],
     quality_actual_routes: [],
+    fallback_slugify_count: 0,
+    resolution_errors: 0,
   };
 
   // F2: honor brain-wide kill-switch unless overridden.
@@ -1417,7 +1467,8 @@ export async function runExtractConversationFactsCore(
   const llmFallbackModel = llmFallbackEnabled
     ? await resolveModel(engine, {
         tier: 'utility',
-        fallback: 'anthropic:claude-haiku-4-5-20251001',
+        // #3813: last-resort fallback stays key-aware, never hardcoded Anthropic.
+        fallback: resolveTierDefault('utility'),
       })
     : null;
   const qualityConfig = await loadConversationFactQualityConfig(engine);
@@ -1816,13 +1867,20 @@ async function writeRunReceiptAndRollup(
   // Rollup UPSERT: ALWAYS fire so doctor's extract_health sees the
   // cycle ran (even no-op runs are signal — they prove the extractor
   // was alive). Best-effort per F-OUT-19.
-  const incomplete = halted || result.pages_failed > 0;
+  //
+  // #4482: a run that stopped ONLY because it hit its per-source budget cap
+  // is working as designed (partial progress banked; the backlog drains over
+  // future runs) — record it as expected_limit_delta, not halt_delta, so
+  // doctor's extract_health failure rate stops warning on normal
+  // bigger-backlog-than-budget operation. Per-page failures stay error halts.
   await upsertExtractRollup(engine, {
     kind: 'facts.conversation',
     source_id: sourceId,
     cost_delta: result.spent_usd ?? 0,
-    round_completed_delta: incomplete ? 0 : 1,
-    halt_delta: incomplete ? 1 : 0,
+    ...classifyRunStop({
+      budget_exhausted: halted,
+      error: result.pages_failed > 0,
+    }),
   });
 }
 
@@ -2087,6 +2145,8 @@ export async function runExtractConversationFacts(
     quality_stop_reasons: [],
     quality_actual_models: [],
     quality_actual_routes: [],
+    fallback_slugify_count: 0,
+    resolution_errors: 0,
   };
   let totalSpent = 0;
   let anyBudgetExhausted = false;
@@ -2153,6 +2213,8 @@ export async function runExtractConversationFacts(
       for (const route of perSource.quality_actual_routes) {
         if (!aggregate.quality_actual_routes.includes(route)) aggregate.quality_actual_routes.push(route);
       }
+      aggregate.fallback_slugify_count += perSource.fallback_slugify_count;
+      aggregate.resolution_errors += perSource.resolution_errors;
       if (perSource.budget_exhausted) anyBudgetExhausted = true;
       if (perSource.spent_usd) totalSpent += perSource.spent_usd;
 
@@ -2203,6 +2265,12 @@ export async function runExtractConversationFacts(
   if (aggregate.orphan_facts_cleaned > 0) {
     console.log(`  Cleaned ${aggregate.orphan_facts_cleaned} orphan fact(s) from prior partial runs (D11 replay safety).`);
   }
+  if (aggregate.fallback_slugify_count > 0) {
+    console.log(`  Minted ${aggregate.fallback_slugify_count} entity slug(s) via fallback_slugify.`);
+  }
+  if (aggregate.resolution_errors > 0) {
+    console.log(`  Kept ${aggregate.resolution_errors} raw entity value(s) after best-effort resolution errors.`);
+  }
   if (anyBudgetExhausted) {
     console.log(`  Budget cap reached. Re-run with a higher --max-cost-usd to continue.`);
   }
@@ -2241,7 +2309,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isAbortError(err: unknown): boolean {
+export function isAbortError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.name === 'AbortError' || /aborted|cancell?ed/i.test(err.message);
 }

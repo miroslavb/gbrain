@@ -41,6 +41,8 @@ export const DB_MERGED_PROVIDER_KEY_FIELDS = [
   'together_api_key',
   'voyage_api_key',
   'dashscope_api_key',
+  'litellm_api_key',
+  'together_api_key',
   'google_api_key',
   'azure_openai_api_key',
 ] as const;
@@ -54,6 +56,9 @@ export const DB_MERGED_PROVIDER_KEY_FIELDS = [
 export interface DbPlaneEngineReader {
   getConfig(key: string): Promise<string | null | undefined>;
   listConfigKeys?(prefix: string): Promise<string[]>;
+  /** One-round-trip whole-table read (see config-snapshot.ts). Optional so
+   *  narrow readers and SDK callers keep working on the per-key path. */
+  getAllConfig?(): Promise<Record<string, string>>;
   executeRaw?<T = Record<string, unknown>>(
     sql: string,
     params?: unknown[],
