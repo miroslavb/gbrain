@@ -52,6 +52,7 @@
 import type { BrainEngine, LinkBatchInput } from '../engine.ts';
 import type { PhaseResult } from '../cycle.ts';
 import type { GBrainConfig } from '../config.ts';
+import { isConfigTruthy } from '../config.ts';
 import type { ProgressReporter } from '../progress.ts';
 import { chat as gatewayChat, withBudgetTracker, isAvailable } from '../ai/gateway.ts';
 import { createGlobalLlmHaltTracker, haltedClassOf, type GlobalLlmErrorClass } from '../ai/errors.ts';
@@ -138,12 +139,36 @@ const ATOM_EXPLICIT_OPT_IN_TYPES_SQL = ATOM_EXPLICIT_OPT_IN_TYPES
 
 // Shared by discovery and backlog counting. Keep this as one SQL fragment so
 // doctor/autopilot never advertise work that the phase itself will refuse.
-const ATOM_PAGE_OPT_IN_POLICY_SQL = `
+//
+// STRICT (default): broad catch-all types need an explicit per-page
+// `atom_extract: true`. OPEN: only an explicit `atom_extract: false` denies —
+// the operator has decided to mine the whole corpus. Both honor the opt-OUT,
+// so a page marked false is never extracted under either policy.
+const ATOM_PAGE_OPT_IN_POLICY_SQL_STRICT = `
       AND lower(COALESCE(p.frontmatter->>'atom_extract', '')) <> 'false'
       AND (
         NOT (p.type = ANY(ARRAY[${ATOM_EXPLICIT_OPT_IN_TYPES_SQL}]::text[]))
         OR lower(COALESCE(p.frontmatter->>'atom_extract', '')) = 'true'
       )`;
+
+const ATOM_PAGE_OPT_IN_POLICY_SQL_OPEN = `
+      AND lower(COALESCE(p.frontmatter->>'atom_extract', '')) <> 'false'`;
+
+/**
+ * `cycle.extract_atoms.broad_types_require_opt_in` (default TRUE = strict).
+ * Set it false to mine broad types corpus-wide. Fails CLOSED: an unset key, a
+ * read error, or any non-falsy value keeps the strict policy, so the expensive
+ * posture is never entered by accident. Resolved per call (not cached) so the
+ * operator can close the gate again without a restart — discovery and the
+ * doctor backlog count then agree on the very next cycle.
+ */
+async function resolveAtomOptInPolicySql(engine: BrainEngine): Promise<string> {
+  try {
+    const raw = await engine.getConfig('cycle.extract_atoms.broad_types_require_opt_in');
+    if (raw != null && !isConfigTruthy(raw)) return ATOM_PAGE_OPT_IN_POLICY_SQL_OPEN;
+  } catch { /* fail closed to strict */ }
+  return ATOM_PAGE_OPT_IN_POLICY_SQL_STRICT;
+}
 
 const PAGE_DISCOVERY_BUDGET = 50;
 const MIN_PAGE_CHARS_FOR_EXTRACTION = 500;
@@ -363,6 +388,7 @@ export async function discoverExtractablePages(
   sourceId: string,
   affectedSlugs?: string[],
 ): Promise<DiscoveredPage[]> {
+  const optInPolicySql = await resolveAtomOptInPolicySql(engine);
   const hasFilter = Array.isArray(affectedSlugs) && affectedSlugs.length > 0;
   const sql = `
     SELECT p.slug,
@@ -376,7 +402,7 @@ export async function discoverExtractablePages(
       AND COALESCE(p.frontmatter->>'imported_from',   '') <> 'markdown-greenfield'
       AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
       ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
-      ${ATOM_PAGE_OPT_IN_POLICY_SQL}
+      ${optInPolicySql}
       AND length(COALESCE(p.compiled_truth, '')) >= $3
       AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
       ${hasFilter ? "AND p.slug = ANY($5::text[])" : ''}
@@ -436,6 +462,7 @@ export async function countExtractAtomsBacklog(
   engine: BrainEngine,
   sourceId?: string,
 ): Promise<number | null> {
+  const optInPolicySql = await resolveAtomOptInPolicySql(engine);
   try {
     // Two modes: scoped (the phase's per-source `remaining`) vs brain-wide
     // (doctor — matches the conversation-facts check's cross-source posture).
@@ -451,7 +478,7 @@ export async function countExtractAtomsBacklog(
            AND COALESCE(p.frontmatter->>'imported_from',   '') <> 'markdown-greenfield'
            AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
-           ${ATOM_PAGE_OPT_IN_POLICY_SQL}
+           ${optInPolicySql}
            AND length(COALESCE(p.compiled_truth, '')) >= $3
            AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
            AND NOT EXISTS (
@@ -467,7 +494,7 @@ export async function countExtractAtomsBacklog(
            AND COALESCE(p.frontmatter->>'imported_from',   '') <> 'markdown-greenfield'
            AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
-           ${ATOM_PAGE_OPT_IN_POLICY_SQL}
+           ${optInPolicySql}
            AND length(COALESCE(p.compiled_truth, '')) >= $2
            AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
            AND NOT EXISTS (
