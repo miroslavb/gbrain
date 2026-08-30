@@ -232,7 +232,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   each worker must retain aggregate-only JSONL receipts, a heartbeat, bounded
   infrastructure-error shutdown, and the engine's source-scoped cycle lock.
   The extraction route is GLM-first and the worker must pin the first fallback
-  to `openai:gpt-5.6-terra`; the Terra semantic validator remains unchanged.
+  to `openai:gpt-5.6-terra`; after one successful fallback, `extract_atoms`
+  latches that answering model for the rest of the batch, while the next batch
+  probes GLM once again. The Terra semantic validator remains unchanged.
   Raise concurrency only through measured canaries and keep provider errors,
   validator timeouts, provisional receipts, and source-isolation drift at zero.
 - **Value-ordered reindex:** markdown queue work must be bounded and scoped with

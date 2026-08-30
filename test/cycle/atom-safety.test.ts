@@ -296,6 +296,57 @@ describe('extract_atoms pre-write safety and semantic gate', () => {
     expect(receipts[0].compiled_truth).not.toContain(quoteB);
   });
 
+  test('latches a successful extraction fallback for the rest of the batch', async () => {
+    const primaryModel = 'together:glm-5.3-flash';
+    const fallbackModel = 'openai:gpt-5.6-terra';
+    const quotes = [
+      'The first fallback-backed claim remains grounded.',
+      'The second fallback-backed claim skips the failed primary.',
+    ];
+    await engine.setConfig('models.dream.extract_atoms', primaryModel);
+    const requestedModels: Array<string | undefined> = [];
+    let extractCall = 0;
+
+    const result = await runPhaseExtractAtoms(engine, {
+      _transcripts: quotes.map((quote, index) => ({
+        filePath: `/fallback-${index}.md`,
+        content: substantiveSource(quote),
+        contentHash: `fallback-latch-${index}`,
+      })),
+      _pages: [],
+      _chat: async (opts) => {
+        requestedModels.push(opts.model);
+        const quote = quotes[extractCall++]!;
+        return chatResult(atomJson(`Fallback claim ${extractCall}`, quote), fallbackModel);
+      },
+      _semanticValidator: async (input) => passAll(input),
+    });
+
+    expect(requestedModels).toEqual([primaryModel, fallbackModel]);
+    expect(result.details?.model).toBe(primaryModel);
+    expect(result.details?.fallback_latched_model).toBe(fallbackModel);
+    expect(result.details?.actual_models).toEqual({
+      extraction: [fallbackModel],
+      semantic_validator: ['anthropic:validator-actual'],
+    });
+
+    const nextBatchRequested: Array<string | undefined> = [];
+    await runPhaseExtractAtoms(engine, {
+      _transcripts: [{
+        filePath: '/fallback-next-batch.md',
+        content: substantiveSource('The next batch probes the primary again.'),
+        contentHash: 'fallback-latch-next-batch',
+      }],
+      _pages: [],
+      _chat: async (opts) => {
+        nextBatchRequested.push(opts.model);
+        return chatResult('[]', fallbackModel);
+      },
+      _semanticValidator: async (input) => passAll(input),
+    });
+    expect(nextBatchRequested).toEqual([primaryModel]);
+  });
+
   test('multilingual structural fence drops slash, parenthetical-list, and vague-fragment atoms', async () => {
     const quotes = [
       'sensitive_count / semantic_failures stops remain absolute.',
