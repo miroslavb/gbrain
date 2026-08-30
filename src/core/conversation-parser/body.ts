@@ -66,6 +66,11 @@ function extractRawTranscriptPath(page: Page): string | null {
  * (`../`-style traversal in frontmatter is untrusted data — a page synced
  * from a mounted repo must not read arbitrary host files). Returns the
  * resolved absolute path, or null on escape.
+ *
+ * Symlink hardening: lexical containment alone is not enough — a symlink
+ * INSIDE the root can point OUTSIDE it. When the candidate exists, its
+ * realpath must also stay inside the root's realpath; the realpath is what
+ * gets returned so the read hits the verified target.
  */
 interface ResolvedTranscriptPath { path: string; root: string }
 
@@ -105,6 +110,8 @@ function resolveWithinRoot(root: string, rel: string): ResolvedTranscriptPath | 
  * A RELATIVE path that ESCAPES its root is rejected outright (returns null →
  * caller falls back to the summary body); it does not retry lower tiers.
  * An ABSOLUTE path may sit in either root (containment, not resolution).
+ * Every containment check is realpath-hardened (see resolveWithinRoot), so a
+ * symlink inside a root that points outside it is refused, not followed.
  */
 async function resolveTranscriptPath(
   engine: BrainEngine,
@@ -201,6 +208,13 @@ export async function readConversationBodySnapshot(
   const rawTranscript = extractRawTranscriptPath(page);
   if (rawTranscript) {
     const resolved = await resolveTranscriptPath(engine, page, rawTranscript);
+    if (!resolved) {
+      // Refusal is loud but class-only: never echo the attempted path
+      // (existence-oracle discipline) — frontmatter is untrusted data.
+      console.warn(
+        '[conversation-parser] raw_transcript refused (containment); falling back to summary body',
+      );
+    }
     if (resolved && existsSync(resolved.path)) {
       try {
         const raw = readRawTranscriptPathSnapshot(resolved.path, maxBytes, resolved.root);

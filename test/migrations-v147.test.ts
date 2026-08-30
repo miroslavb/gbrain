@@ -3,14 +3,21 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { LATEST_VERSION, MIGRATIONS, runMigrations } from '../src/core/migrate.ts';
 
 let engine: PGLiteEngine;
+let skewEngine: PGLiteEngine;
 
 beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  skewEngine = new PGLiteEngine();
+  await skewEngine.connect({});
+  await skewEngine.initSchema();
 });
 
-afterAll(async () => engine.disconnect());
+afterAll(async () => {
+  await engine.disconnect();
+  await skewEngine.disconnect();
+});
 
 describe('migration v147 — world-only host visibility', () => {
   test('normalizes legacy rows, page metadata, DB default, and config', async () => {
@@ -57,38 +64,31 @@ describe('migration v147 — world-only host visibility', () => {
   }, 30_000);
 
   test('v152 convergence guard repairs a DB that ran the older upgrade candidate', async () => {
-    const skewEngine = new PGLiteEngine();
-    await skewEngine.connect({});
-    try {
-      await skewEngine.initSchema();
-      expect(MIGRATIONS.find((candidate) => candidate.version === 152)?.name)
-        .toBe('world_only_host_visibility_convergence_guard');
+    expect(MIGRATIONS.find((candidate) => candidate.version === 152)?.name)
+      .toBe('world_only_host_visibility_convergence_guard');
 
-      await skewEngine.executeRaw(`ALTER TABLE facts ALTER COLUMN visibility SET DEFAULT 'private'`);
-      await skewEngine.executeRaw(`
-        INSERT INTO facts (source_id, entity_slug, fact, visibility, source)
-        VALUES ('default', 'projects/skew-hidden', 'skew hidden fact', 'private', 'test:migration-v152')
-      `);
-      await skewEngine.putPage('projects/skew-hidden', {
-        title: 'Skew hidden page',
-        type: 'project',
-        frontmatter: { visibility: 'private' },
-        compiled_truth: 'skew hidden page body',
-        timeline: '',
-      });
-      await skewEngine.setConfig('facts.default_visibility', 'private');
-      await skewEngine.setConfig('version', '151');
+    await skewEngine.executeRaw(`ALTER TABLE facts ALTER COLUMN visibility SET DEFAULT 'private'`);
+    await skewEngine.executeRaw(`
+      INSERT INTO facts (source_id, entity_slug, fact, visibility, source)
+      VALUES ('default', 'projects/skew-hidden', 'skew hidden fact', 'private', 'test:migration-v152')
+    `);
+    await skewEngine.putPage('projects/skew-hidden', {
+      title: 'Skew hidden page',
+      type: 'project',
+      frontmatter: { visibility: 'private' },
+      compiled_truth: 'skew hidden page body',
+      timeline: '',
+    });
+    await skewEngine.setConfig('facts.default_visibility', 'private');
+    await skewEngine.setConfig('version', '151');
 
-      expect((await runMigrations(skewEngine)).applied).toBe(1);
-      expect(await skewEngine.getConfig('facts.default_visibility')).toBe('world');
-      expect(await skewEngine.executeRaw<{ private_facts: number; private_pages: number }>(`
-        SELECT
-          (SELECT COUNT(*)::int FROM facts WHERE visibility = 'private') AS private_facts,
-          (SELECT COUNT(*)::int FROM pages WHERE frontmatter->>'visibility' = 'private') AS private_pages
-      `)).toEqual([{ private_facts: 0, private_pages: 0 }]);
-      expect((await runMigrations(skewEngine)).applied).toBe(0);
-    } finally {
-      await skewEngine.disconnect();
-    }
+    expect((await runMigrations(skewEngine)).applied).toBe(1);
+    expect(await skewEngine.getConfig('facts.default_visibility')).toBe('world');
+    expect(await skewEngine.executeRaw<{ private_facts: number; private_pages: number }>(`
+      SELECT
+        (SELECT COUNT(*)::int FROM facts WHERE visibility = 'private') AS private_facts,
+        (SELECT COUNT(*)::int FROM pages WHERE frontmatter->>'visibility' = 'private') AS private_pages
+    `)).toEqual([{ private_facts: 0, private_pages: 0 }]);
+    expect((await runMigrations(skewEngine)).applied).toBe(0);
   }, 30_000);
 });

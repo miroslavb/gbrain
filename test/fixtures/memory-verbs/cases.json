@@ -237,6 +237,13 @@
     "validateSchema": true
   },
   {
+    "name": "entity without the required name param is invalid_params with a suggestion",
+    "verb": "entity",
+    "params": {},
+    "expectErrorCode": "invalid_params",
+    "expectSuggestion": true
+  },
+  {
     "name": "forget expires the remembered fact",
     "verb": "forget",
     "params": {
@@ -283,6 +290,14 @@
     "requiresSynthesizeFlag": true
   },
   {
+    "name": "synthesize without an LLM is a clean unavailable error (never a raw throw) — cost-gated, pass --synthesize",
+    "verb": "synthesize",
+    "params": {
+      "question": "Conformance {{marker}}: keyless error-path probe"
+    },
+    "requiresSynthesizeFlag": true
+  },
+  {
     "name": "context_pack returns a schema-valid bundle for unknown entities (empty, not an error)",
     "verb": "context_pack",
     "params": {
@@ -296,6 +311,16 @@
         "equals": 1
       }
     ]
+  },
+  {
+    "name": "context_pack with a malformed since is invalid_params with a suggestion",
+    "verb": "context_pack",
+    "params": {
+      "entities": "conformance-nonexistent-{{marker}}",
+      "since": "not-a-timestamp"
+    },
+    "expectErrorCode": "invalid_params",
+    "expectSuggestion": true
   },
   {
     "name": "delta with an explicit epoch since returns a schema-valid delta",

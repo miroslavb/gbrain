@@ -377,6 +377,7 @@ async function listCandidatePages(
 ): Promise<ProposeTakesPageRow[]> {
   const where = [
     'deleted_at IS NULL',
+    "type IS DISTINCT FROM 'extract_receipt'",
     'type = ANY($1::text[])',
     'NOT (slug LIKE ANY($2::text[]))',
     'length(compiled_truth) >= $3',
@@ -1403,7 +1404,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
                  (source_id, page_slug, content_hash, source_hash, prompt_version, proposal_run_id,
                   claim_text, kind, holder, weight, domain, evidence_span,
                   dedup_against_fence_rows, model_id)
-               VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::text::jsonb,$13)
                ON CONFLICT (source_id, page_slug, content_hash, prompt_version, md5(claim_text)) DO NOTHING
                RETURNING id`,
               [sourceId, page.slug, ch, promptVersion, proposalRunId, p.claim_text,

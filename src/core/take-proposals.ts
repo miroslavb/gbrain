@@ -41,6 +41,16 @@ export interface TakeProposalRow {
   prompt_version: string;
 }
 
+/** Normalize Postgres driver values to the public numeric row contract. */
+function normalizeTakeProposalRow(row: TakeProposalRow): TakeProposalRow {
+  return {
+    ...row,
+    id: Number(row.id),
+    weight: Number(row.weight),
+    promoted_row_num: row.promoted_row_num == null ? null : Number(row.promoted_row_num),
+  };
+}
+
 export type TakeProposalErrorCode = 'not_found' | 'not_pending' | 'unverified';
 
 export class TakeProposalError extends Error {
@@ -120,7 +130,7 @@ export async function listPendingProposals(
       ) continue;
       const proposal = { ...candidate };
       delete (proposal as Partial<CandidateRow>).current_compiled_truth;
-      visible.push(proposal);
+      visible.push(normalizeTakeProposalRow(proposal));
       if (visible.length === limit) break;
     }
     offset += candidates.length;
@@ -147,7 +157,7 @@ async function loadProposal(
   if (rows.length === 0) {
     throw new TakeProposalError('not_found', `No take proposal #${id}${sourceId ? ` in source '${sourceId}'` : ''}.`);
   }
-  const row = rows[0];
+  const row = normalizeTakeProposalRow(rows[0]);
   if (row.status !== 'pending') {
     // wave-g (#4480 follow-up): a crash between the accept CAS and the fence
     // write (or a failed rollback) strands the row as status='accepted' with

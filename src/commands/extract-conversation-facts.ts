@@ -73,7 +73,7 @@ import {
   type ExtractedFact,
 } from '../core/facts/extract.ts';
 import { configureGatewayIfUninitialized, isAvailable, withBudgetTracker } from '../core/ai/gateway.ts';
-import { BudgetTracker, BudgetExhausted } from '../core/budget/budget-tracker.ts';
+import { BudgetTracker, BudgetExhausted, loadPricingOverrides } from '../core/budget/budget-tracker.ts';
 import { listSources } from '../core/sources-ops.ts';
 import {
   loadOpCheckpoint,
@@ -411,7 +411,6 @@ export interface ExtractConversationFactsResult {
 // effect.
 // ---------------------------------------------------------------------------
 
-import { loadPricingOverrides } from '../core/budget/budget-tracker.ts';
 import {
   deriveDateContext,
   parseConversation,
