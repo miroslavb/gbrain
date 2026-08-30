@@ -85,6 +85,19 @@ function walkSize(root: string, budget: { entries: number }): { bytes: number; i
   const stack: string[] = [root];
   while (stack.length > 0) {
     const dir = stack.pop() as string;
+    try {
+      // A privileged/root process can enumerate a mode-000 directory even
+      // though the stored permission bits deny every ordinary reader. Keep
+      // the assessment conservative and host-independent: such a walk is not
+      // evidence that a normal operator/backup process can see all bytes.
+      if ((lstatSync(dir).mode & 0o444) === 0) {
+        incomplete = true;
+        continue;
+      }
+    } catch {
+      incomplete = true;
+      continue;
+    }
     let handle: ReturnType<typeof opendirSync>;
     try {
       handle = opendirSync(dir);

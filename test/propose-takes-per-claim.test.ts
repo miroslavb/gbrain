@@ -65,11 +65,17 @@ async function putThesis(): Promise<void> {
 describe('#2138 per-claim proposal idempotency', () => {
   test('keeps distinct claims, drops repeated claim, then page-cache hits', async () => {
     await putThesis();
-    const result = await runPhaseProposeTakes(context(), { extractor: proposals });
+    const result = await runPhaseProposeTakes(context(), {
+      extractor: proposals,
+      minPageChars: 0,
+    });
     expect((result.details as Record<string, unknown>).proposals_inserted).toBe(2);
     expect(await countProposals('wiki/essays/thesis')).toBe(2);
 
-    const rerun = await runPhaseProposeTakes(context(), { extractor: proposals });
+    const rerun = await runPhaseProposeTakes(context(), {
+      extractor: proposals,
+      minPageChars: 0,
+    });
     expect((rerun.details as Record<string, unknown>).cache_hits).toBe(1);
     expect(await countProposals('wiki/essays/thesis')).toBe(2);
   });
@@ -87,7 +93,10 @@ describe('#2138 per-claim proposal idempotency', () => {
     }
 
     await putThesis();
-    const result = await runPhaseProposeTakes(context(), { extractor: proposals });
+    const result = await runPhaseProposeTakes(context(), {
+      extractor: proposals,
+      minPageChars: 0,
+    });
     expect((result.details as Record<string, unknown>).proposals_inserted).toBe(2);
     expect(await countProposals('wiki/essays/thesis')).toBe(2);
   });

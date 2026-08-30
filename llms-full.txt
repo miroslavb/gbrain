@@ -77,24 +77,229 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Common tasks
 
+- **Verification hygiene:** generated skill/plugin gates describe the committed
+  tree. Do not make them green by staging or deleting unrelated local reference
+  packs; reproduce branch health in a clean clone. Pay module-size ratchets down
+  by compacting or peeling code instead of silently raising their ceilings.
+- **Autopilot install-test isolation:** tests that call `writeWrapperScript()`
+  must keep the preload's per-run `GBRAIN_HOME` or replace it with another
+  explicit scratch root. Changing `HOME` alone is insufficient under Bun because
+  `os.homedir()` can remain cached. Never let an install test resolve
+  `$GBRAIN_HOME/.gbrain/autopilot-run.sh` to the operator's live wrapper.
+- **Test-fixture determinism:** permission-error tests must not depend on
+  `chmod 000` failing under the current UID; root can still read those paths.
+  Use a deterministic reject/test seam, and pass scratch `GBRAIN_HOME` plus
+  `GBRAIN_AUDIT_DIR` explicitly to subprocesses that assert empty local state.
+- **Global-maintenance observability:** the brain-wide maintenance job owns a
+  60-minute aggregate deadline (distinct from a 30-minute source cycle) and
+  persists canonical `current/last-completed` phase progress at every phase
+  boundary. Keep progress aggregate-only and best-effort so diagnostics never
+  become a new cycle failure mode.
+- **Dead-job retention:** back up `minion_jobs` and its job-owned child tables
+  before archival. Use `gbrain jobs prune --status dead` to remove only old
+  dead letters; never consume completed-job retention as a side effect of a
+  dead-job audit.
 - **Conversation-facts epoch safety:** stage every page in bounded memory and
   publish extractor-owned rows plus the terminal marker in one reconcile
   transaction. Lock/recheck page identity; for `raw_transcript`, use the
   symlink-safe bounded reader and run the sidecar digest check both before and
   after row mutations. Any failure preserves the previous completed epoch.
+  Preserve quality-gate `supersedes_id` through staging: the same reconcile
+  transaction must insert the replacement and set the old active fact's
+  `expired_at` plus `superseded_by=new.id`. Missing, foreign-source,
+  wrong-entity, or already-expired targets roll back the whole page. Normalize
+  Postgres BIGINT fact ids to safe JS numbers before transporting lineage.
+- **Duplicate-content signal:** doctor counts every same-source content-hash
+  group, but dependency trees and exact declared distribution/fixture/locale
+  replicas are non-actionable details. Any other distinct-slug group remains
+  a warning; never add a broad prefix exemption to make the check green.
+- **Interrupted transcript quarantine:** the exact Hermes
+  `Operation interrupted: waiting for model response (...)` transport status
+  is not conversation content. Drop it before conversation-facts segmentation,
+  so a request with no completed reply becomes a durable non-extractable
+  outcome instead of publishing requested work as fact.
+- **Indexed-session parser coverage:** generated Hermes previews use closed-role
+  `**User|Assistant|System|Tool|Human** (YYYY-MM-DD): text` anchors. Keep the
+  date-only parser role-enumerated, continuation-aware, and day-accurate at
+  midnight UTC; arbitrary dated bold labels must not become speakers.
+  Conversation-format coverage and facts extraction must distinguish true parser
+  gaps (canonical session/conversation slugs, transcript metadata, or repeated
+  speaker anchors) from narrative meetings and code/docs accidentally typed as
+  `email`; definitive non-transcripts receive a durable non-extractable outcome.
+  Legacy `# Session` pages containing `## Summary`,
+  `## User Questions`, and `## Key Assistant Responses` are generated summaries,
+  not speaker-turn transcripts; mark them non-extractable unless a raw transcript
+  path is present.
+- **MDX route slugs:** slash-prefixed `slug:` values in `.mdx` are external
+  website routes (for example Docusaurus `slug: /`), not GBrain identities.
+  Ignore the route during file import and frontmatter audit, and retain the path-derived DB slug;
+  non-route mismatches must still fail as page-hijack attempts.
+- **Frontmatter audit scope:** prune bare and named Python environments (`venv/`,
+  `*-venv/`) as dependency trees. A synthetic fixture may declare
+  `frontmatter_audit_exemptions: [SLUG_MISMATCH]` when its canonical test
+  identity intentionally differs from its repository path; this suppresses
+  audit reporting only and never weakens import validation.
+- **Drift parity:** `multi_source_drift` must use the same file-admission
+  boundary as source sync. In particular, markdown symlinks are not pages and
+  must never create a false misroute warning.
+- **Graph denominators:** brain-score graph components cover canonical
+  concept/project/analysis/guide/person/company/entity/organization pages.
+  Report session/archive isolation separately, including parent-session entity
+  links; never improve the score by hiding the curated island backlog.
+- **Type-proliferation denominator:** count semantic taxonomy choices outside
+  archive/generated contours (`sessions/`, `life/events/`, `atoms/`,
+  `extracts/`, `dream-cycle-summaries/`) against the active pack. Report types
+  that exist only inside those contours separately; do not broad-retype durable
+  pages merely to silence the warning.
+- **Scattered DB-only pages:** never declare a broad `storage.db_only` prefix
+  when it contains real file-backed pages or collector output. A reviewed
+  legacy page may instead carry `storage_tier: db_only` plus a non-empty
+  `storage_tier_reason`; doctor, storage status, and restore/export must agree
+  on that page-local declaration.
+- **Take proposals:** legacy rows without exact evidence, source hashes, and a
+  matching successful `proposal_page_runs` receipt are audit history, never an
+  acceptance queue. New producer canaries stay page-bounded; proposal rows and
+  their per-page terminal receipt publish in one transaction. Migration 142
+  must also converge the briefly shipped v127 `outcome`/four-column-PK layout;
+  its sequential handler makes each ALTER visible before dependent SQL because
+  `CREATE TABLE IF NOT EXISTS` alone is not a schema migration. Producer
+  selection is restricted in SQL (before `LIMIT`) to durable concept/atom/lore/
+  briefing/writing/originals pages and also denies operational slug contours
+  (`projects/`, `infra/`, `infrastructure/`, `features/`, generated `*/skill`)
+  plus generic Jira and Confluence import contours (`*/jira/*`, `*/cf/*`)
+  because production type metadata is not authoritative. Conversations,
+  sessions, projects, companies, imported system records, and operational pages
+  are out of scope. The production selector also requires at least 800
+  characters of compiled prose
+  before `LIMIT`; short factual stubs must not consume bounded canary slots.
+  Every selected page passes the shared deterministic full-source sensitivity
+  scanner before any external LLM call. A hit writes only a
+  `quality_rejected/sensitive_source` receipt with deterministic scanner model
+  provenance—never the matched value—and sends no page content externally. The
+  production parser accepts only prediction/judgment/bet outputs whose claim
+  text is itself an exact contiguous substring of the evidence span and carries
+  a deterministic multilingual kind signal (forward/uncertainty for predictions
+  and bets; opinion/evaluation/recommendation for judgments). Bare KPIs, ETAs,
+  historical measurements, procedural facts and headings fail closed even when
+  quoted exactly. Markdown hard-wrap whitespace may be canonicalized only by an
+  exact non-whitespace-character match; persist the recovered source bytes and
+  never use fuzzy/paraphrase grounding. Explicit holders must match the prompt's closed
+  world/brain/people/company forms and explicit weights must be finite in
+  `[0,1]`; do not silently normalize malformed model output. Migration 143 adds
+  aggregate-only first-failure reason histograms to page receipts. These counts
+  and phase details use stable codes only and must never persist source or
+  candidate text. Receipts record the
+  provider/model that actually answered after fallback. Empty outcomes live only
+  in `proposal_page_runs`, dry-run writes nothing, and pending-list reads hide
+  proposals whose source snapshot or evidence is no longer current.
+  Acceptance is crash-retryable across the markdown-canonical write and queue
+  acknowledgement: an injected failure after the canonical write must leave the
+  proposal pending, and retry must converge on the existing exact take without
+  adding a duplicate. Keep acceptance tests synthetic; production legacy and
+  canary proposals remain unaccepted unless the operator explicitly changes
+  that decision.
 - **Extraction quality gates:** conversation facts and atoms must pass the
   deterministic sensitive scanner and the batched semantic support/atomicity
   gate before any write. Gate failure is fail-closed; receipts contain counts,
   stable reason codes, and actual route/model only—never source or candidate text.
+  Bind receipt histograms as raw JSON objects through `executeRawJsonb`; migration
+  144 repairs double-encoded JSONB strings and enforces object-shaped histograms.
+  Migration 145 marks only guarded legacy `extracts/` operation receipts as
+  raw-trace-exempt when their existing `run_id`/`round`/`source_id` tuple is the
+  durable trace; never apply that exemption to an ordinary synthesis page.
+  The conversation extractor prompt must also exclude IP/email/phone values,
+  credentials, private paths, and secret-bearing URLs before candidates reach
+  the gate. Redact those values plus configured sensitive literals before the
+  LLM call; deterministic post-LLM rejection remains mandatory defense in depth.
+  The prompt must also split independent clauses and never invent causal language;
+  the semantic atomicity/hidden-causation gate remains fail-closed.
+  Atom budget accounting must load `pricing.overrides` for both the extractor
+  and semantic-validator routes; preserve typed `BudgetExhausted` stops instead
+  of folding them into semantic rejection counts.
+  Exact-quote atoms also fail closed on multilingual compound/list evidence
+  (including spaced slashes and parenthetical enumerations) and vague/deictic
+  fragments before the semantic batch. An unchanged page whose candidates all
+  fail deterministic or semantic quality gates receives three bounded attempts;
+  only then may a hash-keyed terminal marker clear it from the atom backlog.
+  Provider failures, validator timeouts/invalid responses, and invalid safety
+  configuration never consume that allowance. Persist only stable aggregate
+  reason counts, never source or candidate text. JSON-stringified reason maps
+  must bind through `$N::text::jsonb` (or a raw-object JSONB helper), never
+  directly through `$N::jsonb`, so Postgres drivers cannot double-encode them.
 - **Chronicle yield gate:** explicit conversation `message_count < 100` is
   ineligible, including note-typed `conversations/` rescue pages. Meetings and
   calendar events are unaffected; missing metadata keeps legacy eligibility.
-  Backstop, backfill, and advisor must call the same predicate.
+  Backstop, backfill, and advisor must call the same predicate. Bounded
+  backfill canaries must set `--max-total`; it is a hard cross-type admission
+  cap and selects newest eligible pages globally after per-type discovery.
 - **Drain containment:** `cycle.propose_takes.enabled` is default-off; only an
   explicit true value or trusted one-shot `--once` runs it. Keep atom auto-drain
   and conversation-facts bulk drain disabled until bounded quality canaries pass.
+  Pack-gated cycle phases must resolve the active pack through the DB-aware local
+  engine loader; a stale file-plane `schema_pack` must never shadow a brain-wide
+  DB-plane activation in cycle, doctor, or autopilot decisions. Preserve the
+  conflicting DB/file regression in `test/cycle-pack-gating.test.ts`.
+- **Atom population containment:** pack-extractable `note` and `conversation`
+  pages require frontmatter `atom_extract: true`; `atom_extract: false` denies
+  any otherwise extractable page. Discovery, backlog/doctor, drain, and
+  autopilot must share this predicate. Do not broaden these high-volume types
+  back to implicit eligibility without a measured, privacy-safe corpus canary.
+- **Parallel atom mining:** use one `scripts/atom-mine-source-worker.sh` process
+  per explicit source. Never mix the legacy unscoped cycle with source workers;
+  each worker must retain aggregate-only JSONL receipts, a heartbeat, bounded
+  infrastructure-error shutdown, and the engine's source-scoped cycle lock.
+  The extraction route is GLM-first and the worker must pin the first fallback
+  to `openai:gpt-5.6-terra`; after one successful fallback, `extract_atoms`
+  latches that answering model for the rest of the batch, while the next batch
+  probes GLM once again. The Terra semantic validator remains unchanged.
+  Raise concurrency only through measured canaries and keep provider errors,
+  validator timeouts, provisional receipts, and source-isolation drift at zero.
+- **Value-ordered reindex:** markdown queue work must be bounded and scoped with
+  `--source` / `--type` / `--prefix` / `--retrieved-since`, then ordered with
+  `--hot-first`. Benchmark 100 representative pages with four workers before
+  any broader tranche; JSON output must echo the resolved scope.
+- **Embedding migration outage containment:** the stale drain must open a
+  whole-provider circuit after three consecutive provider-wide failures; a
+  dead backend must never become one error per remaining page. Preserve the
+  resumable checkpoint and keep content-shaped 400/413/422 failures isolated
+  per page. llama.cpp physical-batch overflow is content-shaped even when its
+  HTTP surface reports 500; classify its stable message before generic
+  transient handling so it neither opens the provider circuit nor darkens all
+  sibling chunks. Migration progress is page-based with an unknown total unless an
+  exact stale-page census exists; never synthesize a chunk/page denominator
+  that can render above 100%.
+- **Chunkless-page census parity:** count/list/heal only pages with
+  non-whitespace compiled truth or timeline. A newline-only code stub cannot
+  produce chunks and must not keep migrations permanently "chunkless".
+- **Fact-vector catch-up is explicit:** embedding migrations report active
+  NULL fact vectors separately. Heal them with bounded/dry-run validation then
+  `embed --stale --facts --catch-up`; this lane only embeds stored fact text
+  under a fixed start-of-run fact-id watermark and must never re-run extraction
+  or enable a mass facts gate. Require `snapshot_remaining=0` from its receipt.
+- **Bounded stale extraction:** link/timeline backlog canaries must set
+  `extract --stale --max-pages N`; the exact cross-batch cap wins over
+  `--catch-up`. Validate page freshness plus link/timeline graph integrity after
+  the 100-page tranche before admitting the 500-page tranche.
+  The link identity constraint must be `UNIQUE NULLS NOT DISTINCT` over
+  `(from_page_id,to_page_id,link_type,link_source,origin_page_id)`; migration
+  v141 repairs legacy `*_key` constraints and retains the earliest duplicate.
 - **Private documents:** ordinary search excludes `docs/inbox/`; uploaded
   documents are read only through the caller-aware document ACL surface.
+- **Operational-health semantics (2026-08-25):** graph scoring uses canonical
+  slug+type contours; session-parent coverage keeps the raw archive denominator
+  visible but scores only independently eligible parents; entity coverage uses
+  live inbound endpoints. Reranker failures and extract rollups are immutable
+  history: later recovery is append-only and source/model scoped. Schema v146
+  stores extraction current state separately from seven-calendar-day rollups.
+  A successful full-source atoms scan with zero eligible pages publishes only
+  source-scoped current completion; it must not add a historical completed
+  round, and targeted/test-seam empties or failed discovery publish no recovery.
+  Oversized/flagged inventories stay visible and warn only on unacknowledged
+  actionable rows. Home/worktree detection must use Git's resolved worktree,
+  never mere `.git` existence. The legacy facts-fence migration writes the
+  canonical markdown body through to `pages.compiled_truth` before publishing
+  row ownership; its no-embed projection intentionally leaves changed chunks
+  for a bounded stale-embedding pass.
 
 - **Configure:** [`docs/ENGINES.md`](./docs/ENGINES.md),
   [`docs/guides/live-sync.md`](./docs/guides/live-sync.md),

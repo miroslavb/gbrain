@@ -813,6 +813,11 @@ test('every CREATE INDEX column in PGLITE_SCHEMA_SQL is covered by CREATE TABLE 
 // ─────────────────────────────────────────────────────────────────
 
 const COLUMN_EXEMPTIONS = new Set<string>([
+  // Migration v140 proposal-receipt convergence temporarily restores the
+  // briefly shipped `outcome` prototype column, copies it into canonical
+  // `status`, then drops it in the same handler. It is never a steady-state
+  // schema column and therefore must not enter either forward bootstrap.
+  'proposal_page_runs.outcome',
   // T7 — search_telemetry rank-1 drift columns (migration v111). search_telemetry
   // is created entirely by migration v57 (not in the schema blob), so the v57+v111
   // chain handles fresh + upgrade; no CREATE INDEX references these columns, so

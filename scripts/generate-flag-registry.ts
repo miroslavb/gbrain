@@ -43,7 +43,14 @@ const EXTRA_FLAGS: Record<string, string[]> = {
  * scanning the router bleeds takes/quarantine flags into jobs (whose case
  * block imports it for the `jobs stats` thin-client route).
  */
-const EXCLUDED_MODULES = ['thin-client-routing.ts'];
+const EXCLUDED_MODULES = [
+  'thin-client-routing.ts',
+  // Git plumbing carries argv literals such as `--show-toplevel`; commands
+  // importing the helper do not consume those as their own CLI flags. The
+  // sync command still scans this peeled module explicitly via
+  // facadeExpansion('src/commands/sync.ts').
+  'sync-git.ts',
+];
 
 function isExcludedModule(p: string): boolean {
   return EXCLUDED_MODULES.some(m => p.endsWith(`/${m}`));

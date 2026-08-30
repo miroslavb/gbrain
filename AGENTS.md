@@ -73,6 +73,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   explicit scratch root. Changing `HOME` alone is insufficient under Bun because
   `os.homedir()` can remain cached. Never let an install test resolve
   `$GBRAIN_HOME/.gbrain/autopilot-run.sh` to the operator's live wrapper.
+- **Test-fixture determinism:** permission-error tests must not depend on
+  `chmod 000` failing under the current UID; root can still read those paths.
+  Use a deterministic reject/test seam, and pass scratch `GBRAIN_HOME` plus
+  `GBRAIN_AUDIT_DIR` explicitly to subprocesses that assert empty local state.
 - **Global-maintenance observability:** the brain-wide maintenance job owns a
   60-minute aggregate deadline (distinct from a 30-minute source cycle) and
   persists canonical `current/last-completed` phase progress at every phase
