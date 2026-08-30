@@ -213,7 +213,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   of folding them into semantic rejection counts.
   Exact-quote atoms also fail closed on multilingual compound/list evidence
   (including spaced slashes and parenthetical enumerations) and vague/deictic
-  fragments before the semantic batch. An unchanged page whose candidates all
+  fragments before the semantic batch. A precision-biased generic-subject
+  fence also rejects context-dependent clauses such as bare "the system",
+  "buttons", "theme", or "endpoint" subjects; a title may never repair their
+  missing source identity, while explicitly named subjects remain eligible.
+  An unchanged page whose candidates all
   fail deterministic or semantic quality gates receives three bounded attempts;
   only then may a hash-keyed terminal marker clear it from the atom backlog.
   Provider failures, validator timeouts/invalid responses, and invalid safety

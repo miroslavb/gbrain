@@ -307,6 +307,17 @@ const MAX_GROUNDED_BODY_CHARS = 280;
 const COMPOUND_CLAIM_JOIN_RE = /(?:\b(?:and|but|while|whereas|therefore|so)\b|(?:^|[\s,])(?:и|но|а также|тогда как|поэтому)(?=$|[\s,]))/iu;
 const DEICTIC_START_RE = /^(?:this|that|it|they|these|those|such)\b/i;
 const RU_DEICTIC_OR_VAGUE_START_RE = /^(?:это|этот|эта|эти|он|она|оно|они|такой|такая|такие|значение|значения|параметр|параметры|данные)(?=$|[\s,:;.!?-])/iu;
+// A title cannot repair an evidence quote whose grammatical subject is only
+// meaningful inside the source page. Production sampling found that the
+// semantic validator still accepted bare subjects such as "Buttons ...",
+// "Dark theme ...", and a post-comma "the system ...". Keep this fence
+// precision-biased: named subjects before these nouns do not match.
+const CONTEXTLESS_GENERIC_SUBJECT_RE =
+  /(?:^|[,\u2013\u2014]\s+)(?:(?:the|a|an)\s+)?(?:system|site|website|app|application|model|workflow|pipeline|configuration|config|process|phase|buttons?|themes?|endpoints?|hover\s+states?|override|values?|data|operations?|ops|ratios?)\b/iu;
+const CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE =
+  /^(?:(?:current|existing|default|dark|light|different|several|multiple)\s+)(?:buttons?|themes?|operations?|ops|ratios?)\b|^(?:four|\d+)\s+[a-z0-9-]+\s+(?:operations?|ops)\b|^different\s+feed\/kill\s+ratios?\b/iu;
+const RU_CONTEXTLESS_GENERIC_SUBJECT_RE =
+  /(?:^|[,\u2013\u2014]\s+)(?:(?:эта|этот|эти)\s+)?(?:система|сайт|приложение|проект|репозиторий|сервис|платформа|модель|процесс|этап|кнопки?|тема|эндпоинт|воркфлоу|пайплайн)(?=$|[\s,:;.!?-])/iu;
 const INLINE_ENUMERATION_RE = /(?:\s\/\s|\([^)]*(?:,|\/|\b(?:including|included|incl\.?)\b|(?:включая|в\s+т\.?\s*ч\.?)(?=$|[\s,]))[^)]*\))/iu;
 
 function isSingleAtomicSentence(value: string, maxChars: number): boolean {
@@ -322,6 +333,9 @@ function isSelfContainedAtomicEvidence(value: string): boolean {
   return !COMPOUND_CLAIM_JOIN_RE.test(text)
     && !DEICTIC_START_RE.test(text)
     && !RU_DEICTIC_OR_VAGUE_START_RE.test(text)
+    && !CONTEXTLESS_GENERIC_SUBJECT_RE.test(text)
+    && !CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE.test(text)
+    && !RU_CONTEXTLESS_GENERIC_SUBJECT_RE.test(text)
     && !INLINE_ENUMERATION_RE.test(text);
 }
 
