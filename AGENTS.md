@@ -108,6 +108,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Autopilot ownership:** when `gbrain-autopilot.service` exists, it is the
   only daemon owner. The cron watchdog may start/restart the unit but must never
   invoke `autopilot-run.sh` directly; otherwise systemd loops on the live lock.
+  A persistent or runtime systemd mask is an operator fence: the watchdog must
+  exit without starting either the unit or its direct fallback. Detect the mask
+  symlink before `systemctl cat`, because `cat` exits nonzero for masked units
+  and must not make an installed unit look absent. The canonical host script is
+  `scripts/host/autopilot-watchdog.sh`; deploy it to
+  `/root/.gbrain/autopilot-watchdog.sh` and keep the exact 10-minute cron row.
 - **Duplicate-content signal:** doctor counts every same-source content-hash
   group, but dependency trees and exact declared distribution/fixture/locale
   replicas are non-actionable details. Any other distinct-slug group remains
