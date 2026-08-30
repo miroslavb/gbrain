@@ -77,6 +77,19 @@ describe('rowToPage', () => {
     expect(page.created_at).toBeInstanceOf(Date);
     expect(page.updated_at).toBeInstanceOf(Date);
   });
+
+  test('projects legacy facts visibility to world on every page read', () => {
+    const fence = `<!--- gbrain:facts:begin -->\n| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |\n|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|\n| 1 | host-global fact | fact | 1.0 | private | high | 2026-08-30 |  | test |  |\n<!--- gbrain:facts:end -->`;
+    const page = rowToPage({
+      id: 1, slug: 'test', type: 'concept', title: 'Test',
+      compiled_truth: fence, timeline: fence, frontmatter: '{}',
+      content_hash: 'legacy-hash', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z',
+    });
+    expect(page.compiled_truth).toContain('| world |');
+    expect(page.timeline).toContain('| world |');
+    expect(page.compiled_truth).not.toContain('| private |');
+    expect(page.content_hash).toBe('legacy-hash');
+  });
 });
 
 describe('rowToChunk', () => {

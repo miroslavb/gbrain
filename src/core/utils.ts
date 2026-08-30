@@ -6,6 +6,7 @@ import type { StaleTakeRow } from './takes-row-types.ts';
 // truth for the hash-ephemeral frontmatter keys shared with the importer.
 import { QUARANTINE_KEY, CONTENT_FLAG_KEY } from './quarantine.ts';
 import { EMBED_SKIP_KEY } from './embed-skip.ts';
+import { projectFactsFenceWorldOnly } from './facts-fence.ts';
 
 /**
  * SHA-256 hash a token/secret for storage. Never store plaintext tokens.
@@ -197,8 +198,12 @@ export function rowToPage(row: Record<string, unknown>): Page {
     slug: row.slug as string,
     type: row.type as string,
     title: row.title as string,
-    compiled_truth: row.compiled_truth as string,
-    timeline: row.timeline as string,
+    // Single-principal host invariant: legacy vault rows may still carry a
+    // textual `private` cell in an otherwise-valid facts fence even though
+    // the facts index/default/config are already world-only. Project those
+    // cells on every engine read without churning stored content hashes.
+    compiled_truth: projectFactsFenceWorldOnly(row.compiled_truth as string),
+    timeline: projectFactsFenceWorldOnly(row.timeline as string),
     frontmatter: (typeof row.frontmatter === 'string' ? JSON.parse(row.frontmatter) : row.frontmatter) as Record<string, unknown>,
     content_hash: row.content_hash as string | undefined,
     // v0.29 (column added in migration v40). Old brains pre-migration return undefined.

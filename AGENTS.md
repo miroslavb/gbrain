@@ -105,6 +105,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   upgrade train; never reuse or reorder the version-only ledger entry v147.
   Migration v152 idempotently reasserts world-only state for any disposable DB
   that ran the older candidate where upstream migrations occupied v147-v150.
+  Historical vault pages may still store legacy `private` cells inside facts
+  fences; every engine read must project a clean fence to `world` without
+  mutating the stored page/hash, while malformed fences remain byte-identical.
+  This keeps agent-facing material world-only without fabricating extraction
+  staleness from a metadata-only rewrite.
 - **Autopilot ownership:** when `gbrain-autopilot.service` exists, it is the
   only daemon owner. The cron watchdog may start/restart the unit but must never
   invoke `autopilot-run.sh` directly; otherwise systemd loops on the live lock.

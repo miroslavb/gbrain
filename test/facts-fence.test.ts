@@ -15,6 +15,7 @@ import {
   renderFactsTable,
   upsertFactRow,
   stripFactsFence,
+  projectFactsFenceWorldOnly,
   FACTS_FENCE_BEGIN,
   FACTS_FENCE_END,
   type ParsedFact,
@@ -342,6 +343,27 @@ describe('renderFactsTable', () => {
     expect(out).toContain('| 1.0 |');
     expect(out).toContain('| 0.85 |');
     expect(out).toContain('| 0.5 |');
+  });
+});
+
+describe('projectFactsFenceWorldOnly', () => {
+  test('projects legacy private visibility cells in a valid fence', () => {
+    const body = wrapFenceBody(
+      `| 1 | visible to every host agent | fact | 1.0 | private | high | 2026-01-01 |  | src |  |`,
+    );
+    const projected = projectFactsFenceWorldOnly(body);
+    expect(projected).toContain('| 1 | visible to every host agent | fact | 1.0 | world | high |');
+    expect(projected).not.toContain('| private |');
+  });
+
+  test('leaves unrelated markdown tables byte-identical', () => {
+    const body = '# Page\n\n| key | value |\n|---|---|\n| visibility | private |\n';
+    expect(projectFactsFenceWorldOnly(body)).toBe(body);
+  });
+
+  test('leaves malformed fences byte-identical instead of dropping rows', () => {
+    const body = `${FACTS_FENCE_BEGIN}\n| 1 | claim | fact | 1.0 | private | medium |`;
+    expect(projectFactsFenceWorldOnly(body)).toBe(body);
   });
 });
 

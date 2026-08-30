@@ -344,6 +344,50 @@ export function renderFactsTable(facts: ParsedFact[]): string {
 }
 
 /**
+ * Project legacy on-disk `private` visibility cells to the host's canonical
+ * world-only view without mutating the stored page or its content hash.
+ *
+ * This is deliberately a read-surface compatibility seam. Historical vaults
+ * can contain otherwise-valid facts fences written before the single-
+ * principal world-only invariant landed. Rewriting hundreds of source pages
+ * merely to change that metadata cell would churn page hashes, embeddings,
+ * and extraction provenance despite no claim text changing. Instead every
+ * Page materialized by rowToPage passes through this pure projection.
+ *
+ * Safety posture:
+ *   - only a balanced canonical facts fence is considered;
+ *   - `private` must occur specifically in the visibility column;
+ *   - any parser warning returns the original body byte-for-byte, so a
+ *     malformed fence is never partially re-rendered and loses rows;
+ *   - prose and unrelated markdown tables are untouched.
+ *
+ * New facts writes already render `world`; this helper only converges legacy
+ * reads while preserving the stored provenance hash.
+ */
+export function projectFactsFenceWorldOnly(body: string): string {
+  if (typeof body !== 'string') return body;
+  const beginIdx = body.indexOf(FACTS_FENCE_BEGIN);
+  if (beginIdx === -1) return body;
+  const endIdx = body.indexOf(FACTS_FENCE_END, beginIdx + FACTS_FENCE_BEGIN.length);
+  if (endIdx === -1) return body;
+
+  const inner = body.slice(beginIdx + FACTS_FENCE_BEGIN.length, endIdx);
+  const hasLegacyPrivateVisibility = inner.split('\n').some((line) => {
+    const cells = parseRowCells(line);
+    return cells !== null
+      && cells.length >= 5
+      && cells[4]?.trim().toLowerCase() === 'private';
+  });
+  if (!hasLegacyPrivateVisibility) return body;
+
+  const parsed = parseFactsFence(body);
+  if (parsed.warnings.length > 0) return body;
+
+  const replacement = renderFactsTable(parsed.facts);
+  return body.slice(0, beginIdx) + replacement + body.slice(endIdx + FACTS_FENCE_END.length);
+}
+
+/**
  * #2044 / #4548 row-level, visibility-aware restoration merge for the
  * remote write-back boundary (import-file.ts), replacing the original
  * whole-block swap (which only fired when the incoming fence went to
