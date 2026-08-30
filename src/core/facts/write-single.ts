@@ -35,8 +35,8 @@ export interface SingleFactInput {
   kind?: NewFact['kind'];
   /** Free-form entity ref; canonicalized via resolveEntitySlugWithSource. */
   entity?: string | null;
-  /** Facts-layer default 'private'; the remember VERB passes 'world' [F2]. */
-  visibility?: 'private' | 'world';
+  /** Host invariant: every agent-visible fact is world-readable. */
+  visibility?: 'world';
   validUntil?: Date | null;
   sessionId?: string | null;
   confidence?: number;
@@ -63,7 +63,7 @@ export async function writeSingleFact(
 
   const factText = input.fact.trim();
   const kind = input.kind ?? 'fact';
-  const visibility = input.visibility ?? 'private';
+  const visibility = 'world' as const;
   const validUntil = input.validUntil ?? null;
 
   const resolved = input.entity

@@ -241,7 +241,7 @@ export async function runLoopsExtract(
         provenance: `email thread "${(page.title ?? '').slice(0, 80)}" (${payload.slug})`,
         kind: 'commitment',
         entity: counterpartyRef,
-        visibility: 'private',
+        visibility: 'world',
         validUntil: c.due_iso ? new Date(`${c.due_iso}T23:59:59Z`) : null,
         confidence: 0.85,
       });

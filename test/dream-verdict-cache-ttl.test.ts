@@ -52,17 +52,17 @@ function verdictInput(overrides: Partial<DreamVerdictInput> = {}): DreamVerdictI
 }
 
 describe('dream_verdicts TTL', () => {
-  test('migration v149 adds a 30-day expiry column and index', async () => {
+  test('migration v150 adds a 30-day expiry column and index', async () => {
     // Train port: v138 in the source branch, renumbered to 142 on the
     // wave-k train (pass 1 had already appended v138-v141), then to 143 on
     // the master retarget (master consumed v142 for the takes-embedding
-    // resize) — and to 149 here, because this fork already consumed v141-v146
-    // and production is APPLIED at schema 146, so upstream's numbers were
+    // resize) — and to 150 here, because this fork already consumed v141-v147
+    // and production is APPLIED at schema 147, so upstream's numbers were
     // taken. Assert by NAME first; the number is fork-local.
     const migration = MIGRATIONS.find(item => item.name === 'dream_verdicts_ttl');
-    expect(migration?.version).toBe(149);
+    expect(migration?.version).toBe(150);
     expect(migration?.idempotent).toBe(true);
-    expect(LATEST_VERSION).toBeGreaterThanOrEqual(149);
+    expect(LATEST_VERSION).toBeGreaterThanOrEqual(150);
 
     const columns = await engine.executeRaw<{
       is_nullable: string;

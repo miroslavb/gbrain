@@ -813,15 +813,15 @@ test('every CREATE INDEX column in PGLITE_SCHEMA_SQL is covered by CREATE TABLE 
 // ─────────────────────────────────────────────────────────────────
 
 const COLUMN_EXEMPTIONS = new Set<string>([
-  // takes.embedding: the takes table is migration-only (no CREATE TABLE in
-  // PGLITE_SCHEMA_SQL / src/schema.sql), so there is no schema-blob forward
-  // reference for the bootstrap to trip on. The column is created inline in
-  // the takes CREATE TABLE and re-created by migration v126's handler with
-  // the CONFIGURED embedding dimension (dynamic width — cannot be a static
-  // blob column), and idx_takes_embedding_hnsw is created in the same
-  // migration block. Fresh installs and upgrades both get the column + index
-  // from the migration chain, never from the bootstrap.
+  // takes.embedding: takes is migration-only (absent from both schema blobs).
+  // The column is created inline with the table and reconciled by the
+  // configured-dimension migration handler, so there is no schema-blob
+  // forward reference to bootstrap.
   'takes.embedding',
+  // Proposal-receipt convergence temporarily restores the briefly shipped
+  // outcome prototype column, copies it into canonical status, then drops it
+  // in the same handler. It is never a steady-state schema column.
+  'proposal_page_runs.outcome',
   // T7 — search_telemetry rank-1 drift columns (migration v111). search_telemetry
   // is created entirely by migration v57 (not in the schema blob), so the v57+v111
   // chain handles fresh + upgrade; no CREATE INDEX references these columns, so

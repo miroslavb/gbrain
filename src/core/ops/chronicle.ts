@@ -142,11 +142,10 @@ const ontology_propose: Operation = {
     source: { type: 'string', description: 'Provenance (page slug / uri); default "manual".' },
     valid_from: { type: 'string', description: 'ISO date the value became true (default: now).' },
     valid_to: { type: 'string', description: 'ISO date the value stopped being true (default: open).' },
-    visibility: { type: 'string', enum: ['private', 'world'], description: 'Default private.' },
+    visibility: { type: 'string', enum: ['world'], description: 'The only supported visibility is world.' },
   },
   handler: async (ctx, p) => {
-    // [ENG-8] Same unset-vs-explicit ladder as extract_facts: explicit
-    // caller visibility wins; unset resolves facts.default_visibility.
+    // Same world-only write policy as remember/extract_facts.
     const { resolveVisibilityParam } = await import('../facts/visibility.ts');
     return ctx.engine.mergeOntologyFact({
       entitySlug: String(p.entity),

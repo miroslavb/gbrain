@@ -49,8 +49,9 @@ describe('migration v141 — NULL-origin link identity repair', () => {
     `);
     await engine.setConfig('version', '140');
 
+    const expectedApplied = MIGRATIONS.filter(m => m.version > 140).length;
     const first = await runMigrations(engine);
-    expect(first).toMatchObject({ applied: 1, current: LATEST_VERSION });
+    expect(first).toMatchObject({ applied: expectedApplied, current: LATEST_VERSION });
     const rows = await engine.executeRaw<{ context: string }>(
       "SELECT context FROM links WHERE link_type='mentions' ORDER BY id",
     );
@@ -75,7 +76,7 @@ describe('migration v141 — NULL-origin link identity repair', () => {
 
     await engine.setConfig('version', '140');
     const second = await runMigrations(engine);
-    expect(second.applied).toBe(1);
+    expect(second.applied).toBe(expectedApplied);
     expect(await engine.executeRaw("SELECT id FROM links WHERE link_type='mentions'")).toHaveLength(1);
   }, 60_000);
 });

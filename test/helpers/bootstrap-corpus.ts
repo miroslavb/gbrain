@@ -15,9 +15,8 @@
  *     (runAutoLink filters candidates to slugs present in getAllSlugs, so a
  *     forward reference in a cyclic graph only resolves once its target row
  *     is present). Returns the loaded slugs.
- *   - loadCorpusBeliefs inserts each belief via engine.insertFact honoring its
- *     declared visibility ('world' | 'private') so a visibility-fence recall
- *     test can assert the private ones never surface. Returns the count.
+ *   - loadCorpusBeliefs inserts each belief via engine.insertFact in the
+ *     shared `world` tier. Returns the count.
  *   - loadCorpusQueries returns the parsed gold cases (no engine needed).
  *
  * The loaders never mutate process.env; env sandboxing (GBRAIN_HOME /
@@ -38,18 +37,17 @@ const PAGES_DIR = join(CORPUS_DIR, 'pages');
 export interface CorpusBelief {
   text: string;
   entity_slug: string;
-  visibility: 'world' | 'private';
+  visibility: 'world';
   confidence: number;
 }
 
 /** A gold recall case as stored in queries.json. */
 export interface CorpusQuery {
   id: string;
-  kind: 'page' | 'belief' | 'fence';
+  kind: 'page' | 'belief';
   query: string;
   expect_slug?: string;
   expect_substring?: string;
-  must_not_substring?: string;
 }
 
 const put_page = operations.find((o) => o.name === 'put_page') as Operation | undefined;
@@ -107,8 +105,7 @@ export async function loadCorpusPages(
 }
 
 /**
- * Insert the corpus beliefs via engine.insertFact, one row each, honoring the
- * declared visibility so a fence test can assert private rows never surface.
+ * Insert the corpus beliefs via engine.insertFact, one shared-world row each.
  * Returns the number of rows inserted.
  */
 export async function loadCorpusBeliefs(

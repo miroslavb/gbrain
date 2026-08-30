@@ -2388,7 +2388,7 @@ export const MIGRATIONS: Migration[] = [
           fact              TEXT        NOT NULL,
           kind              TEXT        NOT NULL DEFAULT 'fact'
                             CHECK (kind IN ('event','preference','commitment','belief','fact')),
-          visibility        TEXT        NOT NULL DEFAULT 'private'
+          visibility        TEXT        NOT NULL DEFAULT 'world'
                             CHECK (visibility IN ('private','world')),
           notability        TEXT        NOT NULL DEFAULT 'medium'
                             CHECK (notability IN ('high','medium','low')),
@@ -6484,18 +6484,67 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
+    version: 147,
+    name: 'world_only_host_visibility',
+    // This deployment is single-principal: every agent attached to the host
+    // must see the same brain. Keep the legacy enum value readable so old
+    // dumps/fences can be imported, but remove every storage/default path that
+    // can create a hidden tier. Source isolation and document ACL are separate
+    // boundaries and intentionally unchanged.
+    idempotent: true,
+    sql: `
+      UPDATE facts
+         SET visibility = 'world'
+       WHERE visibility = 'private';
+
+      ALTER TABLE facts ALTER COLUMN visibility SET DEFAULT 'world';
+
+      UPDATE pages
+         SET frontmatter = COALESCE(frontmatter, '{}'::jsonb)
+                           || '{"visibility":"world"}'::jsonb
+       WHERE frontmatter->>'visibility' = 'private';
+    `,
+    handler: async (engine) => {
+      await engine.setConfig('facts.default_visibility', 'world');
+    },
+    verify: async (engine) => {
+      const rows = await engine.executeRaw<{
+        private_facts: number;
+        private_pages: number;
+        world_default: boolean;
+      }>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM facts WHERE visibility = 'private') AS private_facts,
+          (SELECT COUNT(*)::int FROM pages WHERE frontmatter->>'visibility' = 'private') AS private_pages,
+          EXISTS (
+            SELECT 1
+              FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = 'facts'
+               AND column_name = 'visibility'
+               AND column_default ILIKE '%world%'
+          ) AS world_default
+      `);
+      return rows[0]?.private_facts === 0
+        && rows[0]?.private_pages === 0
+        && rows[0]?.world_default === true
+        && (await engine.getConfig('facts.default_visibility')) === 'world';
+    },
+  },
+  {
     // ── Upstream v0.47.3.0 migrations, RENUMBERED for this fork ──────────
     // Upstream shipped these as v141-v144. This fork already consumed
-    // v141-v146 (links_identity_nulls_not_distinct_repair,
+    // v141-v147 (links_identity_nulls_not_distinct_repair,
     // grounded_take_proposal_receipts, take_proposal_rejection_reason_receipts,
     // take_proposal_rejection_reason_jsonb_object,
-    // legacy_extract_receipt_raw_trace_exemptions, extract_health_current_state)
-    // and production is APPLIED at version 146, so upstream's numbers are taken.
-    // Renumbered v141->v147, v142->v148, v143->v149, v144->v150; each body is
+    // legacy_extract_receipt_raw_trace_exemptions, extract_health_current_state,
+    // world_only_host_visibility) and production is APPLIED at version 147, so
+    // upstream's numbers are taken. Renumbered v141->v148, v142->v149,
+    // v143->v150, v144->v151; each body is
     // otherwise verbatim upstream. The v14x references inside the comments below
     // are upstream's own historical skew-guard notes about ITS branch spellings
     // and are deliberately left untouched.
-    version: 147,
+    version: 148,
     name: 'extract_rollup_expected_limit',
     // #4482: orthogonal counter for EXPECTED-limit stops (per-source budget /
     // walltime caps working as designed). halt_count keeps its historical
@@ -6511,7 +6560,7 @@ export const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    version: 148,
+    version: 149,
     name: 'takes_embedding_dimension_matches_config',
     // #2089: takes was created with a hard-coded vector(1536), while the
     // configured embedding model can emit another width (for example the
@@ -6566,7 +6615,7 @@ export const MIGRATIONS: Migration[] = [
              WHERE active AND embedding IS NOT NULL`,
         );
       }
-      process.stderr.write(`  v148: takes.embedding resized to vector(${embeddingDim}); existing take vectors cleared\n`);
+      process.stderr.write(`  v149: takes.embedding resized to vector(${embeddingDim}); existing take vectors cleared\n`);
     },
   },
   {
@@ -6575,7 +6624,7 @@ export const MIGRATIONS: Migration[] = [
     // takes-embedding resize above; LATEST_VERSION is Math.max so only the
     // duplicate id needed fixing). Guarded DDL below is idempotent, so a
     // brain that ran the branch's v142 spelling records v143 as a no-op.
-    version: 149,
+    version: 150,
     name: 'dream_verdicts_ttl',
     // #4069 (reimplemented): 30-day TTL on the significance-verdict cache.
     // `triage_version`/`model` (v129) already invalidate rows semantically,
@@ -6600,7 +6649,7 @@ export const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    version: 150,
+    version: 151,
     name: 'open_loops',
     // Gmail-first open-loop engine: the structured record behind
     // "who is waiting on you, what you promised". One row per open loop,
@@ -6708,7 +6757,55 @@ export const MIGRATIONS: Migration[] = [
              WHERE active AND embedding IS NOT NULL`,
         );
       }
-      process.stderr.write(`  v150 skew guard: takes.embedding resized to vector(${embeddingDim})\n`);
+      process.stderr.write(`  v151 skew guard: takes.embedding resized to vector(${embeddingDim})\n`);
+    },
+  },
+  {
+    version: 152,
+    name: 'world_only_host_visibility_convergence_guard',
+    // A disposable DB may have run the pre-world-only v0.47.3 candidate,
+    // where fork-renumbered upstream migrations occupied v147-v150. The
+    // ledger is version-only, so such a DB would otherwise skip canonical
+    // v147. Re-apply the host invariant after the upstream train; this is an
+    // idempotent no-op for production, which already applied v147 correctly.
+    idempotent: true,
+    sql: `
+      UPDATE facts
+         SET visibility = 'world'
+       WHERE visibility = 'private';
+
+      ALTER TABLE facts ALTER COLUMN visibility SET DEFAULT 'world';
+
+      UPDATE pages
+         SET frontmatter = COALESCE(frontmatter, '{}'::jsonb)
+                           || '{"visibility":"world"}'::jsonb
+       WHERE frontmatter->>'visibility' = 'private';
+    `,
+    handler: async (engine) => {
+      await engine.setConfig('facts.default_visibility', 'world');
+    },
+    verify: async (engine) => {
+      const rows = await engine.executeRaw<{
+        private_facts: number;
+        private_pages: number;
+        world_default: boolean;
+      }>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM facts WHERE visibility = 'private') AS private_facts,
+          (SELECT COUNT(*)::int FROM pages WHERE frontmatter->>'visibility' = 'private') AS private_pages,
+          EXISTS (
+            SELECT 1
+              FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = 'facts'
+               AND column_name = 'visibility'
+               AND column_default ILIKE '%world%'
+          ) AS world_default
+      `);
+      return rows[0]?.private_facts === 0
+        && rows[0]?.private_pages === 0
+        && rows[0]?.world_default === true
+        && (await engine.getConfig('facts.default_visibility')) === 'world';
     },
   },
 ];

@@ -1048,7 +1048,6 @@ class ProposeTakesPhase extends BaseCyclePhase {
     const configuredProposeModel = await engine.getConfig?.('models.dream.propose_takes')
       .catch(() => null) ?? null;
     const modelId = opts.model ?? configuredProposeModel ?? getChatModel();
-
     // #4494: configurable extractor output caps (dream.triage.max_tokens
     // precedent — floor 256, retry clamped >= base, fail-open to the #3763
     // defaults on any config-plane error). Thinking models spend reasoning
@@ -1270,7 +1269,10 @@ class ProposeTakesPhase extends BaseCyclePhase {
           pagePath: page.slug,
           pageBody: body,
           existingTakes,
-          modelHint: opts.model,
+          // Use the fully resolved per-phase model, not only the CLI override:
+          // models.dream.propose_takes must control the actual gateway call as
+          // well as provider probing, budget accounting, and receipts.
+          modelHint: modelId,
           // #4494: configurable output caps (see resolution above).
           maxTokens: extractorMaxTokens,
           retryMaxTokens: extractorRetryMaxTokens,

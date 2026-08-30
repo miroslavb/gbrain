@@ -3,7 +3,7 @@
  *
  * Pins:
  *   - Param validation: entity_slug required, non-empty.
- *   - Visibility filter on remote=true callers (R6 / D-CDX-1).
+ *   - World-only visibility parity for local and remote callers.
  *   - Source scoping via sourceScopeOpts (federated vs scalar).
  *   - Stable JSON envelope: points + regressions + drift_score + schema_version=1 (R5).
  *   - Engine result's raw Float32Array embedding is NOT serialized to wire.
@@ -134,8 +134,8 @@ describe('find_trajectory MCP op — registration + shape', () => {
   });
 });
 
-describe('find_trajectory MCP op — visibility filter (R6 / D-CDX-1)', () => {
-  test('remote=true sees only world-visibility points', async () => {
+describe('find_trajectory MCP op — world-only visibility', () => {
+  test('remote=true sees legacy private points in the shared host view', async () => {
     await insertTyped({ entity_slug: 'optraj-vis', metric: 'mrr', value: 50000, visibility: 'private', valid_from: new Date('2026-01-15') });
     await insertTyped({ entity_slug: 'optraj-vis', metric: 'mrr', value: 99999, visibility: 'world',   valid_from: new Date('2026-04-12') });
 
@@ -144,8 +144,8 @@ describe('find_trajectory MCP op — visibility filter (R6 / D-CDX-1)', () => {
     expect(local.points.length).toBe(2);
 
     const remote = await op.handler(mkCtx({ remote: true  }), { entity_slug: 'optraj-vis' }) as any;
-    expect(remote.points.length).toBe(1);
-    expect(remote.points[0].value).toBe(99999);
+    expect(remote.points.length).toBe(2);
+    expect(remote.points.map((point: { value: number }) => point.value)).toEqual([50000, 99999]);
   });
 
   test('FAIL-CLOSED cast bypass: a context missing `remote` is world-only (F7b)', async () => {

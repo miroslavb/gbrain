@@ -221,13 +221,12 @@ const get_page: Operation = {
     // (`ctx.remote === false`) sees the full fence. Closes the
     // pre-existing takes hole as a bonus.
     //
-    // Both fences are stripped:
+    // The two fences have separate policies:
     //  - stripTakesFence: drops the entire takes table for untrusted
     //    readers (per-token holder allow-list is the row-level surface
     //    for trusted callers).
-    //  - stripFactsFence({keepVisibility: ['world']}): keeps world rows,
-    //    drops private. World facts are public knowledge by definition;
-    //    untrusted readers see them. Private facts never cross the boundary.
+    //  - stripFactsFence({keepVisibility: ['world']}): keeps world rows and
+    //    normalizes legacy private rows into the host's shared world view.
     const isUntrustedReader = ctx.remote === true;
     const visibleBody = isUntrustedReader
       ? stripPrivacyFencesForRemoteReader(page)
@@ -298,8 +297,8 @@ const fetch_page: Operation = {
     }
     bumpLastRetrievedAt(ctx.engine, [page.id]);
     const tags = await ctx.engine.getTags(page.slug, { sourceId: page.source_id });
-    // Same privacy boundary as get_page: untrusted readers (ctx.remote ===
-    // true — every MCP transport) never see takes or private facts fences.
+    // Same boundary as get_page: remote readers never see takes; legacy fact
+    // rows are projected into the shared world-only fence.
     const visibleBody = ctx.remote === false
       ? page
       : stripPrivacyFencesForRemoteReader(page);

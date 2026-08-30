@@ -118,7 +118,9 @@ describe('op-layer capture — query', () => {
     expect(row.tool_name).toBe('query');
     expect(row.query).toBe('alice');
     expect(row.remote).toBe(true);
-    expect(row.expand_enabled).toBe(true); // default
+    // Omitted means the config/mode resolution chain decided; capture keeps
+    // that distinct from an explicit per-call true/false override.
+    expect(row.expand_enabled).toBeNull();
     expect(row.vector_enabled).toBe(false); // OPENAI_API_KEY deleted
     expect(row.job_id).toBeNull();
     expect(row.subagent_id).toBeNull();
@@ -131,6 +133,15 @@ describe('op-layer capture — query', () => {
 
     const rows = await engine.listEvalCandidates();
     expect(rows[0]!.remote).toBe(false);
+  });
+
+  test('captures an explicit per-call expansion override', async () => {
+    const ctx = makeCtx({ remote: true });
+    await queryOp.handler(ctx, { query: 'alice', expand: true });
+    await waitForCapture();
+
+    const row = (await engine.listEvalCandidates())[0]!;
+    expect(row.expand_enabled).toBe(true);
   });
 
   test('captures subagent query call with jobId + subagentId', async () => {

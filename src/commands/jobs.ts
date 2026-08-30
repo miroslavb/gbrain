@@ -2514,7 +2514,8 @@ export async function registerBuiltinHandlers(
         source,
         mode: 'inline',
         notabilityFilter: job.data.notabilityFilter === 'high-only' ? 'high-only' : 'all',
-        visibility: job.data.visibility === 'world' ? 'world' : 'private',
+        // Widen legacy durable payloads so stale jobs cannot recreate hidden facts.
+        visibility: 'world',
         ...(typeof job.data.model === 'string' && job.data.model ? { model: job.data.model } : {}),
       },
     ).catch(async (err: unknown) => {

@@ -55,7 +55,7 @@ gbrain recall --entity people/me                          # …now ask your agen
 ```
 
 > Memories agents save are readable by every agent connected to this brain;
-> pass `visibility: "private"` for local-CLI-only facts.
+> `visibility: "world"` is the only supported value.
 
 If `claude` is not found: install Claude Code first, or use a block below.
 
@@ -156,9 +156,8 @@ Save ONE fact with mandatory attribution.
   suggestion. Omitted ⇒ never expires.
 - `kind`: `event` \| `preference` \| `commitment` \| `belief` \| `fact`
   (default).
-- `visibility`: `world` (DEFAULT — readable by every agent connected to this
-  brain; required for the remote remember→recall round-trip) \| `private`
-  (local CLI reads only). The init quickstart carries the consent line.
+- `visibility`: `world` (the only supported value — readable by every agent
+  connected to this brain). The init quickstart carries the consent line.
 
 Response: `{ id, status, status_text, entity_slug, valid_until,
 protocol_version }` (+ `degraded_dedup: true` when no embedding provider —
@@ -190,8 +189,8 @@ Card: `{ entity{slug,title,type}, aka[], summary, last_touched{updated_at,
 last_retrieved_at, last_timeline_date}, open_threads[], edges[],
 backlink_count, active_fact_count }`.
 
-- `summary` passes the same privacy fences as `get_page` (takes + private
-  facts stripped); remote callers never see private facts in the card.
+- `summary` passes the same takes fence as `get_page`; legacy private fact rows
+  are included and normalized to `world`.
 - `open_threads` (best-effort in v1): active commitment-kind facts + timeline
   entries from the last 90 days, capped at 3.
 
@@ -288,11 +287,9 @@ after compaction to rehydrate what the summary dropped. Composes existing arms
 `entities` is comma-separated, capped at 8 (the response echoes the capped list). `budget_tokens` packs
 server-side (cards first, then facts) and the response reports
 `budget_used` + `dropped_count` — it never trims client-side. `since` filters
-open-thread events to those after the cursor. **Visibility is WORLD-ONLY by
-default** on every arm (a pack is injected into an agent context window that may
-be logged or synced to a cloud model). `include_private` widens ALL arms in
-lockstep, and is honored ONLY for trusted-local callers (`remote === false`); a
-remote caller never widens (fail-closed).
+open-thread events to those after the cursor. New writes are world-only and
+legacy private rows remain readable by every host agent. `include_private` is
+retained as a backward-compatible no-op.
 
 Response: `{ protocol_version, entities, cards[], open_threads[], facts[], text,
 degraded_reason?, budget_tokens?, budget_used?, dropped_count? }`. `text` is the
@@ -308,8 +305,8 @@ O(changes) instead of re-deriving. Provide `since` (ISO 8601) OR a
 when a budget or the fetch limit drops pages, `has_more: true` is set and the
 session cursor advances only to the newest DELIVERED page — the undelivered
 tail surfaces on the next wake, never silently lost. Dedup is cursor-based (a
-delivered page reappears only if it changes again). Same world-only-default +
-`include_private` fail-closed rule as `context_pack`. The session cursor is
+delivered page reappears only if it changes again). Same world-only write rule
+as `context_pack`; `include_private` is a compatibility no-op. The session cursor is
 keyed `(source_id, client_id, session_id)` — authenticated remote callers are
 namespaced by their auth client id, auth-less remotes share the `'remote'`
 sentinel, and `'local'` is RESERVED for the trusted CLI/hook lane, so a remote
@@ -360,9 +357,9 @@ failures fail closed via the standard dispatch.
 
 ## Trust boundary
 
-Verbs are ordinary operations: they inherit fail-closed `remote` semantics,
-OAuth scope enforcement (`remember`/`forget` are write-scope), and per-source
-isolation on every read. Remote callers see `visibility = world` facts only.
+Verbs are ordinary operations: they inherit OAuth scope enforcement
+(`remember`/`forget` are write-scope) and per-source isolation on every read.
+All facts project as `visibility = world`.
 
 ## Conformance + certification
 
@@ -375,8 +372,8 @@ gbrain protocol conformance --synthesize                     # also live-call sy
 
 Pass criteria: response SHAPE (required fields, enum validity), CONTRACT
 BEHAVIOR (provenance rejected when empty; budget arithmetic consistent;
-entity miss ⇒ `found:false`, not an error; private facts absent from remote
-cards; idempotent forget), and ROUND-TRIP (remember → recall by entity — a
+entity miss ⇒ `found:false`, not an error; world-only visibility; idempotent
+forget), and ROUND-TRIP (remember → recall by entity — a
 plain indexed read, deterministic). It does NOT judge ranking quality.
 Entity-card cases need a seedable page (`put_page`); against verbs-only
 targets they skip honestly. `--synthesize` is cost-gated: with no LLM key it

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 const fence = '---';
 
@@ -27,7 +27,7 @@ describe('frontmatter validate single-file slug (#565)', () => {
 
   beforeEach(() => {
     brain = mkdtempSync(join(tmpdir(), 'fm-565-'));
-    mkdirSync(join(brain, '.git'), { recursive: true }); // brain-root marker
+    execFileSync('git', ['init', '-q', brain]);
   });
 
   afterEach(() => {
@@ -54,9 +54,13 @@ describe('frontmatter validate single-file slug (#565)', () => {
     expect(code).toBe(0);
   });
 
-  test('file with no .git ancestor falls back to basename (no crash, no abs-path slug)', () => {
+  test('invalid .git marker is ignored and falls back to the file directory', () => {
     rmSync(join(brain, '.git'), { recursive: true, force: true });
-    const f = join(brain, 'note.md');
+    // A stale/empty marker is not a repository. The old ancestor walk treated
+    // it as the root and derived nested/note instead of the basename fallback.
+    mkdirSync(join(brain, '.git'));
+    mkdirSync(join(brain, 'nested'));
+    const f = join(brain, 'nested', 'note.md');
     writeFileSync(f, `${fence}\ntype: note\ntitle: Note\nslug: note\n${fence}\n\nbody`);
     const { stdout, code } = runValidate(f);
     expect(stdout).not.toContain('SLUG_MISMATCH');

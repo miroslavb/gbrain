@@ -8,8 +8,7 @@
  *   - server-side budget packing math (incl. budget < first item)
  *   - query-arm keyword degradation (never an error without embeddings)
  *   - remember contract: provenance_required, ttl forms (P30D trap), enum
- *     kinds, world default + the remote remember→recall round-trip [F2],
- *     private facts hidden from remote readers
+ *     kinds, world-only schema + the remote remember→recall round-trip [F2]
  *   - entity: card shape vs RESPONSE_SCHEMAS, three resolution arms,
  *     miss→suggestions, ZERO-LLM guard (chat transport rigged to throw)
  *   - synthesize: [EXPENSIVE prefix, annotations, clean `unavailable` with
@@ -212,14 +211,15 @@ describe('remember — contract behavior', () => {
     expect(violations).toEqual([]);
   });
 
-  it('remote remember→recall round-trip holds (world default [F2]); private facts stay hidden', async () => {
+  it('remote remember→recall round-trip holds and private is rejected', async () => {
     await callRemote('remember', {
       fact: 'world-visible round-trip fact', provenance: 'test', entity: 'people/roundtrip-test',
     });
-    await callRemote('remember', {
+    const rejected = await callRemote('remember', {
       fact: 'PRIVATE-SENTINEL fact', provenance: 'test', entity: 'people/roundtrip-test',
       visibility: 'private',
     });
+    expect(rejected.isError).toBe(true);
     const { body } = await callRemote('recall', { entity: 'people/roundtrip-test' });
     const texts = body.facts.map((f: { fact: string }) => f.fact).join('|');
     expect(texts).toContain('world-visible round-trip fact');
@@ -353,15 +353,15 @@ describe('entity — card, arms, zero LLM', () => {
     expect(body.card.backlink_count).toBe(0);
   });
 
-  it('remote card never carries private commitment facts (fence test)', async () => {
+  it('remote card carries every world-visible commitment fact', async () => {
     await seedEntityPage('people/fence-test', 'Fence Test Person');
     await callRemote('remember', {
       fact: 'PRIVATE-SENTINEL commitment text', provenance: 'test',
-      entity: 'people/fence-test', kind: 'commitment', visibility: 'private',
+      entity: 'people/fence-test', kind: 'commitment', visibility: 'world',
     });
     const { body } = await callRemote('entity', { name: 'people/fence-test' });
     expect(body.found).toBe(true);
-    expect(JSON.stringify(body.card.open_threads)).not.toContain('PRIVATE-SENTINEL');
+    expect(JSON.stringify(body.card.open_threads)).toContain('PRIVATE-SENTINEL');
   });
 });
 
@@ -466,25 +466,20 @@ describe('forget — idempotency + not_found', () => {
     expect(stillActive[0].expired_at).toBe(null);
   });
 
-  it('[ship P1.1] a remote caller cannot forget a private fact (world-only)', async () => {
-    const r = await callRemote('remember', {
-      fact: 'private fact remote cannot forget', provenance: 'test',
-      entity: 'people/private-forget-test', visibility: 'private',
-    });
-    // remote remember defaults world; force a private one locally instead.
+  it('a remote caller can forget a legacy private fact on the same source', async () => {
     const localRes = await dispatchToolCall(engine, 'remember', {
       fact: 'truly private fact', provenance: 'test',
-      entity: 'people/private-forget-test', visibility: 'private',
+      entity: 'people/private-forget-test', visibility: 'world',
     }, { remote: false, sourceId: 'default' });
     const localId = JSON.parse(localRes.content[0].text).id as string;
+    await engine.executeRaw(`UPDATE facts SET visibility = 'private' WHERE id = $1`, [Number(localId)]);
 
     const res = await dispatchToolCall(engine, 'forget', { id: localId }, {
       remote: true, takesHoldersAllowList: ['world'], sourceId: 'default',
     });
     const body = JSON.parse(res.content[0].text);
-    expect(res.isError).toBe(true);
-    expect(body.error).toBe('not_found'); // remote can't reach a private fact
-    void r;
+    expect(res.isError).toBeFalsy();
+    expect(body.expired).toBe(true);
   });
 });
 

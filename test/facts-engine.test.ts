@@ -64,7 +64,7 @@ describe('insertFact + listFactsByEntity', () => {
     expect(ours).toBeDefined();
     expect(ours!.fact).toBe('alice example fact');
     expect(ours!.kind).toBe('fact');
-    expect(ours!.visibility).toBe('private');
+    expect(ours!.visibility).toBe('world');
     // v0.31.2: row mapper exposes notability; default 'medium' when caller omits.
     expect(ours!.notability).toBe('medium');
     expect(ours!.confidence).toBe(1.0);

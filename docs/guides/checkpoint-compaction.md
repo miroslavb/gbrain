@@ -117,9 +117,9 @@ config while serve resolves it from DB config. Keep
 resolves as a typed `not_found` skip on the flush and the sweep extracts from
 wherever the hook actually wrote.
 
-**Remote thin clients:** link re-pull over remote MCP sees world-grade fences
-(private-visibility facts are stripped by `get_page`'s trust boundary). The
-trusted-local lane (CLI, hooks, IPC) sees the full fence.
+**Remote thin clients:** link re-pull over remote MCP sees the same world-only
+fact view as local agents. Legacy private rows are normalized, not hidden;
+source grants and document ACLs still apply.
 
 ## Compiled views
 
@@ -135,9 +135,8 @@ exactly one source; thin clients are refused — run it on the host install):
 the durable prefixes (`concepts/` `people/` `companies/` `originals/`, cap
 50 each), pages tagged `compile-context` (the explicit pin: always a
 candidate, ranked above every unpinned page — the scan and the budget still
-apply), and the newest 30 days of pages (cap 500). Entries are
-world-visibility excerpts (600 chars max; private-visibility fences never
-leave the brain).
+apply), and the newest 30 days of pages (cap 500). Entries are world-visibility
+excerpts (600 chars max); legacy private fact fences normalize into that view.
 
 Deterministic by construction: selection anchors recency decay to the newest
 `updated_at` among candidates (never wall-clock), ordering is a total order,

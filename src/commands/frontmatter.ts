@@ -33,6 +33,7 @@ import {
 } from '../core/brain-writer.ts';
 import { collectGitVisibleFiles } from '../core/git-visible-files.ts';
 import { isMarkdownFilePath, pruneDir, slugifyPath } from '../core/sync.ts';
+import { discoverGitRoot } from '../core/sync-git.ts';
 
 export async function runFrontmatter(args: string[]): Promise<void> {
   const sub = args[0];
@@ -157,24 +158,20 @@ interface FileValidation {
 }
 
 /**
- * Walk up from `start` (file or dir) to the brain root — the nearest ancestor
- * containing a `.git` marker — so slug derivation is brain-root-relative,
- * matching how sync/extract compute slugs. Falls back to the start's own
- * directory when no marker is found. Fixes #565: for a single-file target,
+ * Resolve the containing Git worktree through Git itself so malformed/stale
+ * `.git` markers cannot change slug derivation. Falls back to the start's own
+ * directory when no valid worktree is found. Fixes #565: for a single-file target,
  * `relative(resolve(target), file)` was empty (target === file) and fell back
  * to the ABSOLUTE path, yielding bogus "root/brain/..." slugs and false
  * SLUG_MISMATCH — which the install-hook pre-commit hook hits on every commit.
  */
 function findBrainRoot(start: string): string {
   const startDir = lstatSync(start).isDirectory() ? start : dirname(start);
-  let candidate = startDir;
-  for (let i = 0; i < 40; i++) {
-    if (existsSync(join(candidate, '.git'))) return candidate;
-    const parent = resolve(candidate, '..');
-    if (parent === candidate) break;
-    candidate = parent;
+  try {
+    return discoverGitRoot(startDir);
+  } catch {
+    return startDir;
   }
-  return startDir;
 }
 
 async function runValidate(rest: string[]): Promise<void> {

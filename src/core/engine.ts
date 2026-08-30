@@ -494,7 +494,7 @@ export const ALL_FACT_KINDS: readonly FactKind[] = [
   'event', 'preference', 'commitment', 'belief', 'fact',
 ] as const;
 
-/** Visibility tier on a fact row. Mirrors takes' world-default ACL contract (D21). */
+/** Legacy storage tier on a fact row. New writes accept only `world`. */
 export type FactVisibility = 'private' | 'world';
 
 /** Status returned by insertFact. */
@@ -535,7 +535,7 @@ export interface NewFact {
   fact: string;
   kind?: FactKind;                     // default 'fact'
   entity_slug?: string | null;
-  visibility?: FactVisibility;          // default 'private'
+  visibility?: FactVisibility;          // legacy callers are normalized to world by every write seam
   context?: string | null;
   valid_from?: Date;                   // default now()
   valid_until?: Date | null;

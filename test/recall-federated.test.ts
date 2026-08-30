@@ -2,8 +2,8 @@
  * cathedral-6 D1b: `recall` honors federated grants. The fact arms route
  * through sourceScopeOpts — a remote caller whose token carries
  * allowedSources sees world facts across every granted source (the spec's
- * cross-agent continuity), while an ungranted source stays invisible and
- * private facts stay local-only. Single-source callers keep the exact
+ * cross-agent continuity), while an ungranted source stays invisible. Legacy
+ * private facts share the host-wide world view. Single-source callers keep the exact
  * pre-v1 single-query path.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
@@ -24,6 +24,15 @@ function ctx(over: Record<string, unknown>): OperationContext {
   } as unknown as OperationContext;
 }
 
+async function rememberLegacyPrivate(sourceId: string, fact: string): Promise<void> {
+  const remember = operationsByName['remember'];
+  await remember.handler(
+    ctx({ remote: false, sourceId }),
+    { fact, provenance: 'recall-federated test', visibility: 'world' },
+  );
+  await engine.executeRaw(`UPDATE facts SET visibility='private' WHERE source_id=$1 AND fact=$2`, [sourceId, fact]);
+}
+
 beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({ database_url: '' });
@@ -39,11 +48,8 @@ beforeAll(async () => {
     ctx({ remote: true, sourceId: 'proj-widget' }),
     { fact: 'The payments provider decision is Stripe-shaped (test marker QQF1)', provenance: 'recall-federated test', visibility: 'world' },
   );
-  // A private fact in proj-widget: must never cross to remote readers.
-  await remember.handler(
-    ctx({ remote: false, sourceId: 'proj-widget' }),
-    { fact: 'Private hunch marker QQF2', provenance: 'recall-federated test', visibility: 'private' },
-  );
+  // Simulate a pre-v147 row; every host agent must still read it.
+  await rememberLegacyPrivate('proj-widget', 'Private hunch marker QQF2');
   // A fact in an UNGRANTED source: must not leak through the federated arm.
   await remember.handler(
     ctx({ remote: true, sourceId: 'nova-notes' }),
@@ -70,7 +76,7 @@ describe('recall federated grants (D1b)', () => {
     const facts = (res.facts ?? []).map((f: any) => String(f.fact));
     expect(facts.some((f: string) => f.includes('QQF1'))).toBe(true);
     expect(facts.some((f: string) => f.includes('QQF3'))).toBe(false); // ungranted source
-    expect(facts.some((f: string) => f.includes('QQF2'))).toBe(false); // private stays hidden
+    expect(facts.some((f: string) => f.includes('QQF2'))).toBe(true);  // legacy row shares world view
   });
 
   it('without the federated grant the foreign source stays invisible (scalar path)', async () => {
@@ -104,10 +110,10 @@ describe('recall federated grants (D1b)', () => {
     const facts = (res.facts ?? []).map((f: any) => String(f.fact));
     expect(facts.some((f: string) => f.includes('QQF1'))).toBe(true);  // granted foreign source
     expect(facts.some((f: string) => f.includes('QQF3'))).toBe(false); // ungranted source
-    expect(facts.some((f: string) => f.includes('QQF2'))).toBe(false); // private stays hidden
+    expect(facts.some((f: string) => f.includes('QQF2'))).toBe(true);  // legacy row shares world view
   });
 
-  it('local trusted caller still reads private facts (visibility unchanged)', async () => {
+  it('local trusted caller reads the same legacy fact', async () => {
     const res: any = await recall().handler(
       ctx({ remote: false, sourceId: 'proj-widget' }),
       {},
@@ -116,12 +122,9 @@ describe('recall federated grants (D1b)', () => {
     expect(facts.some((f: string) => f.includes('QQF2'))).toBe(true);
   });
 
-  it('a private superseded fact is invisible to a remote supersessions=true call', async () => {
+  it('a legacy private superseded fact is visible to a remote supersessions=true call', async () => {
     const remember = operationsByName['remember'];
-    await remember.handler(
-      ctx({ remote: false, sourceId: 'proj-widget' }),
-      { fact: 'Private superseded marker QQF4', provenance: 'recall-federated test', visibility: 'private' },
-    );
+    await rememberLegacyPrivate('proj-widget', 'Private superseded marker QQF4');
     await remember.handler(
       ctx({ remote: true, sourceId: 'proj-widget' }),
       { fact: 'World superseded marker QQF5', provenance: 'recall-federated test', visibility: 'world' },
@@ -133,9 +136,7 @@ describe('recall federated grants (D1b)', () => {
        WHERE fact LIKE '%QQF4%' OR fact LIKE '%QQF5%'`,
     );
 
-    // Remote federated caller: the audit arm filters visibility at the
-    // ENGINE level (before each source's LIMIT) — the private row must
-    // never surface.
+    // Remote federated callers share the same audit material.
     const remoteRes: any = await recall().handler(
       ctx({
         remote: true,
@@ -146,7 +147,7 @@ describe('recall federated grants (D1b)', () => {
     );
     const remoteFacts = (remoteRes.facts ?? []).map((f: any) => String(f.fact));
     expect(remoteFacts.some((f: string) => f.includes('QQF5'))).toBe(true);  // world audit row visible
-    expect(remoteFacts.some((f: string) => f.includes('QQF4'))).toBe(false); // private stays hidden
+    expect(remoteFacts.some((f: string) => f.includes('QQF4'))).toBe(true);  // legacy row visible
 
     // Local trusted caller still sees the private audit row.
     const localRes: any = await recall().handler(
@@ -157,19 +158,13 @@ describe('recall federated grants (D1b)', () => {
     expect(localFacts.some((f: string) => f.includes('QQF4'))).toBe(true);
   });
 
-  it('with limit=1 and the newest supersession private, a remote call still returns the older world row', async () => {
-    // Pre-fix ordering bug: the post-merge visibility filter let the private
-    // newest row consume the single limit slot at the engine, then filtered
-    // it away → empty response instead of the older world-visible row.
+  it('with limit=1, the newest legacy supersession is returned to a remote caller', async () => {
     // Own source so the earlier supersession test's rows can't take the slot.
     await engine.executeRaw(
       `INSERT INTO sources (id, name) VALUES ('sup-limit', 'sup-limit') ON CONFLICT (id) DO NOTHING`,
     );
     const remember = operationsByName['remember'];
-    await remember.handler(
-      ctx({ remote: false, sourceId: 'sup-limit' }),
-      { fact: 'Private newest superseded marker QQF6', provenance: 'recall-federated test', visibility: 'private' },
-    );
+    await rememberLegacyPrivate('sup-limit', 'Private newest superseded marker QQF6');
     await remember.handler(
       ctx({ remote: true, sourceId: 'sup-limit' }),
       { fact: 'World older superseded marker QQF7', provenance: 'recall-federated test', visibility: 'world' },
@@ -188,8 +183,7 @@ describe('recall federated grants (D1b)', () => {
     );
     const facts = (res.facts ?? []).map((f: any) => String(f.fact));
     expect(facts.length).toBe(1);
-    expect(facts[0]).toContain('QQF7');
-    expect(facts.some((f: string) => f.includes('QQF6'))).toBe(false);
+    expect(facts[0]).toContain('QQF6');
   });
 
   it('include_pending sums pending-consolidation counts across the federated grant', async () => {

@@ -140,7 +140,13 @@ async function withEnv2<T>(fn: () => Promise<T>): Promise<T> {
 describe('addSource — Q4 pre-flight collision', () => {
   test('rejects existing id BEFORE any clone work', async () => {
     await withEnv2(async () => {
-      await addSource(engine, { id: 'taken', localPath: '/tmp/a' });
+      // Seed the collision directly. Registering a fake local path would
+      // exercise the newer git-repository validation before this test ever
+      // reaches the collision path it is meant to pin.
+      await engine.executeRaw(
+        `INSERT INTO sources (id, name, local_path, config)
+         VALUES ('taken', 'taken', '/tmp/a', '{}'::jsonb)`,
+      );
       try {
         await addSource(engine, {
           id: 'taken',

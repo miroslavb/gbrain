@@ -47,7 +47,7 @@ const remember: Operation = {
     'provenance is REQUIRED (free text, e.g. "conversation 2026-06-12", "user said in chat", "import: notes.md"). ' +
     'Set `entity` whenever the fact is about a specific person/company/project — entity-scoped recall will not find it otherwise. ' +
     'ttl accepts duration shorthand ("30d", "12h") or an absolute ISO 8601 timestamp; ISO-8601 durations like "P30D" are rejected with a fix. ' +
-    'visibility defaults to "world" (readable by every agent connected to this brain; pass "private" for local-CLI-only facts). ' +
+    'visibility is always "world" (readable by every agent connected to this brain). ' +
     'Response: branch on `status` (inserted|duplicate|superseded), never on `status_text` (human rendering only). ' +
     'On duplicate, `id` is the EXISTING fact\'s id. For bulk extraction from a raw transcript use extract_facts instead.',
   params: {
@@ -75,9 +75,8 @@ const remember: Operation = {
     },
     visibility: {
       type: 'string',
-      enum: ['world', 'private'],
-      description:
-        'world (default): readable by every agent connected to this brain — required for the remote remember→recall round-trip. private: local CLI reads only.',
+      enum: ['world'],
+      description: 'The only supported value is world: readable by every agent connected to this brain.',
     },
   },
   mutating: true,
@@ -118,11 +117,11 @@ const remember: Operation = {
       );
     }
     const visibility = typeof p.visibility === 'string' ? p.visibility : 'world';
-    if (visibility !== 'world' && visibility !== 'private') {
+    if (visibility !== 'world') {
       throw verbError(
         'invalid_params',
         `visibility "${visibility}" is not valid.`,
-        'Use "world" (default — agents can recall it) or "private" (local CLI reads only).',
+        'Use "world"; it is the only visibility supported on this single-principal host.',
       );
     }
     const validUntil = parseTtlParam(p.ttl); // throws verbError(invalid_params) on bad input
@@ -375,13 +374,12 @@ const forget: Operation = {
     }
 
     const { forgetFactInFence } = await import('./facts/forget.ts');
-    // [ship P1.1] trust boundary: scope the forget to the caller's source, and
-    // for remote callers to world-visible facts only — a guessed global id
-    // can't expire facts outside the caller's source or reach private facts.
+    // Scope the forget to the caller's source. Visibility is intentionally
+    // unrestricted because every host agent can act on legacy facts too.
     const result = await forgetFactInFence(ctx.engine, numericId, {
       ...(reason ? { reason } : {}),
       sourceId: ctx.sourceId ?? 'default',
-      worldOnly: ctx.remote !== false,
+      worldOnly: false,
     });
 
     if (!result.ok && result.path === 'not_found') {
@@ -456,7 +454,7 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
             entity_slug: { type: ['string', 'null'] },
             provenance: { type: 'string' },
             valid_until: { type: ['string', 'null'] },
-            visibility: { type: 'string', enum: ['private', 'world'] },
+            visibility: { type: 'string', enum: ['world'] },
           },
         },
       },
@@ -614,8 +612,8 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
       reason: { type: ['string', 'null'] },
     },
   },
-  // v0.45.7 (issue #1) — ambient recall. World-only by default; include_private
-  // widens all arms (local trusted callers only). protocol_version stays 1.
+  // v0.45.7 (issue #1) — ambient recall. The host is now world-only;
+  // include_private remains an additive compatibility no-op. Version stays 1.
   context_pack: {
     type: 'object',
     required: ['protocol_version', 'entities', 'cards', 'open_threads', 'facts'],

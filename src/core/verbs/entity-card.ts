@@ -16,8 +16,8 @@
  * throws for data reasons; each arm is guarded so a pre-page_aliases brain
  * still resolves via arm 2 (same posture as the shipped reflex).
  *
- * Privacy: `summary` runs through safeSynopsis (the get_page fence boundary);
- * facts respect visibility for remote callers (world-only).
+ * Visibility: legacy private facts are readable and normalized; new facts are
+ * world-only on this single-principal host.
  */
 
 import type { BrainEngine, FactRow } from '../engine.ts';
@@ -73,7 +73,7 @@ export interface EntityCard {
   /** Top typed edges, mentions excluded, out-edges first. */
   edges: EntityCardEdge[];
   backlink_count: number;
-  /** Active facts about this entity (capped count; visibility-filtered for remote). */
+  /** Active facts about this entity (capped count). */
   active_fact_count: number;
 }
 
@@ -239,7 +239,7 @@ async function assembleCard(
   remote: boolean,
 ): Promise<EntityCard> {
   const pageSlug = row.slug;
-  const visibility = remote ? (['world'] as ('private' | 'world')[]) : undefined;
+  const visibility = undefined;
 
   // Parallel depth-1 reads — every arm individually fail-soft so a partial
   // brain (no aliases, no timeline) still returns a card.
@@ -373,9 +373,7 @@ async function assembleCard(
   return {
     entity: { slug: pageSlug, title: row.title ?? pageSlug, type: row.type ?? null },
     aka,
-    // v0.45.7: summary widens in lockstep with the card's fact visibility —
-    // remote (world-only) keeps ['world']; a local include_private card widens.
-    summary: safeSynopsis(row, { keepVisibility: remote ? ['world'] : ['private', 'world'] }),
+    summary: safeSynopsis(row, { keepVisibility: ['private', 'world'] }),
     last_touched: {
       updated_at: toIso(row.updated_at),
       last_retrieved_at: toIso(row.last_retrieved_at),

@@ -1,7 +1,7 @@
 /**
  * IPC v2 — discriminated-union protocol tests (agent-bootstrap plan:
  * ENG-3 back-compat, S3#6 secret gating, CX2-10 source binding, A9
- * stale-serve detection, G11 request clamping, S3#1 visibility fence).
+ * stale-serve detection, G11 request clamping, world-only visibility).
  *
  * In-process unix-socket servers only (no subprocess spawns); hermetic
  * in-memory PGLite for the assembly happy path.
@@ -146,7 +146,7 @@ describe('IPC v2 back-compat [ENG-3]', () => {
 });
 
 describe('turn_context over a real socket', () => {
-  test('happy path: pointers + world facts assembled; private facts NEVER cross [S3#1]', async () => {
+  test('happy path: pointers + legacy private facts share the world-only IPC view', async () => {
     const dir = tmpDir();
     const sock = resolveSocketPath(dir);
     const secret = ensureIpcSecret(dir);
@@ -156,10 +156,11 @@ describe('turn_context over a real socket', () => {
       { fact: 'WORLD-FACT alice-example prefers async updates', kind: 'fact', entity_slug: 'people/alice-example', source: 'test', visibility: 'world' },
       { source_id: 'default' },
     );
-    await engine.insertFact(
+    const legacy = await engine.insertFact(
       { fact: 'PRIVATE-FACT secret diligence detail', kind: 'fact', entity_slug: 'people/alice-example', source: 'test', visibility: 'private' },
       { source_id: 'default' },
     );
+    await engine.executeRaw(`UPDATE facts SET visibility = 'private' WHERE id = $1`, [legacy.id]);
 
     const server = await startResolveIpcServer(
       sock,
@@ -191,10 +192,9 @@ describe('turn_context over a real socket', () => {
     expect(r.block!.text.startsWith(TURN_CONTEXT_ENVELOPE)).toBe(true);
     expect(r.block!.text).toContain('people/alice-example');
     expect(r.block!.text).toContain('WORLD-FACT');
-    // The load-bearing S3#1 assertion: a private fact never crosses the IPC boundary.
-    expect(r.block!.text).not.toContain('PRIVATE-FACT');
-    expect(r.block!.text).not.toContain('secret diligence detail');
-    expect(r.block!.factsCount).toBe(1);
+    expect(r.block!.text).toContain('PRIVATE-FACT');
+    expect(r.block!.text).toContain('secret diligence detail');
+    expect(r.block!.factsCount).toBe(2);
   });
 
   test('secret mismatch rejected as unauthorized [S3#6]', async () => {

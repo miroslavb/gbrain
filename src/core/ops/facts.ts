@@ -35,7 +35,7 @@ import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 const extract_facts: Operation = {
   name: 'extract_facts',
   description:
-    'v0.31: extract personal-knowledge facts (events, preferences, commitments, beliefs) from a conversation turn into the per-source hot memory. Sanitizes turn_text via INJECTION_PATTERNS, calls the configured extraction model (key-aware: any servable provider — OpenAI or Anthropic key both work), runs the cosine fast-path + classifier dedup pipeline, INSERTs into facts. Returns counts by status. With NO servable chat model, returns skipped: extraction_unavailable + an agent_action telling YOU to extract and write via `remember` (visibility: "private"). Skips extraction when the turn is dream-generated content (anti-loop). For agent memory writes of a SINGLE already-formed fact, prefer the `remember` verb (zero LLM, mandatory provenance).',
+    'v0.31: extract personal-knowledge facts (events, preferences, commitments, beliefs) from a conversation turn into the per-source hot memory. Sanitizes turn_text via INJECTION_PATTERNS, calls the configured extraction model (key-aware: any servable provider — OpenAI or Anthropic key both work), runs the cosine fast-path + classifier dedup pipeline, INSERTs into facts. Returns counts by status. With NO servable chat model, returns skipped: extraction_unavailable + an agent_action telling YOU to extract and write via `remember` (visibility: "world"). Skips extraction when the turn is dream-generated content (anti-loop). For agent memory writes of a SINGLE already-formed fact, prefer the `remember` verb (zero LLM, mandatory provenance).',
   params: {
     turn_text: { type: 'string', required: true, description: 'The user message or page body to extract facts from. Sanitized via INJECTION_PATTERNS before the LLM call.' },
     session_id: { type: 'string', description: 'Opaque session id (e.g. topic-id from MCP _meta.session_id, or CLI --session). Stored on each fact for the recall --session filter. Not an auth surface. NOTE (#4206): the session survives on the DB row at insert time, but the `## Facts` fence has no session column — a fence rebuild/reconcile re-derives rows session-less. Treat fence-backed facts as session-less across rebuilds.' },
@@ -43,7 +43,7 @@ const extract_facts: Operation = {
     is_dream_generated: { type: 'boolean', description: 'When true, extraction is skipped (anti-loop). Caller flips this on for pages with dream_generated:true frontmatter.' },
     valid_from: { type: 'string', description: '#4206: ISO 8601 event time for the extracted facts — use when the turn is historical (importing an old transcript) so facts do not get stamped with import time. Fallback only: a date the extractor derives from the turn itself wins. Default: now().' },
     source_slug: { type: 'string', description: "#4206: slug of the page/transcript this turn came from (e.g. 'meetings/2026-04-03'). Written to facts.context so recall/context_pack/delta consumers see the provenance." },
-    visibility: { type: 'string', description: 'Default visibility for extracted facts. private (default) | world.' },
+    visibility: { type: 'string', enum: ['world'], description: 'The only supported visibility is world.' },
   },
   mutating: true,
   scope: 'write',
@@ -78,11 +78,10 @@ const extract_facts: Operation = {
     }
 
     const sourceId = ctx.sourceId ?? 'default';
-    // [ENG-8] Explicit caller value wins; UNSET resolves through the shared
-    // facts.default_visibility helper (the old ternary coerced unset →
-    // 'private' before any config default could run). Garbage stays 'private'.
+    // The shared resolver normalizes omitted and legacy durable values to the
+    // host's only writable visibility.
     const { resolveVisibilityParam } = await import('../facts/visibility.ts');
-    const visibility: 'private' | 'world' = await resolveVisibilityParam(ctx.engine, p.visibility);
+    const visibility = await resolveVisibilityParam(ctx.engine, p.visibility);
 
     // #4206: optional event-time + provenance threading. An unparseable
     // valid_from fails LOUD — silently defaulting to now() is exactly the
@@ -119,16 +118,7 @@ const extract_facts: Operation = {
     // message. `chat_unavailable` means no servable chat model: the calling
     // agent IS an LLM, so hand it the keyless self-extract path (the
     // `remember` verb + `## Facts` fences work with zero keys). The
-    // visibility pin in the instruction is mandatory copy: `remember`
-    // defaults to 'world' while extract_facts facts default 'private' —
-    // omitting it would silently widen private data to every connected agent.
-    // The visibility instruction names the RESOLVED visibility for THIS call
-    // (caller param > facts.default_visibility config > private): a caller who
-    // asked for world must not be steered to private, and an unpinned
-    // instruction would silently widen private-default extractions because
-    // `remember` hard-defaults to 'world'.
-    const visibilityPin = `visibility: "${visibility}"` +
-      (visibility === 'private' ? ' (remember defaults to world — omitting it would widen these facts)' : '');
+    const visibilityPin = 'visibility: "world"';
     if (r.skipped_reason === 'chat_unavailable') {
       return {
         inserted: 0, duplicate: 0, superseded: 0, fact_ids: [],
@@ -170,7 +160,7 @@ const extract_facts: Operation = {
 const recall: Operation = {
   name: 'recall',
   description:
-    'MEMORY VERB (v1): retrieve saved facts/snippets — the protocol read verb. Filters hot-memory facts by entity / since / session_id; pass `query` to ALSO run hybrid search over pages (results[] arm); pass `budget_tokens` for server-side packing (response reports budget_used + dropped_count — never trims client-side). Remote callers see visibility=world facts only. Routing: for ONE known person/company/project card use `entity` (zero LLM); for broad questions needing reasoning use `synthesize` (expensive). Branch on structured fields (status/kind/evidence), never on prose. Every response carries protocol_version.',
+    'MEMORY VERB (v1): retrieve saved facts/snippets — the protocol read verb. Filters hot-memory facts by entity / since / session_id; pass `query` to ALSO run hybrid search over pages (results[] arm); pass `budget_tokens` for server-side packing (response reports budget_used + dropped_count — never trims client-side). Every fact is agent-readable under the host world-only policy. Routing: for ONE known person/company/project card use `entity` (zero LLM); for broad questions needing reasoning use `synthesize` (expensive). Branch on structured fields (status/kind/evidence), never on prose. Every response carries protocol_version.',
   params: {
     entity: { type: 'string', description: 'Entity slug (canonical). Returns facts about this entity newest first.' },
     query: { type: 'string', description: 'MEMORY_VERBS v1: free-text retrieval over pages (hybrid search arm). Response adds results[] (slug, title, chunk, evidence, create_safety, provenance). Combinable with entity (both arms run). Degrades to keyword-only search when no embedding provider is configured (search_degraded notes it; never an error).' },
@@ -208,13 +198,9 @@ const recall: Operation = {
           : [sourceId],
     )];
 
-    // Visibility filter: remote callers see world-only unless their token
-    // grants elevated visibility (future-proofing; v0.31 ships world-only
-    // for remote, all for local CLI).
-    const visibility =
-      ctx.remote === false
-        ? undefined
-        : ['world'] as ('private' | 'world')[];
+    // Legacy private rows are readable during convergence; all new rows are
+    // world-only and the response projection normalizes the legacy marker.
+    const visibility = undefined;
 
     type FactRows = Awaited<ReturnType<typeof ctx.engine.listFactsByEntity>>;
     type FactRowItem = FactRows[number];
@@ -370,8 +356,9 @@ const recall: Operation = {
     let searchDegraded: string | undefined;
     if (queryText) {
       const searchScope = sourceScopeOpts(ctx);
-      // #4352 — recall's page-search arm enforces `visibility: private` for
-      // untrusted callers (matches the facts arms' world-only filter above).
+      // Keep the page-search arm on the shared visibility resolver. Under the
+      // host-wide world policy it returns false, while legacy deployments that
+      // have not reached v147 retain their historical page gate.
       const { resolveExcludePrivatePages } = await import('../search/private-visibility.ts');
       const excludePrivate = await resolveExcludePrivatePages(ctx.engine, ctx.remote);
       if (!isAvailable('embedding')) {
@@ -420,7 +407,9 @@ const recall: Operation = {
         fact: r.fact,
         kind: r.kind,
         entity_slug: r.entity_slug,
-        visibility: r.visibility,
+        // Legacy DB rows are projected through the host's single writable
+        // visibility so agents never need to branch on an obsolete tier.
+        visibility: 'world',
         // v0.31.2: notability surfaced to recall consumers (CLI, MCP, admin).
         // Pre-v46 brains return 'medium' via the row mapper's fallback so the
         // contract stays total.
@@ -479,13 +468,13 @@ function parseEntityList(v: unknown): string[] {
 const context_pack: Operation = {
   name: 'context_pack',
   description:
-    'MEMORY VERB (v1): budget-packed session-boundary bundle for a set of standing entities — entity cards + open threads + hot facts, zero-LLM, sub-second. Call at session start (warm cold context) and after compaction (rehydrate what the summary lost). WORLD-ONLY by default; pass include_private (honored for LOCAL trusted callers only) to widen all arms. budget_tokens packs server-side (response reports budget_used + dropped_count; cards pack first, then facts). Branch on structured fields, never prose. protocol_version rides every response.',
+    'MEMORY VERB (v1): budget-packed session-boundary bundle for a set of standing entities — entity cards + open threads + hot facts, zero-LLM, sub-second. Call at session start (warm cold context) and after compaction (rehydrate what the summary lost). Every host agent sees all legacy facts; new facts are world-only. budget_tokens packs server-side (response reports budget_used + dropped_count; cards pack first, then facts). Branch on structured fields, never prose. protocol_version rides every response.',
   params: {
     entities: { type: 'string', required: true, description: 'Comma-separated entity names/slugs to bundle. Capped at 8.' },
     budget_tokens: { type: 'number', description: 'Server-side token budget (char/4). Cards pack first, then facts. Response adds budget_tokens, budget_used, dropped_count.' },
     since: { type: 'string', description: 'ISO 8601 datetime. When set, open-thread events are filtered to those after this cursor.' },
     session_id: { type: 'string', description: 'Opaque session id; keys the hot-memory cache and (on the push path) the session cursor.' },
-    include_private: { type: 'boolean', description: 'Local trusted callers only: widen ALL arms to include private facts. Ignored (world-only) for remote callers. Default false.' },
+    include_private: { type: 'boolean', description: 'Deprecated compatibility no-op: all host agents already see legacy facts.' },
   },
   scope: 'read',
   verb: true,
@@ -508,9 +497,8 @@ const context_pack: Operation = {
     // PACK_DEFAULT_MAX_ENTITIES, so echoing more would claim entities were
     // bundled that produced no cards.
     const entities = parseEntityList(p.entities).slice(0, PACK_DEFAULT_MAX_ENTITIES);
-    // Fail-closed: private only when EXPLICITLY requested AND the caller is
-    // trusted-local (ctx.remote === false). A remote caller never widens.
-    const includePrivate = p.include_private === true && ctx.remote === false;
+    // Compatibility field only: the world-only host view cannot be widened.
+    const includePrivate = false;
     const budgetTokens =
       typeof p.budget_tokens === 'number' && Number.isFinite(p.budget_tokens) && p.budget_tokens > 0
         ? Math.floor(p.budget_tokens)
@@ -588,14 +576,14 @@ const context_pack: Operation = {
 const delta: Operation = {
   name: 'delta',
   description:
-    'MEMORY VERB (v1): "what changed since T" for heartbeats — pages updated after `since` + hot facts newer than `since` + open-thread events after `since`, zero-LLM. Lets a periodic wake maintain warm state in O(changes) instead of re-deriving. Optionally scope thread deltas to `entities`. WORLD-ONLY by default; include_private honored for local trusted callers only. budget_tokens packs server-side (pages first, then facts). protocol_version rides every response.',
+    'MEMORY VERB (v1): "what changed since T" for heartbeats — pages updated after `since` + hot facts newer than `since` + open-thread events after `since`, zero-LLM. Lets a periodic wake maintain warm state in O(changes) instead of re-deriving. Optionally scope thread deltas to `entities`. Every host agent sees all legacy facts; new facts are world-only. budget_tokens packs server-side (pages first, then facts). protocol_version rides every response.',
   params: {
     since: { type: 'string', description: 'ISO 8601 cursor. Returns pages/facts/thread-events newer than this timestamp. Optional when session_id carries an established cursor.' },
     since_slug: { type: 'string', description: 'Stateless keyset resume: pass back `next_cursor.slug` from the previous response (paired with `since`=next_cursor.since) to page through pages sharing one timestamp. Ignored when session_id is set (the session cursor carries it).' },
     entities: { type: 'string', description: 'Optional comma-separated entity scope for thread-event deltas. Capped at 8.' },
     budget_tokens: { type: 'number', description: 'Server-side token budget (char/4). Pages pack first, then facts. Response adds budget_tokens, budget_used, dropped_count.' },
     session_id: { type: 'string', description: 'Opaque session id. Drives the per-session cursor: the first call establishes it, each call advances it to the newest DELIVERED change (at-least-once — with has_more:true the undelivered tail returns on the next wake). Without it, pass an explicit `since` for a stateless delta.' },
-    include_private: { type: 'boolean', description: 'Local trusted callers only: widen ALL arms to include private facts. Ignored (world-only) for remote callers. Default false.' },
+    include_private: { type: 'boolean', description: 'Deprecated compatibility no-op: all host agents already see legacy facts.' },
   },
   scope: 'read',
   verb: true,
@@ -624,7 +612,7 @@ const delta: Operation = {
     // use their auth client id; an auth-LESS or blank-id remote (stdio MCP)
     // gets the shared 'remote' sentinel — never collapsed into 'local'.
     const clientId = ctx.remote === false ? null : ctx.auth?.clientId?.trim() || 'remote';
-    const includePrivate = p.include_private === true && ctx.remote === false;
+    const includePrivate = false;
     const budgetTokens =
       typeof p.budget_tokens === 'number' && Number.isFinite(p.budget_tokens) && p.budget_tokens > 0
         ? Math.floor(p.budget_tokens)

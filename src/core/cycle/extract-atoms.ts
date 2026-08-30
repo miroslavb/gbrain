@@ -68,8 +68,8 @@ import {
 } from '../budget/budget-tracker.ts';
 import { writeReceipt } from '../extract/receipt-writer.ts';
 import { updateExtractHealthState, upsertExtractRollup } from '../extract/rollup-writer.ts';
-import { createHash, randomUUID } from 'crypto';
-import { slugifySegment } from '../sync.ts';
+import { randomUUID } from 'crypto';
+import { atomSlug } from './atom-slug.ts';
 import {
   AtomSemanticValidationError,
   createGatewayAtomSemanticValidator,
@@ -317,6 +317,17 @@ const MAX_GROUNDED_BODY_CHARS = 280;
 const COMPOUND_CLAIM_JOIN_RE = /(?:\b(?:and|but|while|whereas|therefore|so)\b|(?:^|[\s,])(?:и|но|а также|тогда как|поэтому)(?=$|[\s,]))/iu;
 const DEICTIC_START_RE = /^(?:this|that|it|they|these|those|such)\b/i;
 const RU_DEICTIC_OR_VAGUE_START_RE = /^(?:это|этот|эта|эти|он|она|оно|они|такой|такая|такие|значение|значения|параметр|параметры|данные)(?=$|[\s,:;.!?-])/iu;
+// A title cannot repair an evidence quote whose grammatical subject is only
+// meaningful inside the source page. Production sampling found that the
+// semantic validator still accepted bare subjects such as "Buttons ...",
+// "Dark theme ...", and a post-comma "the system ...". Keep this fence
+// precision-biased: named subjects before these nouns do not match.
+const CONTEXTLESS_GENERIC_SUBJECT_RE =
+  /(?:^|[,\u2013\u2014]\s+)(?:(?:the|a|an)\s+)?(?:system|site|website|app|application|model|workflow|pipeline|configuration|config|process|phase|buttons?|themes?|endpoints?|hover\s+states?|override|values?|data|operations?|ops|ratios?)\b/iu;
+const CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE =
+  /^(?:(?:current|existing|default|dark|light|different|several|multiple)\s+)(?:buttons?|themes?|operations?|ops|ratios?)\b|^(?:four|\d+)\s+[a-z0-9-]+\s+(?:operations?|ops)\b|^different\s+feed\/kill\s+ratios?\b/iu;
+const RU_CONTEXTLESS_GENERIC_SUBJECT_RE =
+  /(?:^|[,\u2013\u2014]\s+)(?:(?:эта|этот|эти)\s+)?(?:система|сайт|приложение|проект|репозиторий|сервис|платформа|модель|процесс|этап|кнопки?|тема|эндпоинт|воркфлоу|пайплайн)(?=$|[\s,:;.!?-])/iu;
 const INLINE_ENUMERATION_RE = /(?:\s\/\s|\([^)]*(?:,|\/|\b(?:including|included|incl\.?)\b|(?:включая|в\s+т\.?\s*ч\.?)(?=$|[\s,]))[^)]*\))/iu;
 
 function isSingleAtomicSentence(value: string, maxChars: number): boolean {
@@ -332,6 +343,9 @@ function isSelfContainedAtomicEvidence(value: string): boolean {
   return !COMPOUND_CLAIM_JOIN_RE.test(text)
     && !DEICTIC_START_RE.test(text)
     && !RU_DEICTIC_OR_VAGUE_START_RE.test(text)
+    && !CONTEXTLESS_GENERIC_SUBJECT_RE.test(text)
+    && !CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE.test(text)
+    && !RU_CONTEXTLESS_GENERIC_SUBJECT_RE.test(text)
     && !INLINE_ENUMERATION_RE.test(text);
 }
 
@@ -883,6 +897,8 @@ export async function runPhaseExtractAtoms(
     // Keep safe defaults on any config-read failure: key-aware utility-tier
     // model, $0.30 cap, default max_source_chars.
   }
+  let activeExtractModel = extractModel;
+  let fallbackLatchedModel: string | null = null;
   // A cost cap is only meaningful when BOTH calls the tracker covers can be
   // priced. #4312 operator overrides are part of that decision and are also
   // passed into the tracker for reserve/record calculations.
@@ -1054,7 +1070,7 @@ export async function runPhaseExtractAtoms(
     let itemGateOperationalFailure = false;
     try {
       const result = await chat({
-        model: extractModel,
+        model: activeExtractModel,
         system: EXTRACT_PROMPT,
         messages: [
           {
@@ -1066,6 +1082,12 @@ export async function runPhaseExtractAtoms(
         ],
         maxTokens: maxOutputTokens,
       });
+      // The gateway reports the canonical requested model unless a fallback
+      // answered. Keep that operationally healthy route for this batch only.
+      if (result.model !== activeExtractModel) {
+        activeExtractModel = result.model;
+        fallbackLatchedModel = result.model;
+      }
       extractionActualModels.add(result.model);
       extractionActualRoutes.add(result.providerId);
       // Post-await yield: closes the "long LLM call past TTL" hazard
@@ -1440,6 +1462,7 @@ export async function runPhaseExtractAtoms(
       estimated_spend_usd: estimatedSpendUsd,
       budget_usd: budgetCap,
       model: extractModel,
+      fallback_latched_model: fallbackLatchedModel,
       budget_exhausted: budgetExhausted,
       source_id: sourceId,
       dry_run: opts.dryRun ?? false,
@@ -1563,46 +1586,4 @@ function atomsFromParsedArray(parsed: unknown[], sourceText?: string): Extracted
     });
   }
   return atoms;
-}
-
-function todayDate(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/**
- * Canonical slug stem for an atom title. Routes through slugifySegment (the
- * same normalizer the FS-import path uses) and RE-STRIPS a trailing dash after
- * the 60-char truncation — the cut can land on a hyphen and re-introduce one.
- * Two writers disagreeing on that trailing dash (`…would` vs `…would-`) was the
- * "trailing-dash twin" duplicate bug.
- */
-function atomSlugStem(title: string): string {
-  return slugifySegment(title).slice(0, 60).replace(/-+$/g, '') || 'untitled';
-}
-
-/**
- * Pull a YYYY-MM-DD date from a source reference — a transcript file path like
- * `…/2026-06-11-telegram.md`, or a dated page slug. Checks the basename first
- * to avoid matching a date in a parent directory. Falls back to the run date
- * only when the source carries no date, so dated sources are fully deterministic.
- */
-function sourceDate(ref: string): string {
-  const base = ref.split('/').pop() ?? ref;
-  const m = base.match(/(\d{4}-\d{2}-\d{2})/) ?? ref.match(/(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : todayDate();
-}
-
-/**
- * Deterministic per-atom slug: `atoms/<source-date>/<stem>-<title-hash>`.
- * - Date comes from the SOURCE, not the run date, so re-extracting an
- *   append-only transcript on a later day yields the SAME slug → putPage
- *   upserts instead of minting a cross-day duplicate.
- * - The 6-char title hash keeps two distinct atoms whose titles share the
- *   first 60 chars on separate slugs, so a deterministic slug never silently
- *   clobbers a *different* atom. Hash is over the title only (not body) so an
- *   LLM rewording the body on re-extraction still upserts rather than dupes.
- */
-function atomSlug(title: string, srcRef: string): string {
-  const hash = createHash('sha256').update(title).digest('hex').slice(0, 6);
-  return `atoms/${sourceDate(srcRef)}/${atomSlugStem(title)}-${hash}`;
 }

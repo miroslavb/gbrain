@@ -700,7 +700,7 @@ export async function computeExtractHealthCheck(
     // Fork: grouped per (kind, source_id) over SEVEN calendar days
     // (CURRENT_DATE - 6 inclusive of today) so one source's stall cannot be
     // averaged away by its siblings. Upstream's pre-v141 column fallback is
-    // kept as-is: the column is this fork's v147.
+    // kept as-is: the column is this fork's v148.
     let rows: RollupRow[];
     try {
       rows = await engine.executeRaw<RollupRow>(rollupQuery(true), []);

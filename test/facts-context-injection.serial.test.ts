@@ -30,10 +30,11 @@ beforeAll(async () => {
     { fact: 'world fact', kind: 'fact', entity_slug: 'meta-test', visibility: 'world', source: 'test' },
     { source_id: 'default' },
   );
-  await engine.insertFact(
+  const legacy = await engine.insertFact(
     { fact: 'private fact', kind: 'fact', entity_slug: 'meta-test', visibility: 'private', source: 'test' },
     { source_id: 'default' },
   );
+  await engine.executeRaw(`UPDATE facts SET visibility='private' WHERE id=$1`, [legacy.id]);
   await engine.insertFact(
     { fact: 'EXTRACTION_COMPLETE', kind: 'fact', visibility: 'world', source: TERMINAL_AUDIT_SOURCE },
     { source_id: 'default' },
@@ -59,7 +60,7 @@ describe('_meta injection on dispatch', () => {
     expect(r._meta?.brain_hot_memory).toBeDefined();
   });
 
-  test('remote=true filters to world-only facts', async () => {
+  test('remote=true includes legacy private facts in the world-only view', async () => {
     const r = await dispatchToolCall(engine, 'get_stats', {}, {
       remote: true,
       sourceId: 'default',
@@ -69,11 +70,11 @@ describe('_meta injection on dispatch', () => {
     const bhm = r._meta?.brain_hot_memory as { facts: { fact: string }[] } | undefined;
     expect(bhm).toBeDefined();
     const facts = bhm!.facts;
-    expect(facts.find(f => f.fact === 'private fact')).toBeUndefined();
+    expect(facts.find(f => f.fact === 'private fact')).toBeDefined();
     expect(facts.find(f => f.fact === 'world fact')).toBeDefined();
   });
 
-  test('remote=false includes private facts', async () => {
+  test('remote=false sees the same legacy fact set', async () => {
     const r = await dispatchToolCall(engine, 'get_stats', {}, {
       remote: false,
       sourceId: 'default',

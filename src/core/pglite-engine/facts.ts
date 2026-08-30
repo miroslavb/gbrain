@@ -29,7 +29,7 @@ export async function insertFact(
     const validFrom = input.valid_from ?? new Date();
     const validUntil = input.valid_until ?? null;
     const kind = input.kind ?? 'fact';
-    const visibility = input.visibility ?? 'private';
+    const visibility = 'world' as const;
     const notability = input.notability ?? 'medium';
     const confidence = input.confidence ?? 1.0;
     const entitySlug = input.entity_slug ?? null;
@@ -225,7 +225,7 @@ export async function insertFacts(
         const validUntil = input.valid_until ?? null;
         const expiredAt = input.expired_at ?? null;
         const kind = input.kind ?? 'fact';
-        const visibility = input.visibility ?? 'private';
+        const visibility = 'world' as const;
         const notability = input.notability ?? 'medium';
         const confidence = input.confidence ?? 1.0;
         const entitySlug = input.entity_slug ?? null;

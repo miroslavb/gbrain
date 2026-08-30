@@ -97,29 +97,19 @@ question is: does it belong in this DB-only-by-design list? If not,
 it's FS-canonical and needs a fence (or frontmatter field) plus a
 reconciler.
 
-## The privacy boundary
+## The host visibility boundary
 
-Private knowledge in a fence still lives in the markdown file. If the
-user commits the page to git, the private data lands in git too. This
-is the existing operational model — we don't infer git policy.
+This deployment is single-principal. Fact writers accept only `world`, while
+legacy private fact rows and page frontmatter are readable by every connected
+agent and normalized by migration v147. The chunker and `get_page` therefore
+project legacy fact fences into the shared world view; the separate takes fence
+keeps its own access rules.
 
-For untrusted readers (remote MCP, subagent), the v0.32.2 release ships
-a 3-layer strip:
+This does not weaken source grants, document ACLs, or git policy. The user still
+decides whether to commit an entity page; `gbrain.yml` `db_only` paths are
+gitignored automatically and per-page choices remain ordinary git workflow.
 
-1. **Layer A (chunker):** `src/core/chunkers/recursive.ts` calls
-   `stripFactsFence({keepVisibility: ['world']})` + `stripTakesFence`
-   before chunking. Private fact text never reaches
-   `content_chunks.chunk_text`, embeddings, or search results.
-2. **Layer B (get_page):** when `ctx.remote === true`, the response
-   body has both fences stripped (private rows from facts; entire
-   takes fence). Local CLI (`ctx.remote === false`) sees the full
-   fence.
-3. **Layer C (git tracking):** the user decides whether to commit the
-   entity page. `gbrain.yml` `db_only` paths are gitignored
-   automatically; per-page choices via the user's normal git workflow.
-
-For universally-private entities (a friend's name, an investor's
-internal notes), mark the entity page's directory as `db_only` in
+For entities that must stay out of git, mark the entity page's directory as `db_only` in
 `gbrain.yml`. The file stays on disk but never lands in git.
 
 ## The forget contract

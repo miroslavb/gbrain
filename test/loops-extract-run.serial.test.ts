@@ -251,6 +251,7 @@ describe('runLoopsExtract', () => {
     expect(facts[0].kind).toBe('commitment');
     expect(facts[0].entity_slug).toBe(PERSON_SLUG);
     expect(facts[0].fact).toBe('Send Alice the widget-co deck');
+    expect(facts[0].visibility).toBe('world');
     // Decisions get no facts projection.
     expect(decision!.fact_id).toBeNull();
 

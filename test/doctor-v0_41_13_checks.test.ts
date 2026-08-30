@@ -17,8 +17,11 @@
  * that bit the original test draft.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 interface DoctorCheck {
   name: string;
@@ -32,6 +35,14 @@ interface DoctorEnvelope {
   checks: DoctorCheck[];
 }
 
+const doctorAuditDir = mkdtempSync(join(tmpdir(), 'gbrain-doctor-audit-'));
+const doctorHome = mkdtempSync(join(tmpdir(), 'gbrain-doctor-home-'));
+
+afterAll(() => {
+  rmSync(doctorAuditDir, { recursive: true, force: true });
+  rmSync(doctorHome, { recursive: true, force: true });
+});
+
 function runDoctor(): DoctorEnvelope {
   const result = spawnSync(
     process.execPath, // bun
@@ -40,6 +51,14 @@ function runDoctor(): DoctorEnvelope {
       cwd: process.cwd(),
       encoding: 'utf8',
       timeout: 60000,
+      // Pin the subprocess itself, not only the parent test preload. This
+      // branch asserts the no-history opt-in message and must never observe
+      // an operator's real audit trail or config.
+      env: {
+        ...process.env,
+        GBRAIN_AUDIT_DIR: doctorAuditDir,
+        GBRAIN_HOME: doctorHome,
+      },
     },
   );
   if (result.error) throw result.error;

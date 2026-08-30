@@ -535,10 +535,9 @@ export function safeSynopsis(
   row: PageRow,
   opts: { keepVisibility?: ('private' | 'world')[]; maxLen?: number } = {},
 ): string {
-  // v0.45.7 ambient recall: world-only by default (the injected-context posture).
-  // The ONLY widening caller is the entity-card builder for a trusted-local
-  // include_private pack (entity-card.ts) — the pointer/volunteer arms always
-  // run world-only (turn mode never widens).
+  // World-only host posture: the fence parser normalizes legacy private rows,
+  // so every caller sees the same facts. `keepVisibility` remains only for
+  // backward-compatible internal call shapes.
   const keepVisibility = opts.keepVisibility ?? ['world'];
   const maxLen = opts.maxLen ?? SYNOPSIS_MAX;
   const fmSummary = row.frontmatter?.summary;

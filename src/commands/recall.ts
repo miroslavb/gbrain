@@ -591,7 +591,7 @@ function remoteFactToRow(o: Record<string, unknown>): FactRow {
     fact: String(o.fact ?? ''),
     kind: (o.kind as FactKind) ?? 'fact',
     entity_slug: typeof o.entity_slug === 'string' ? o.entity_slug : null,
-    visibility: (o.visibility === 'private' || o.visibility === 'world') ? o.visibility : 'private',
+    visibility: 'world',
     notability: (o.notability === 'high' || o.notability === 'medium' || o.notability === 'low') ? o.notability : 'medium',
     context: null,
     valid_from: parseMaybeDate(o.valid_from) ?? new Date(0),

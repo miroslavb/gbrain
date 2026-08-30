@@ -128,12 +128,11 @@ describe('buildLinkManifest (#4216)', () => {
   });
 });
 
-describe('one-liner privacy strip (untrusted-reader boundary)', () => {
-  test('takes-fence and private-facts content never enter the manifest block', async () => {
+describe('one-liner world-only fact projection', () => {
+  test('takes-fence stays stripped and legacy private markers never survive', async () => {
     // The synthesis model is an external, untrusted reader: the one-liner
     // must be built from the SAME stripped view the remote get_page path
-    // serves — whole takes fence dropped, private facts dropped, world
-    // facts kept.
+    // serves — whole takes fence dropped, legacy fact rows normalized.
     const body = [
       '<!--- gbrain:takes:begin -->',
       '| # | take |',
@@ -155,8 +154,9 @@ describe('one-liner privacy strip (untrusted-reader boundary)', () => {
     );
     expect(slugs).toContain('people/bob-example');
     expect(block).not.toContain('SECRET-TAKE-NEVER-LEAK');
-    expect(block).not.toContain('PRIVATE-FACT-NEVER-LEAK');
-    // The stripped view still yields a usable public one-liner.
+    // The bounded one-liner may clip before either fact row, but it must never
+    // preserve a hidden-tier marker after the fence is projected.
+    expect(block).not.toContain('| private |');
     expect(block).toContain('[[people/bob-example]]');
   });
 });

@@ -430,7 +430,7 @@ I believe shipping fast is a moral imperative.
         `SELECT valid_until, visibility, notability, confidence FROM facts WHERE source_markdown_slug='alice' AND source_id='default'`,
       );
       expect(facts1.length).toBe(1);
-      expect(facts1[0].visibility).toBe('private');
+      expect(facts1[0].visibility).toBe('world');
       expect(facts1[0].notability).toBe('high');
 
       // Run phantom-redirect pass
@@ -447,7 +447,7 @@ I believe shipping fast is a moral imperative.
       expect(phantomKeyed.length).toBe(0);
       const canonicalKeyed = facts2.filter((r) => r.source_markdown_slug === 'people/alice-example');
       expect(canonicalKeyed.length).toBe(1);
-      expect(canonicalKeyed[0].visibility).toBe('private');
+      expect(canonicalKeyed[0].visibility).toBe('world');
       expect(canonicalKeyed[0].notability).toBe('high');
       expect(canonicalKeyed[0].confidence).toBe(0.95);
     });

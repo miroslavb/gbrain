@@ -21,7 +21,9 @@ import type { OperationContext } from '../src/core/operations.ts';
 let engine: PGLiteEngine;
 let repo: string;
 
-const SLUG = 'companies/drain-example';
+// `companies/%` is intentionally excluded from production proposal discovery;
+// keep this queue-focused fixture in an eligible long-form namespace.
+const SLUG = 'wiki/drain-example';
 const CLAIM = 'drain-example doubles revenue within 12 months';
 
 function ctx(): OperationContext {
@@ -59,7 +61,7 @@ beforeAll(async () => {
     title: 'Drain Example',
     compiled_truth: 'I bet drain-example doubles revenue within 12 months. They ship fast.',
   });
-  mkdirSync(join(repo, 'companies'), { recursive: true });
+  mkdirSync(join(repo, 'wiki'), { recursive: true });
   writeFileSync(
     join(repo, `${SLUG}.md`),
     '# Drain Example\n\nI bet drain-example doubles revenue within 12 months. They ship fast.\n',
@@ -77,7 +79,9 @@ describe('propose_takes → takes propose drain (#4102)', () => {
     const extractor: ProposeTakesExtractor = async () => [
       { claim_text: CLAIM, kind: 'bet', holder: 'world', weight: 0.75, domain: 'revenue', evidence_span: 'I bet drain-example doubles revenue within 12 months.' },
     ];
-    const phase = await runPhaseProposeTakes(ctx(), { extractor });
+    // This test exercises queue production/drain, not the production
+    // long-form candidate selector; admit the deliberately tiny fixture.
+    const phase = await runPhaseProposeTakes(ctx(), { extractor, minPageChars: 0 });
     expect(phase.status).toBe('ok');
     expect((phase.details as Record<string, unknown>).proposals_inserted).toBe(1);
 
@@ -126,6 +130,7 @@ describe('propose_takes → takes propose drain (#4102)', () => {
       const once = await runPhaseProposeTakes(ctx(), {
         extractor,
         once: true,
+        minPageChars: 0,
         promptVersion: 'test-once-bypass',
       });
       expect(once.status).not.toBe('skipped');

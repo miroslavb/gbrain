@@ -328,14 +328,16 @@ describe('verifyWorkspace — write-through disabled by config', () => {
 });
 
 describe('verifyWorkspace — engine-plane side effects', () => {
-  test('[CX-P1.1] facts.default_visibility: unset → set to world; explicit private → untouched', async () => {
+  test('facts.default_visibility: schema/private → normalized to world-only', async () => {
     const e2 = new PGLiteEngine();
     await e2.connect({});
     await e2.initSchema();
     const ws2 = mkdtempSync(join(tmpdir(), 'gb-verify-vis-'));
     try {
       mkdirSync(join(ws2, 'brain'), { recursive: true });
-      expect(await e2.getConfig('facts.default_visibility')).toBeNull();
+      // Migration v147 establishes the host-wide invariant before bootstrap
+      // verification gets a chance to repair a stale config value.
+      expect(await e2.getConfig('facts.default_visibility')).toBe('world');
 
       const res = await verifyWorkspace(e2, ws2, {
         sourceId: 'workspace',
@@ -346,14 +348,13 @@ describe('verifyWorkspace — engine-plane side effects', () => {
       });
       // Fresh engine: posture set to world through the engine config plane…
       expect(await e2.getConfig('facts.default_visibility')).toBe('world');
-      // …and the report names the posture + where to flip it, in one line.
+      // …and the report names the world-only posture.
       const check = res.checks.find((c) => c.id === 'facts_visibility')!;
       expect(check.ok).toBe(true);
       expect(check.detail).toContain('world');
-      expect(check.detail).toContain('facts.default_visibility');
-      expect(check.detail).toContain('gbrain config set');
+      expect(check.detail).toContain('world-only');
 
-      // Pre-set explicit value survives verify (set-if-unset, never override).
+      // A stale explicit private value is normalized too.
       await e2.setConfig('facts.default_visibility', 'private');
       const res2 = await verifyWorkspace(e2, ws2, {
         sourceId: 'workspace',
@@ -362,10 +363,10 @@ describe('verifyWorkspace — engine-plane side effects', () => {
         skipHooksSmoke: true,
         sweepBudgetMs: 5_000,
       });
-      expect(await e2.getConfig('facts.default_visibility')).toBe('private');
+      expect(await e2.getConfig('facts.default_visibility')).toBe('world');
       const check2 = res2.checks.find((c) => c.id === 'facts_visibility')!;
       expect(check2.detail).toContain('private');
-      expect(check2.detail).toContain('untouched');
+      expect(check2.detail).toContain('normalized');
     } finally {
       await e2.disconnect();
       rmSync(ws2, { recursive: true, force: true });

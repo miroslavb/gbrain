@@ -177,8 +177,8 @@ export interface TurnContextRequest {
  *   - bankOnly: PreCompact banking — extract entities from `window`, merge
  *     them into the session row's standing set, return an empty block. The
  *     post-compaction SessionStart (source=compact) then serves a warm pack.
- * Same secret + source-binding posture as turn_context. World-only ALWAYS
- * (the push path never widens — include_private is a pull-verb affordance).
+ * Same secret + source-binding posture as turn_context. World-only ALWAYS;
+ * `include_private` is a compatibility no-op.
  */
 export interface ContextPackRequest {
   kind: 'context_pack';

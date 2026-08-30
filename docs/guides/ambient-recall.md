@@ -50,15 +50,13 @@ pure win. See the per-verb latency table in
   no hooks, no recipe — see
   [`checkpoint-compaction.md`](./checkpoint-compaction.md)).
 
-## Visibility — world-only by default
+## Visibility — one shared world tier
 
-A pack is injected into an agent context window that may be logged or synced to a
-cloud model, so **every arm is world-visibility by default.** To pull private
-facts in, pass `include_private` — and it is honored ONLY for trusted-local
-callers (`remote === false`, i.e. the CLI/hook path). A remote MCP caller never
-widens, even if it asks (fail-closed). When it does widen, all arms widen
-together, so a pack is never a mix of private facts beside world-stripped
-synopses.
+This host is single-principal: **every connected agent receives the same
+world-visibility view.** New fact writers accept only `visibility: world`;
+legacy private facts and pages remain readable and are normalized by migration
+v147. `include_private` remains accepted only for protocol compatibility and is
+a no-op. Source grants and document ACLs remain independent boundaries.
 
 ## Budgets
 

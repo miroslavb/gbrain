@@ -1,9 +1,4 @@
-/**
- * v0.31 Phase 6 — visibility ACL parity with takes (D21).
- *
- * Pins: visibility column is private/world; remote (untrusted) callers see
- * world-only when the recall op enforces the filter. Local CLI sees all.
- */
+/** World-only host visibility contract plus legacy-row compatibility. */
 
 import { describe, test, expect, beforeAll, afterAll, afterEach } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -31,10 +26,13 @@ beforeAll(async () => {
     { fact: 'world-visible', kind: 'fact', entity_slug: 'vis-test', source: 'test', visibility: 'world' },
     { source_id: 'default' },
   );
-  await engine.insertFact(
+  const legacy = await engine.insertFact(
     { fact: 'private-only', kind: 'fact', entity_slug: 'vis-test', source: 'test', visibility: 'private' },
     { source_id: 'default' },
   );
+  // The writer above normalizes to world. Recreate one legacy row directly so
+  // reads prove convergence does not hide pre-policy material.
+  await engine.executeRaw(`UPDATE facts SET visibility = 'private' WHERE id = $1`, [legacy.id]);
 });
 
 afterAll(async () => {
@@ -42,12 +40,15 @@ afterAll(async () => {
 });
 
 describe('visibility column', () => {
-  test('insertFact stores visibility in DB', async () => {
-    const rows = await engine.executeRaw<{ visibility: string }>(
-      `SELECT visibility FROM facts WHERE entity_slug = 'vis-test'`,
+  test('insertFact normalizes even an explicit private input to world', async () => {
+    await engine.insertFact(
+      { fact: 'writer-normalized', kind: 'fact', entity_slug: 'write-policy', source: 'test', visibility: 'private' },
+      { source_id: 'default' },
     );
-    const tiers = rows.map(r => r.visibility).sort();
-    expect(tiers).toEqual(['private', 'world']);
+    const rows = await engine.executeRaw<{ visibility: string }>(
+      `SELECT visibility FROM facts WHERE entity_slug = 'write-policy'`,
+    );
+    expect(rows.map(r => r.visibility)).toEqual(['world']);
   });
 
   test('listFactsByEntity with visibility=[world] returns only world rows', async () => {
@@ -68,19 +69,20 @@ describe('visibility column', () => {
   });
 });
 
-describe('recall op visibility enforcement', () => {
-  test('remote=true → only world facts in payload', async () => {
+describe('recall op world-only projection', () => {
+  test('remote=true sees legacy private material and projects it as world', async () => {
     const result = await dispatchToolCall(engine, 'recall', { entity: 'vis-test' }, {
       remote: true,
       sourceId: 'default',
     });
     expect(result.isError).toBeFalsy();
     const payload = JSON.parse(result.content[0].text);
-    expect(payload.facts.length).toBe(1);
-    expect(payload.facts[0].fact).toBe('world-visible');
+    expect(payload.facts.length).toBe(2);
+    expect(payload.facts.map((f: { fact: string }) => f.fact).sort()).toEqual(['private-only', 'world-visible']);
+    expect(payload.facts.every((f: { visibility: string }) => f.visibility === 'world')).toBe(true);
   });
 
-  test('remote=false → all visibility tiers in payload', async () => {
+  test('remote=false uses the same world-only projection', async () => {
     const result = await dispatchToolCall(engine, 'recall', { entity: 'vis-test' }, {
       remote: false,
       sourceId: 'default',
@@ -88,6 +90,7 @@ describe('recall op visibility enforcement', () => {
     expect(result.isError).toBeFalsy();
     const payload = JSON.parse(result.content[0].text);
     expect(payload.facts.length).toBe(2);
+    expect(payload.facts.every((f: { visibility: string }) => f.visibility === 'world')).toBe(true);
   });
 });
 
@@ -98,8 +101,8 @@ describe('resolveDefaultVisibility [ENG-8]', () => {
     await engine.unsetConfig(FACTS_DEFAULT_VISIBILITY_KEY);
   });
 
-  test('unset config → private (fail-closed floor)', async () => {
-    expect(await resolveDefaultVisibility(engine)).toBe('private');
+  test('unset config → world', async () => {
+    expect(await resolveDefaultVisibility(engine)).toBe('world');
   });
 
   test('world opt-in resolves world (whitespace/case tolerant)', async () => {
@@ -109,45 +112,45 @@ describe('resolveDefaultVisibility [ENG-8]', () => {
     expect(await resolveDefaultVisibility(engine)).toBe('world');
   });
 
-  test('invalid config value → private', async () => {
+  test('invalid config value cannot change the host invariant', async () => {
     await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'everyone');
-    expect(await resolveDefaultVisibility(engine)).toBe('private');
+    expect(await resolveDefaultVisibility(engine)).toBe('world');
   });
 
-  test('config read failure → private (never widen on error)', async () => {
+  test('config read failure cannot change the host invariant', async () => {
     const broken = { getConfig: async () => { throw new Error('db down'); } } as unknown as BrainEngine;
-    expect(await resolveDefaultVisibility(broken)).toBe('private');
+    expect(await resolveDefaultVisibility(broken)).toBe('world');
   });
 });
 
-describe('resolveVisibilityParam — explicit caller value ALWAYS wins [ENG-8]', () => {
+describe('resolveVisibilityParam — world is the only result', () => {
   afterEach(async () => {
     await engine.unsetConfig(FACTS_DEFAULT_VISIBILITY_KEY);
   });
 
-  test("explicit 'private' beats a world default", async () => {
+  test("legacy explicit 'private' is normalized", async () => {
     await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'world');
-    expect(await resolveVisibilityParam(engine, 'private')).toBe('private');
+    expect(await resolveVisibilityParam(engine, 'private')).toBe('world');
   });
 
-  test("explicit 'world' beats the private floor", async () => {
+  test("explicit 'world' stays world", async () => {
     expect(await resolveVisibilityParam(engine, 'world')).toBe('world');
   });
 
-  test('unset resolves the config default (the old ternary coerced this to private)', async () => {
+  test('unset is world regardless of config', async () => {
     await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'world');
     expect(await resolveVisibilityParam(engine, undefined)).toBe('world');
     expect(await resolveVisibilityParam(engine, null)).toBe('world');
   });
 
-  test('unset with no config → private', async () => {
-    expect(await resolveVisibilityParam(engine, undefined)).toBe('private');
+  test('unset with no config → world', async () => {
+    expect(await resolveVisibilityParam(engine, undefined)).toBe('world');
   });
 
-  test('garbage values stay private even with a world default (fail-closed)', async () => {
+  test('legacy garbage cannot create a hidden tier', async () => {
     await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'world');
-    expect(await resolveVisibilityParam(engine, 'banana')).toBe('private');
-    expect(await resolveVisibilityParam(engine, 42)).toBe('private');
+    expect(await resolveVisibilityParam(engine, 'banana')).toBe('world');
+    expect(await resolveVisibilityParam(engine, 42)).toBe('world');
   });
 });
 
@@ -172,8 +175,8 @@ describe('ontology_propose visibility site (operations.ts ~:5812) [ENG-8]', () =
     return rows[0].visibility;
   }
 
-  test('unset + no config → private (historic behavior preserved)', async () => {
-    expect(await propose('people/ont-a', 'advisor')).toBe('private');
+  test('unset + no config → world', async () => {
+    expect(await propose('people/ont-a', 'advisor')).toBe('world');
   });
 
   test('unset + world config → world (the config default finally reaches the op)', async () => {
@@ -181,9 +184,11 @@ describe('ontology_propose visibility site (operations.ts ~:5812) [ENG-8]', () =
     expect(await propose('people/ont-b', 'advisor')).toBe('world');
   });
 
-  test('explicit private wins over world config default', async () => {
-    await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'world');
-    expect(await propose('people/ont-c', 'advisor', 'private')).toBe('private');
+  test('explicit private is rejected by the public schema', async () => {
+    const result = await dispatchToolCall(engine, 'ontology_propose', {
+      entity: 'people/ont-c', dimension: 'role', value: 'advisor', visibility: 'private',
+    }, { remote: false, sourceId: 'default' });
+    expect(result.isError).toBe(true);
   });
 
   test('explicit world wins over the private floor', async () => {
@@ -212,7 +217,7 @@ describe('backstop minion-payload visibility site (backstop.ts queue mode) [ENG-
     await engine.executeRaw(`DELETE FROM minion_jobs WHERE name = 'facts-absorb'`).catch(() => {});
   });
 
-  async function submitAndReadPayload(slug: string, visibility?: 'private' | 'world') {
+  async function submitAndReadPayload(slug: string, visibility?: 'world') {
     markShortLivedCliProcess(); // route queue mode through the durable minion job
     const r = await runFactsBackstop(
       {
@@ -248,12 +253,11 @@ describe('backstop minion-payload visibility site (backstop.ts queue mode) [ENG-
     expect(await submitAndReadPayload('wiki/notes/vis-default-world')).toBe('world');
   });
 
-  test('explicit private wins over a world config default', async () => {
-    await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'world');
-    expect(await submitAndReadPayload('wiki/notes/vis-explicit-private', 'private')).toBe('private');
+  test('explicit world remains world', async () => {
+    expect(await submitAndReadPayload('wiki/notes/vis-explicit-world', 'world')).toBe('world');
   });
 
-  test('caller-unset + no config → private (historic behavior preserved)', async () => {
-    expect(await submitAndReadPayload('wiki/notes/vis-floor')).toBe('private');
+  test('caller-unset + no config → world', async () => {
+    expect(await submitAndReadPayload('wiki/notes/vis-floor')).toBe('world');
   });
 });

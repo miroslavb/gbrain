@@ -156,6 +156,35 @@ function buildCtx(engine: BrainEngine): OperationContext {
 }
 
 describe('runPhaseProposeTakes threads dream.propose_takes.* config (#4494)', () => {
+  test('configured per-phase model reaches the extractor input', async () => {
+    const engine = buildMockEngine({
+      'models.dream.propose_takes': 'ollama:qwen3.5-9b',
+    });
+    const seen: Array<string | undefined> = [];
+    const extractor: ProposeTakesExtractor = async (input) => {
+      seen.push(input.modelHint);
+      return [];
+    };
+    await runPhaseProposeTakes(buildCtx(engine), { extractor });
+    expect(seen[0]).toBe('ollama:qwen3.5-9b');
+  });
+
+  test('explicit model wins over the configured per-phase model', async () => {
+    const engine = buildMockEngine({
+      'models.dream.propose_takes': 'ollama:qwen3.5-9b',
+    });
+    const seen: Array<string | undefined> = [];
+    const extractor: ProposeTakesExtractor = async (input) => {
+      seen.push(input.modelHint);
+      return [];
+    };
+    await runPhaseProposeTakes(buildCtx(engine), {
+      extractor,
+      model: 'openai:gpt-5.4-mini',
+    });
+    expect(seen[0]).toBe('openai:gpt-5.4-mini');
+  });
+
   test('configured caps reach the extractor input', async () => {
     const engine = buildMockEngine({
       'dream.propose_takes.max_tokens': '5000',

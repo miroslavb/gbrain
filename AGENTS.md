@@ -73,6 +73,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   explicit scratch root. Changing `HOME` alone is insufficient under Bun because
   `os.homedir()` can remain cached. Never let an install test resolve
   `$GBRAIN_HOME/.gbrain/autopilot-run.sh` to the operator's live wrapper.
+- **Test-fixture determinism:** permission-error tests must not depend on
+  `chmod 000` failing under the current UID; root can still read those paths.
+  Use a deterministic reject/test seam, and pass scratch `GBRAIN_HOME` plus
+  `GBRAIN_AUDIT_DIR` explicitly to subprocesses that assert empty local state.
 - **Global-maintenance observability:** the brain-wide maintenance job owns a
   60-minute aggregate deadline (distinct from a 30-minute source cycle) and
   persists canonical `current/last-completed` phase progress at every phase
@@ -92,6 +96,18 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   `expired_at` plus `superseded_by=new.id`. Missing, foreign-source,
   wrong-entity, or already-expired targets roll back the whole page. Normalize
   Postgres BIGINT fact ids to safe JS numbers before transporting lineage.
+- **World-only visibility:** this host is single-principal. Agent-facing fact
+  writers accept only `visibility: world`; migration v147 and runtime seams
+  normalize legacy facts/pages, the DB default, and config to world. Remote
+  reads include legacy private material during convergence, but source scopes
+  and document ACLs remain separate boundaries. Production has already applied
+  fork migration v147, so upstream v141-v144 are renumbered to v148-v151 in the
+  upgrade train; never reuse or reorder the version-only ledger entry v147.
+  Migration v152 idempotently reasserts world-only state for any disposable DB
+  that ran the older candidate where upstream migrations occupied v147-v150.
+- **Autopilot ownership:** when `gbrain-autopilot.service` exists, it is the
+  only daemon owner. The cron watchdog may start/restart the unit but must never
+  invoke `autopilot-run.sh` directly; otherwise systemd loops on the live lock.
 - **Duplicate-content signal:** doctor counts every same-source content-hash
   group, but dependency trees and exact declared distribution/fixture/locale
   replicas are non-actionable details. Any other distinct-slug group remains
@@ -201,7 +217,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   of folding them into semantic rejection counts.
   Exact-quote atoms also fail closed on multilingual compound/list evidence
   (including spaced slashes and parenthetical enumerations) and vague/deictic
-  fragments before the semantic batch. An unchanged page whose candidates all
+  fragments before the semantic batch. A precision-biased generic-subject
+  fence also rejects context-dependent clauses such as bare "the system",
+  "buttons", "theme", or "endpoint" subjects; a title may never repair their
+  missing source identity, while explicitly named subjects remain eligible.
+  An unchanged page whose candidates all
   fail deterministic or semantic quality gates receives three bounded attempts;
   only then may a hash-keyed terminal marker clear it from the atom backlog.
   Provider failures, validator timeouts/invalid responses, and invalid safety
@@ -218,6 +238,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 - **Drain containment:** `cycle.propose_takes.enabled` is default-off; only an
   explicit true value or trusted one-shot `--once` runs it. Keep atom auto-drain
   and conversation-facts bulk drain disabled until bounded quality canaries pass.
+  The resolved propose-takes model must reach the actual extractor call, provider
+  probe, budget tracker, and receipt with one precedence chain: explicit option,
+  then `models.dream.propose_takes`, then the global chat model.
   Pack-gated cycle phases must resolve the active pack through the DB-aware local
   engine loader; a stale file-plane `schema_pack` must never shadow a brain-wide
   DB-plane activation in cycle, doctor, or autopilot decisions. Preserve the
@@ -227,6 +250,16 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   any otherwise extractable page. Discovery, backlog/doctor, drain, and
   autopilot must share this predicate. Do not broaden these high-volume types
   back to implicit eligibility without a measured, privacy-safe corpus canary.
+- **Parallel atom mining:** use one `scripts/atom-mine-source-worker.sh` process
+  per explicit source. Never mix the legacy unscoped cycle with source workers;
+  each worker must retain aggregate-only JSONL receipts, a heartbeat, bounded
+  infrastructure-error shutdown, and the engine's source-scoped cycle lock.
+  The extraction route is GLM-first and the worker must pin the first fallback
+  to `openai:gpt-5.6-terra`; after one successful fallback, `extract_atoms`
+  latches that answering model for the rest of the batch, while the next batch
+  probes GLM once again. The Terra semantic validator remains unchanged.
+  Raise concurrency only through measured canaries and keep provider errors,
+  validator timeouts, provisional receipts, and source-isolation drift at zero.
 - **Value-ordered reindex:** markdown queue work must be bounded and scoped with
   `--source` / `--type` / `--prefix` / `--retrieved-since`, then ordered with
   `--hot-first`. Benchmark 100 representative pages with four workers before
@@ -318,7 +351,7 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   with regressions auto-flagged, or `gbrain founder scorecard <entity-slug>`
   for a four-signal JSON rollup (claim_accuracy / consistency /
   growth_trajectory / red_flags). MCP op `find_trajectory` exposes the
-  same data — read scope, visibility-filtered for remote callers.
+  same data — read scope, with the same world-only visibility projection.
   `gbrain think` uses this substrate automatically on temporal /
   knowledge_update intent (default ON; flip `think.trajectory_enabled=false`
   to opt out). Non-metric event rows (`meeting`, `job_change`,

@@ -110,13 +110,13 @@ describe('parseFactsFence — canonical happy path', () => {
     expect(r.warnings).toEqual([]);
   });
 
-  test('both visibility values parse', () => {
+  test('legacy private values parse and normalize to world', () => {
     const body = wrapFenceBody(
       `| 1 | private one | fact | 1.0 | private | medium | 2026-01-01 |  | src |  |
 | 2 | world one | fact | 1.0 | world | medium | 2026-01-01 |  | src |  |`,
     );
     const r = parseFactsFence(body);
-    expect(r.facts.map(f => f.visibility)).toEqual(['private', 'world']);
+    expect(r.facts.map(f => f.visibility)).toEqual(['world', 'world']);
   });
 
   test('all three notability values parse', () => {
@@ -308,7 +308,7 @@ describe('renderFactsTable', () => {
     expect(out).toContain(FACTS_FENCE_END);
     expect(out).toContain('| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |');
     expect(out).toContain('| 1 | C1 | fact | 1.0 | world | medium | 2026-01-01 |');
-    expect(out).toContain('| 2 | C2 | preference | 0.85 | private | medium |');
+    expect(out).toContain('| 2 | C2 | preference | 0.85 | world | medium |');
   });
 
   test('inactive rows render with strikethrough on claim', () => {
@@ -540,25 +540,27 @@ describe('stripFactsFence', () => {
     expect(stripped).toContain('Some preamble');
   });
 
-  test('keepVisibility:["world"] keeps world rows, drops private rows', () => {
+  test('keepVisibility:["world"] keeps and normalizes legacy private rows', () => {
     const body = wrapFenceBody(
       `| 1 | PRIVATE_TEXT_PROOF | fact | 1.0 | private | high | 2026-01-01 |  | src |  |
 | 2 | WORLD_TEXT_PROOF | fact | 1.0 | world | high | 2026-01-01 |  | src |  |`,
     );
     const stripped = stripFactsFence(body, { keepVisibility: ['world'] });
     expect(stripped).toContain('WORLD_TEXT_PROOF');
-    expect(stripped).not.toContain('PRIVATE_TEXT_PROOF');
+    expect(stripped).toContain('PRIVATE_TEXT_PROOF');
+    expect(stripped).not.toContain('| private |');
     // Fence shape preserved so callers can still parse/round-trip
     expect(stripped).toContain(FACTS_FENCE_BEGIN);
     expect(stripped).toContain(FACTS_FENCE_END);
   });
 
-  test('keepVisibility with NO world rows produces an empty-but-well-formed fence', () => {
+  test('keepVisibility with legacy-private-only rows normalizes them to world', () => {
     const body = wrapFenceBody(
       `| 1 | private only | fact | 1.0 | private | high | 2026-01-01 |  | src |  |`,
     );
     const stripped = stripFactsFence(body, { keepVisibility: ['world'] });
-    expect(stripped).not.toContain('private only');
+    expect(stripped).toContain('private only');
+    expect(stripped).toContain('| world |');
     expect(stripped).toContain(FACTS_FENCE_BEGIN);
     expect(stripped).toContain(FACTS_FENCE_END);
   });

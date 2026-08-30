@@ -296,6 +296,57 @@ describe('extract_atoms pre-write safety and semantic gate', () => {
     expect(receipts[0].compiled_truth).not.toContain(quoteB);
   });
 
+  test('latches a successful extraction fallback for the rest of the batch', async () => {
+    const primaryModel = 'together:glm-5.3-flash';
+    const fallbackModel = 'openai:gpt-5.6-terra';
+    const quotes = [
+      'The first fallback-backed claim remains grounded.',
+      'The second fallback-backed claim skips the failed primary.',
+    ];
+    await engine.setConfig('models.dream.extract_atoms', primaryModel);
+    const requestedModels: Array<string | undefined> = [];
+    let extractCall = 0;
+
+    const result = await runPhaseExtractAtoms(engine, {
+      _transcripts: quotes.map((quote, index) => ({
+        filePath: `/fallback-${index}.md`,
+        content: substantiveSource(quote),
+        contentHash: `fallback-latch-${index}`,
+      })),
+      _pages: [],
+      _chat: async (opts) => {
+        requestedModels.push(opts.model);
+        const quote = quotes[extractCall++]!;
+        return chatResult(atomJson(`Fallback claim ${extractCall}`, quote), fallbackModel);
+      },
+      _semanticValidator: async (input) => passAll(input),
+    });
+
+    expect(requestedModels).toEqual([primaryModel, fallbackModel]);
+    expect(result.details?.model).toBe(primaryModel);
+    expect(result.details?.fallback_latched_model).toBe(fallbackModel);
+    expect(result.details?.actual_models).toEqual({
+      extraction: [fallbackModel],
+      semantic_validator: ['anthropic:validator-actual'],
+    });
+
+    const nextBatchRequested: Array<string | undefined> = [];
+    await runPhaseExtractAtoms(engine, {
+      _transcripts: [{
+        filePath: '/fallback-next-batch.md',
+        content: substantiveSource('The next batch probes the primary again.'),
+        contentHash: 'fallback-latch-next-batch',
+      }],
+      _pages: [],
+      _chat: async (opts) => {
+        nextBatchRequested.push(opts.model);
+        return chatResult('[]', fallbackModel);
+      },
+      _semanticValidator: async (input) => passAll(input),
+    });
+    expect(nextBatchRequested).toEqual([primaryModel]);
+  });
+
   test('multilingual structural fence drops slash, parenthetical-list, and vague-fragment atoms', async () => {
     const quotes = [
       'sensitive_count / semantic_failures stops remain absolute.',
@@ -328,6 +379,76 @@ describe('extract_atoms pre-write safety and semantic gate', () => {
       `SELECT COUNT(*)::int AS n FROM pages WHERE type = 'atom'`,
     );
     expect(atoms[0].n).toBe(0);
+  });
+
+  test('deterministic fence rejects contextless generic subjects before semantic validation', async () => {
+    const quotes = [
+      'Buttons are transparent with green borders by default.',
+      'Instead of floating cards, the system relies on warm borders.',
+      'The endpoint returns dashboard data.',
+      'Dark theme is the only theme.',
+      'Different feed/kill ratios produce different patterns.',
+      'Four code-intelligence ops graduated to first-class MCP ops.',
+      'Система использует тёмную тему по умолчанию.',
+    ];
+    let extractCall = 0;
+    let semanticCalls = 0;
+    const result = await runPhaseExtractAtoms(engine, {
+      _transcripts: quotes.map((quote, index) => ({
+        filePath: `/contextless-${index}.md`,
+        content: substantiveSource(quote),
+        contentHash: `contextless-subject-${index}`,
+      })),
+      _pages: [],
+      _chat: async () => {
+        const quote = quotes[extractCall++]!;
+        return chatResult(atomJson(`Candidate ${extractCall}`, quote));
+      },
+      _semanticValidator: async (input) => {
+        semanticCalls++;
+        return passAll(input);
+      },
+    });
+
+    expect(semanticCalls).toBe(0);
+    expect(result.details?.candidates).toBe(0);
+    expect(result.details?.accepted).toBe(0);
+    const atoms = await engine.executeRaw<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM pages WHERE type = 'atom'`,
+    );
+    expect(atoms[0].n).toBe(0);
+  });
+
+  test('deterministic generic-subject fence preserves explicitly named subjects', async () => {
+    const quotes = [
+      'Example Dashboard uses a dark-only operator theme.',
+      'Gray-Scott feed/kill ratios control emergent patterns.',
+      '`GET /api/dashboard` returns dashboard data for Example Control Plane.',
+      'The project works when its output can help somebody else.',
+      "Parameters should move directionally over a scene's duration.",
+      'New REST endpoint `GET /api/dashboard` returns dashboard data.',
+    ];
+    let extractCall = 0;
+    let semanticCalls = 0;
+    const result = await runPhaseExtractAtoms(engine, {
+      _transcripts: quotes.map((quote, index) => ({
+        filePath: `/named-subject-${index}.md`,
+        content: substantiveSource(quote),
+        contentHash: `named-subject-${index}`,
+      })),
+      _pages: [],
+      _chat: async () => {
+        const quote = quotes[extractCall++]!;
+        return chatResult(atomJson(`Named candidate ${extractCall}`, quote));
+      },
+      _semanticValidator: async (input) => {
+        semanticCalls++;
+        return passAll(input);
+      },
+    });
+
+    expect(semanticCalls).toBe(quotes.length);
+    expect(result.details?.accepted).toBe(quotes.length);
   });
 
   test('validator invalid JSON fails closed for its batch without deleting atoms accepted earlier', async () => {

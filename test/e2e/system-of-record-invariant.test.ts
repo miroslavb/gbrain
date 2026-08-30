@@ -269,7 +269,7 @@ describe('system-of-record invariant — full delete-and-rebuild round-trip', ()
 // ─────────────────────────────────────────────────────────────────
 
 describe('chunker strip prevents private fact bytes from reaching search', () => {
-  test('search/chunks for verbatim private fact text returns zero matches', async () => {
+  test('search/chunks include legacy private fact text in the world-only view', async () => {
     await importAllFixtures();
     await reconcileEverything();
 
@@ -278,7 +278,7 @@ describe('chunker strip prevents private fact bytes from reaching search', () =>
     const chunkHits = await (engine as any).db.query(
       `SELECT COUNT(*) AS n FROM content_chunks WHERE chunk_text ILIKE '%PRIVATE_DETAIL_PROOF%'`,
     );
-    expect(Number(chunkHits.rows[0].n)).toBe(0);
+    expect(Number(chunkHits.rows[0].n)).toBeGreaterThan(0);
 
     // World facts SHOULD survive in chunks — they're public knowledge.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -290,22 +290,23 @@ describe('chunker strip prevents private fact bytes from reaching search', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────
-// Layer B (get_page strip trigger) — Codex R2-#5
+// Layer B (get_page world-only projection)
 // ─────────────────────────────────────────────────────────────────
 
-describe('get_page privacy strip via stripFactsFence({keepVisibility:["world"]})', () => {
-  test('private rows dropped at the row level when caller is untrusted', async () => {
+describe('get_page projection via stripFactsFence({keepVisibility:["world"]})', () => {
+  test('legacy rows are retained and normalized for remote callers', async () => {
     await importAllFixtures();
     const page = await engine.getPage('people/alice');
     expect(page).not.toBeNull();
     if (!page) return;
 
     const trustedBody = page.compiled_truth ?? '';
-    expect(trustedBody).toContain('PRIVATE_DETAIL_PROOF');  // local CLI sees full fence
+    expect(trustedBody).toContain('PRIVATE_DETAIL_PROOF');
 
     const remoteBody = stripFactsFence(trustedBody, { keepVisibility: ['world'] });
-    expect(remoteBody).not.toContain('PRIVATE_DETAIL_PROOF');  // remote MCP strips
-    expect(remoteBody).toContain('Founded Acme in 2017');       // world fact retained
+    expect(remoteBody).toContain('PRIVATE_DETAIL_PROOF');
+    expect(remoteBody).not.toContain('| private |');
+    expect(remoteBody).toContain('Founded Acme in 2017');
   });
 
   test('remote put_page round-trip preserves an existing private-only facts fence', async () => {
@@ -333,7 +334,8 @@ slug: ${slug}
 
     const remoteBody = stripFactsFence(trusted.compiled_truth ?? '', { keepVisibility: ['world'] });
     expect(remoteBody).toContain('gbrain:facts:begin');
-    expect(remoteBody).not.toContain('PRIVATE_ONLY_FACT');
+    expect(remoteBody).toContain('PRIVATE_ONLY_FACT');
+    expect(remoteBody).not.toContain('| private |');
 
     await importFromContent(engine, slug, `---
 type: person

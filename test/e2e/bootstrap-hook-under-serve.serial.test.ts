@@ -50,7 +50,6 @@ import { addSource } from '../../src/core/sources-ops.ts';
 import {
   loadCorpusPages,
   loadCorpusBeliefs,
-  loadCorpusBeliefData,
   loadCorpusQueries,
 } from '../helpers/bootstrap-corpus.ts';
 
@@ -135,10 +134,10 @@ beforeAll(async () => {
 
   // Pre-init the brain in-process (schema + source) so the serve subprocess
   // boots fast and doesn't spend its boot budget on migrations. Also SEED the
-  // synthetic corpus (pages + world/private beliefs) into the serve's source
+  // synthetic corpus (pages + world beliefs) into the serve's source
   // BEFORE the serve takes the single-writer lock — the serve then reads this
   // committed data when it assembles turn context, so Pin 1 can assert on real
-  // recalled content (world belief present, private belief fenced out) instead
+  // recalled content (world belief present) instead
   // of accepting an empty block [GAP 2].
   const engineConfig = { engine: 'pglite' as const, database_path: dbDir };
   const engine = await createEngine(engineConfig);
@@ -220,7 +219,7 @@ describe('bootstrap hook under a live serve (serial e2e) [A7]', () => {
     expect(existsSync(ipcSecretPath(dbDir))).toBe(true);
   }, 30_000);
 
-  test('Pin 1: user-prompt hook with a LIVE serve → exit 0 + additionalContext carrying the recalled WORLD belief, never the PRIVATE one', async () => {
+  test('Pin 1: user-prompt hook with a LIVE serve → exit 0 + additionalContext carrying the recalled world belief', async () => {
     // Transcript fixture under the confinement seam root.
     const projRoot = join(tmpParent, 'projects');
     mkdirSync(join(projRoot, 'p1'), { recursive: true });
@@ -228,12 +227,10 @@ describe('bootstrap hook under a live serve (serial e2e) [A7]', () => {
     copyFileSync(TRANSCRIPT_FIXTURE, transcript);
 
     // Drive the turn off a real gold recall case: its query is the prompt, its
-    // expected substring is a WORLD belief we seeded, and its must_not is the
-    // PRIVATE sibling belief the visibility fence must keep out of the block.
+    // expected substring is a world belief we seeded.
     const beliefCase = loadCorpusQueries().find((q) => q.id === 'belief-recall-alice-standups');
     expect(beliefCase).toBeDefined();
     expect(beliefCase!.expect_substring).toBeDefined();
-    expect(beliefCase!.must_not_substring).toBeDefined();
 
     const out = collectStdout();
     const code = await runHook(['user-prompt'], {
@@ -254,28 +251,19 @@ describe('bootstrap hook under a live serve (serial e2e) [A7]', () => {
     expect(hb.event).toBe('user-prompt');
     expect(hb.outcome).not.toBe('error');
 
-    // Every distinctive fragment of a PRIVATE belief that must NEVER cross the
-    // IPC boundary (the meta-hook pins visibility=['world'] for the hook path).
-    const privateFragments = loadCorpusBeliefData()
-      .filter((b) => b.visibility === 'private')
-      .map((b) => b.text);
-
     if (payload.length > 0) {
       // Happy path: assert the REAL recalled content, not length>0. The
-      // assembled block must carry the seeded WORLD belief the gold case
-      // expects, and NONE of the private beliefs.
+      // assembled block must carry the seeded world belief the gold case expects.
       const parsed = JSON.parse(payload) as {
         hookSpecificOutput: { hookEventName: string; additionalContext: string };
       };
       expect(parsed.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit');
       const ctx = parsed.hookSpecificOutput.additionalContext;
       expect(ctx).toContain(beliefCase!.expect_substring!);
-      expect(ctx).not.toContain(beliefCase!.must_not_substring!);
-      for (const frag of privateFragments) expect(ctx).not.toContain(frag);
     } else {
       // Empty stdout MUST be a documented degradation recorded in the
       // heartbeat — never a silent nothing, never a wiring-broken reason. A
-      // degraded turn also, trivially, leaked no private content.
+      // degraded turn remains an explicit, inspectable outcome.
       expect(hb.reason).toBeDefined();
       expect(DOCUMENTED_LIVE_SERVE_REASONS.has(hb.reason!)).toBe(true);
     }
@@ -386,12 +374,7 @@ describe('bootstrap hook under a live serve (serial e2e) [A7]', () => {
     expect(packHb.event).toBe('session-start');
     expect(packHb.outcome).not.toBe('error');
 
-    // The pack path never widens visibility (world-only ALWAYS, D2=A): no
-    // fragment of a seeded PRIVATE belief may ride along in the warm pack.
-    const privateFragments = loadCorpusBeliefData()
-      .filter((b) => b.visibility === 'private')
-      .map((b) => b.text);
-    for (const frag of privateFragments) expect(pack).not.toContain(frag);
+    // The pack path uses the same shared world view as every other host agent.
   }, 60_000);
 
   test('Pin 3b (cathedral 5): compact under a REAL serve banks a content-addressed segment + ledger and stays fail-open + lock-free', async () => {

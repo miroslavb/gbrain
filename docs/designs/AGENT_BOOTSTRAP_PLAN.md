@@ -156,11 +156,9 @@ ChatGPT-app user). CLIs come along via shared machinery.
   DB-only fallback), and the private repo actually fills. `bootstrap verify` asserts an
   MCP-path `put_page` materializes a COMMITTED file under `brain/` — a green verify with
   an empty repo is impossible.
-- [S3#1] `turn-context.ts` constructs an OperationContext with `remote: true` and
-  threads `visibility: ['world']` into all fact reads (parity with the existing
-  meta-hook posture — the IPC path must never widen what MCP would return). IPC test:
-  a `visibility='private'` fact NEVER appears in a turn_context response. Verify's
-  magic-moment fact is written with visibility the harness can read back (world).
+- [S3#1] Superseded by the host's single-principal policy: `turn-context.ts`
+  exposes the same world-only view to IPC and MCP. Legacy private rows remain
+  readable during convergence; new schemas accept only `visibility: world`.
 
 **Interview + render hardening (S3#3, G10, G12, A8):**
 - Answers render inside fenced, explicitly-subordinate blocks ("verbatim principal
@@ -239,14 +237,9 @@ ChatGPT-app user). CLIs come along via shared machinery.
   codex-as-agent (greenfield here — docs/plans/ has n=1 file); it becomes
   `src/core/bootstrap/host-specs.ts` with TARGETS entries carrying id/status/
   verifiedAt/references.
-- [ENG-8] (9/10) **Facts visibility knob = ONE resolver helper.** The 'private'
-  default is duplicated at backstop.ts:185, :352, operations.ts:4468, :5812 — and the
-  :4468 ternary coerces any non-'world' to 'private', so a config default needs an
-  explicit caller-unset check. Implement `resolveDefaultVisibility(engine)` (reads
-  `facts.default_visibility` via the getConfig precedent, extract.ts:44) feeding
-  ctx.visibility at ALL FOUR sites; no schema change (CHECK already permits 'world',
-  migrate.ts:2319). Documented as security-relevant: it widens what remote/MCP
-  callers read via meta-hook.ts:66 — the intended effect, stated as such.
+- [ENG-8] (superseded) **Facts visibility = one world-only resolver.**
+  `resolveDefaultVisibility` and `resolveVisibilityParam` return `world` at every
+  write seam; migration v147 normalizes legacy storage and DB/config defaults.
 - [ENG-9] (8/10) **Secret-scan module reuses residents:** seed exclusion list from
   `.gitleaks.toml` allowlist paths (test/, skills/, .claude/skills/) so the scanner
   doesn't fire on fixtures CI already ignores; findings render through
@@ -817,4 +810,3 @@ settings.local.json + config.toml writers (single module owns each host format).
   `gbrain bootstrap`; paste block is pinned to a release tag (supply-chain integrity).
   BOOTSTRAP_FOR_AGENTS.md opens with a scope note: "For Claude Code / Codex. Running
   OpenClaw or Hermes? Use INSTALL_FOR_AGENTS.md instead."
-
