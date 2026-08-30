@@ -140,6 +140,11 @@ describe('isSyncable', () => {
     expect(isSyncable('node_modules/some-pkg/docs/api.md')).toBe(false);
     expect(isSyncable('apps/web/node_modules/dep/notes.md')).toBe(false);
   });
+
+  test('rejects named Python virtualenvs in the git-visible fast path', () => {
+    expect(isSyncable('embedding-venv/lib/python3.12/site-packages/pkg/template.md')).toBe(false);
+    expect(isSyncable('tools/docs-venv/site-packages/pkg/README.mdx')).toBe(false);
+  });
 });
 
 describe('pruneDir', () => {
@@ -164,6 +169,7 @@ describe('pruneDir', () => {
     expect(pruneDir('dist')).toBe(false);
     expect(pruneDir('build')).toBe(false);
     expect(pruneDir('venv')).toBe(false);
+    expect(pruneDir('embedding-venv')).toBe(false);
   });
 
   test('blocks *.raw sidecar dirs (gbrain convention)', () => {

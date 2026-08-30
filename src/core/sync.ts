@@ -444,7 +444,15 @@ export function pruneDir(name: string, parentDir?: string): boolean {
  */
 export function isPathPruned(path: string, includeHidden?: string[]): boolean {
   const segments = path.split('/');
-  if (segments.some((seg) => PRUNE_DIR_NAMES.has(seg) || seg.endsWith('.raw'))) return true;
+  // Keep the pure git-visible classifier byte-for-byte aligned with
+  // pruneDir(). Named virtualenvs (embedding-venv, docs-venv, …) are not in
+  // PRUNE_DIR_NAMES because pruneDir handles the suffix dynamically. Missing
+  // that dynamic branch here let git-untracked site-packages Markdown leak
+  // into sync/frontmatter scans even though the recursive walker pruned the
+  // same tree.
+  if (segments.some((seg) =>
+    PRUNE_DIR_NAMES.has(seg) || seg.endsWith('-venv') || seg.endsWith('.raw')
+  )) return true;
   const dotPruned = segments.some((seg) => seg.startsWith('.'));
   if (!dotPruned) return false;
   return !(includeHidden && includeHidden.length > 0 && matchesAnyGlob(path, includeHidden));

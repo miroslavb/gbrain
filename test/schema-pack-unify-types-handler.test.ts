@@ -138,6 +138,23 @@ describe('runUnifyTypes', () => {
       expect(rows[0].type).toBe('note');
       expect(rows[0].frontmatter.legacy_type).toBe('some-weird-type');
     });
+
+    it('catch-all leaves archive/generated-only unknown types untouched', async () => {
+      await seed('sessions/claude/example/segments/0001', 'conversation-segment');
+      await seed('life/events/2026-08-30/example', 'legacy-event-fragment');
+      const result = await runUnifyTypes(ctxOf(), {
+        target_pack: 'gbrain-base-v2',
+        apply: true,
+      });
+      expect(result.per_phase.retype_catch_all.would_apply).toBe(0);
+      const rows = await engine.executeRaw<{ slug: string; type: string }>(
+        `SELECT slug, type FROM pages WHERE deleted_at IS NULL ORDER BY slug`,
+      );
+      expect(Object.fromEntries(rows.map((row) => [row.slug, row.type]))).toEqual({
+        'life/events/2026-08-30/example': 'legacy-event-fragment',
+        'sessions/claude/example/segments/0001': 'conversation-segment',
+      });
+    });
   });
 
   describe('idempotency', () => {
@@ -201,6 +218,14 @@ describe('#2184 conversation-shaped types survive v2 unify', () => {
       expect(pt?.path_prefixes).toContain(prefix);
       expect(pt?.extractable).toBe(true);
     }
+    expect(manifest.page_types.some((t) => t.name === 'extract_receipt')).toBe(true);
+    expect(manifest.phases).toContain('extract_atoms');
+    expect(manifest.mapping_rules).toContainEqual(expect.objectContaining({
+      kind: 'retype',
+      from_type: 'session',
+      to_type: 'conversation',
+      slug_filter: 'sessions/%',
+    }));
   });
 });
 

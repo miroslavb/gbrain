@@ -26,8 +26,8 @@
 
 api_version: gbrain-schema-pack-v1
 name: gbrain-base-v2
-version: 1.2.0
-description: 14-type DRY/MECE canonical taxonomy + `note` catch-all (15 total). Successor to gbrain-base. Issue #1479.
+version: 1.2.1
+description: Fork runtime taxonomy with conversation/receipt preservation and atom extraction. Successor to gbrain-base. Issue #1479.
 gbrain_min_version: 0.42.0
 extends: null
 borrow_from: []
@@ -37,17 +37,24 @@ takes_kinds:
   - bet
   - hunch
 
-# #2117 — explicit: this pack declares NO lens-pack cycle phases.
-# extract_atoms / synthesize_concepts stay opt-in — activate a lens pack
-# that ships them (gbrain-creator, gbrain-everything) or add the phase
-# name to this list in a fork.
-phases: []
+# Fork runtime: atom extraction is an operator-approved maintenance phase.
+# Mass gates remain off; source-scoped workers and cycle policy still bound
+# each run.
+phases:
+  - extract_atoms
 
 migration_from:
   pack: gbrain-base
   version: "1.x"
 
 page_types:
+  # Machine operation receipts are not human notes and must survive taxonomy
+  # unification as their own audit contour.
+  - name: extract_receipt
+    primitive: annotation
+    path_prefixes:
+      - extracts/
+
   - name: person
     primitive: entity
     path_prefixes:
@@ -392,6 +399,14 @@ mapping_rules:
   # All retype rules write frontmatter.legacy_type per D8 (unless
   # subtype_field IS legacy_type, in which case it supplies legacy_type
   # directly via the cluster-8 pattern).
+
+  # Legacy agent-session pages under sessions/ are conversations. The slug
+  # fence prevents an unrelated page typed session elsewhere from being
+  # promoted into the conversation-facts contour.
+  - kind: retype
+    from_type: session
+    to_type: conversation
+    slug_filter: "sessions/%"
 
   # Cluster 1: tweet family (~106K pages, 7 types → 1 with subtype)
   - kind: retype

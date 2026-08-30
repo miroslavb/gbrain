@@ -391,6 +391,15 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Before shipping
 
+Fork production invariant (2026-08-30): the active `gbrain-base-v2` pack keeps
+`extract_receipt` distinct, runs the operator-approved `extract_atoms` phase,
+and retypes only `sessions/%` legacy `session` rows to `conversation`. Type
+unification's unknown-type catch-all must use the same taxonomy-relevant
+contours as doctor; it must never fold `sessions/`, `life/events/`, `atoms/`,
+`extracts/`, or `dream-cycle-summaries/` merely to clear a warning. Git-visible
+and recursive walkers must both prune named Python environments ending in
+`-venv`.
+
 Easiest path: `bun run ci:local` runs the full CI gate inside Docker (gitleaks,
 guards + typecheck, then 4-shard parallel unit + E2E against four pgvector
 containers plus a transaction-mode PgBouncer; unit phase keeps `DATABASE_URL`

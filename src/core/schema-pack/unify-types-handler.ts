@@ -112,7 +112,21 @@ export async function runUnifyTypes(
   );
 
   // Pack identity capture
-  const activePackBefore = await loadActivePack({ cfg: null, remote: false });
+  // Resolve the same active pack as doctor/query. A DB-plane schema_pack is
+  // tier-4 and can intentionally override ~/.gbrain/config.json; using
+  // cfg:null here fabricated gbrain-base as the "before" identity on those
+  // brains even while the migration target and every live query used the
+  // DB-selected custom pack.
+  const { loadConfigFileOnly } = await import('../config.ts');
+  let dbConfig: string | undefined;
+  try {
+    dbConfig = (await ctx.engine.getConfig('schema_pack')) ?? undefined;
+  } catch { /* pre-config brains fall through to file/default resolution */ }
+  const activePackBefore = await loadActivePack({
+    cfg: loadConfigFileOnly(),
+    remote: false,
+    dbConfig,
+  });
   const pack_identity_before = activePackBefore.identity;
 
   // 3. Acquire db-lock
@@ -198,9 +212,22 @@ export async function runUnifyTypes(
       const pageToLinkTargets = new Set(pageToLinkRules.map((r) => r.from_type));
       const pageToAliasTargets = new Set(pageToAliasRules.map((r) => r.from_type));
       // Find distinct types in the brain not covered by any other phase.
+      // Match doctor's taxonomy-relevant denominator. Archive/generated
+      // contours do not spend the semantic type budget and therefore must
+      // not be folded into note merely to clear type_proliferation. The old
+      // whole-brain DISTINCT pulled conversation-segment/session rows from
+      // sessions/* into the catch-all even though the warning explicitly
+      // excluded that contour.
+      const taxonomyRelevant = `
+        deleted_at IS NULL AND type IS NOT NULL
+        AND slug NOT LIKE 'sessions/%'
+        AND slug NOT LIKE 'life/events/%'
+        AND slug NOT LIKE 'atoms/%'
+        AND slug NOT LIKE 'extracts/%'
+        AND slug NOT LIKE 'dream-cycle-summaries/%'`;
       const where = sourceId
-        ? `WHERE deleted_at IS NULL AND type IS NOT NULL AND source_id = $1`
-        : `WHERE deleted_at IS NULL AND type IS NOT NULL`;
+        ? `WHERE ${taxonomyRelevant} AND source_id = $1`
+        : `WHERE ${taxonomyRelevant}`;
       const params = sourceId ? [sourceId] : [];
       const rows = await ctx.engine.executeRaw<{ type: string }>(
         `SELECT DISTINCT type FROM pages ${where} ORDER BY type`,
@@ -274,8 +301,9 @@ export async function runUnifyTypes(
       }
       active_pack_flipped = true;
       const activeAfter = await loadActivePack({
-        cfg: { schema_pack: input.target_pack } as never,
+        cfg: loadConfigFileOnly(),
         remote: false,
+        perCall: input.target_pack,
       });
       pack_identity_after = activeAfter.identity;
       onProgress(`[unify-types] active pack flipped: ${pack_identity_before} → ${pack_identity_after}`);
