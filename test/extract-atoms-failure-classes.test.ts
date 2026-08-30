@@ -24,6 +24,7 @@ import {
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import type { ChatResult, ChatOpts } from '../src/core/ai/gateway.ts';
 import type { AtomSemanticValidator } from '../src/core/cycle/atom-safety.ts';
+import { contentHash } from '../src/core/utils.ts';
 
 let engine: PGLiteEngine;
 
@@ -432,6 +433,9 @@ describe('runPhaseExtractAtoms — completion receipt (gbrain#4148)', () => {
     const afm = typeof atoms[0].frontmatter === 'string' ? JSON.parse(atoms[0].frontmatter) : atoms[0].frontmatter;
     expect(afm.source_hash).toBe(HASH_A); // flipped, not pending:
     expect(String(afm.source_hash)).not.toContain('pending');
+    const atomPage = await engine.getPage(atoms[0].slug, { sourceId: 'default' });
+    expect(atomPage).not.toBeNull();
+    expect(atomPage!.content_hash).toBe(contentHash(atomPage!));
     expect((await frontmatterOf('note/ok1')).atoms_scan_hash).toBe(HASH_A);
   });
 

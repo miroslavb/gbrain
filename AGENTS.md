@@ -110,6 +110,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   mutating the stored page/hash, while malformed fences remain byte-identical.
   This keeps agent-facing material world-only without fabricating extraction
   staleness from a metadata-only rewrite.
+- **Atom completion receipts:** keep provisional `pending:<source_hash>` atom
+  rows invisible to discovery until every atom for the item persists. Publish
+  the final source hash and recompute each atom page's canonical content hash
+  in the same transaction; a JSONB-only flip creates page/hash drift and is
+  forbidden. Atom body/chunks are unchanged, so this repair must not trigger
+  re-embedding.
 - **Autopilot ownership:** when `gbrain-autopilot.service` exists, it is the
   only daemon owner. The cron watchdog may start/restart the unit but must never
   invoke `autopilot-run.sh` directly; otherwise systemd loops on the live lock.
