@@ -19,6 +19,7 @@ Environment:
   ATOM_MINE_SLEEP_SECONDS     pause between cycles (default: 20)
   ATOM_MINE_MAX_BATCHES       stop after N cycles; 0 means unlimited (default: 0)
   ATOM_MINE_MAX_ERROR_STREAK  fail closed after N bad cycles (default: 3)
+  ATOM_MINE_FALLBACK_CHAIN    chat fallback after GLM (default: openai:gpt-5.6-terra)
 
 To request a clean stop, create <state-dir>/<source-id>.STOP.
 EOF
@@ -46,6 +47,7 @@ timeout_seconds=${ATOM_MINE_TIMEOUT_SECONDS:-1800}
 sleep_seconds=${ATOM_MINE_SLEEP_SECONDS:-20}
 max_batches=${ATOM_MINE_MAX_BATCHES:-0}
 max_error_streak=${ATOM_MINE_MAX_ERROR_STREAK:-3}
+fallback_chain=${ATOM_MINE_FALLBACK_CHAIN:-openai:gpt-5.6-terra}
 
 for numeric_name in timeout_seconds sleep_seconds max_batches max_error_streak; do
   numeric_value=${!numeric_name}
@@ -139,7 +141,7 @@ while :; do
 
   (
     cd "$repo_dir" || exit 2
-    timeout "$timeout_seconds" "$gbrain_bin" dream \
+    GBRAIN_CHAT_FALLBACK_CHAIN="$fallback_chain" timeout "$timeout_seconds" "$gbrain_bin" dream \
       --source "$source_id" --phase extract_atoms --once --json
   ) >"$stdout_file" 2>"$stderr_file"
   command_rc=$?

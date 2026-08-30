@@ -23,8 +23,10 @@ describe('atom-mine-source-worker', () => {
     const dir = makeScratch();
     const fake = join(dir, 'fake-gbrain');
     const argsFile = join(dir, 'args');
+    const fallbackFile = join(dir, 'fallback-chain');
     writeFileSync(fake, `#!/usr/bin/env bash
 printf '%s\\n' "$*" >"${argsFile}"
+printf '%s\\n' "\${GBRAIN_CHAT_FALLBACK_CHAIN:-}" >"${fallbackFile}"
 printf '%s\\n' '{"schema_version":"1","timestamp":"2026-01-01T00:00:00Z","duration_ms":10,"status":"ok","brain_dir":null,"phases":[{"phase":"extract_atoms","status":"warn","duration_ms":10,"summary":"bounded","details":{"source_id":"alpha","pages_processed":2,"pages_total":3,"atoms_extracted":1,"candidates":2,"accepted":1,"rejected":1,"malformed_outputs":0,"failures":[{"source":"semantic_validator","error":"semantic_validator_timeout"}]}}],"totals":{}}'
 `, { mode: 0o755 });
     chmodSync(fake, 0o755);
@@ -45,6 +47,7 @@ printf '%s\\n' '{"schema_version":"1","timestamp":"2026-01-01T00:00:00Z","durati
     expect(readFileSync(argsFile, 'utf8').trim()).toBe(
       'dream --source alpha --phase extract_atoms --once --json',
     );
+    expect(readFileSync(fallbackFile, 'utf8').trim()).toBe('openai:gpt-5.6-terra');
     const receipt = JSON.parse(readFileSync(join(dir, 'alpha.batches.jsonl'), 'utf8'));
     expect(receipt).toMatchObject({
       source_id: 'alpha',
