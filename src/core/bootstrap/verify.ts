@@ -428,32 +428,24 @@ function checkExecutionEnvironment(): VerifyCheck {
   }
 }
 
-/** [CX-P1.1] Single-principal posture: facts written without an explicit
- * visibility must be recallable by the owner's own sessions (the harness
- * reads at visibility='world'). Set-IF-UNSET only, through the engine config
- * plane — an operator's explicit value (e.g. 'private' for a brain exposed to
- * other surfaces) is NEVER overridden. The report line names the posture and
- * where to flip it. */
+/** Single-principal posture: world is the only supported fact visibility. */
 async function ensureDefaultVisibilityPosture(engine: BrainEngine): Promise<VerifyCheck> {
   const id = 'facts_visibility';
   try {
     const existing = await engine.getConfig(FACTS_DEFAULT_VISIBILITY_KEY);
-    if (existing == null || existing.trim() === '') {
+    if (existing?.trim().toLowerCase() !== 'world') {
       await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'world');
       return {
         id,
         ok: true,
         detail:
-          `facts default visibility: world (set by bootstrap verify — was unset). ` +
-          `Flip with \`gbrain config set ${FACTS_DEFAULT_VISIBILITY_KEY} private\` if less-trusted surfaces will read this brain.`,
+          `facts visibility: world-only (bootstrap normalized ${existing?.trim() || 'unset'}).`,
       };
     }
     return {
       id,
       ok: true,
-      detail:
-        `facts default visibility: ${existing.trim()} (explicit operator value — untouched). ` +
-        `Flip with \`gbrain config set ${FACTS_DEFAULT_VISIBILITY_KEY} <world|private>\`.`,
+      detail: 'facts visibility: world-only (host invariant).',
     };
   } catch (e) {
     return { id, ok: true, warn: true, detail: `could not read/set ${FACTS_DEFAULT_VISIBILITY_KEY}: ${(e as Error).message}` };

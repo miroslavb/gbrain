@@ -1,16 +1,16 @@
 /**
  * Ambient recall hooks (issue #1) — context_pack + delta frozen verbs, the
- * shared session cursor, world-only-by-default visibility, and cross-caller
+ * shared session cursor, world-only visibility, and cross-caller
  * isolation. Hermetic in-memory PGLite.
  *
  * Coverage map (plan verification + eng-review findings):
  *  - session-state round-trip, surfaced-slug union, ISO cursor, GC
  *  - eng 1B: cross-caller isolation via the (source_id, client_id, session_id) key
- *  - eng 1A / D2=A: world-only default; include_private widens only for
- *    trusted-local (ctx.remote === false); remote NEVER widens (fail-closed)
+ *  - eng 1A / D2=A: all host agents share one world view; include_private is
+ *    a compatibility no-op and legacy private rows remain readable
  *  - delta cursor lifecycle (establish → advance), page dedup, since|session gate
  *  - MEMORY_VERBS_VERSION stays 1 (additive; the P1 fix)
- *  - v0.45.7 gap-closure wave: delta visibility fail-closed mirror, stateless
+ *  - v0.45.7 gap-closure wave: delta world-only parity, stateless
  *    keyset resume + explicit since_slug precedence, forced budget overflow,
  *    session-state outage fail-open, banked-entity warm-pack visibility
  */
@@ -573,73 +573,71 @@ describe('push-path IPC handler (extracted, real engine)', () => {
   });
 });
 
-describe('hot-memory cache: cross-tier isolation (adversarial P1 regression)', () => {
-  test('a local include_private call must not warm the cache the remote read hits', async () => {
+describe('hot-memory cache: one shared visibility tier', () => {
+  test('a local read may warm the same all-facts cache a remote read hits', async () => {
     const local = ctxFor({ remote: false });
-    await call(remember, local, { fact: 'tier-secret burn detail', provenance: 't', entity: 'tier-acme', visibility: 'private' });
+    await call(remember, local, { fact: 'tier-secret burn detail', provenance: 't', entity: 'tier-acme', visibility: 'world' });
+    await engine.executeRaw(`UPDATE facts SET visibility='private' WHERE fact='tier-secret burn detail'`);
     __resetHotMemoryCacheForTests();
-    // Warm the cache at the trusted-local tier (private facts included).
+    // Warm the single host-wide cache with a legacy private row.
     const warm = await call(contextPack, local, { entities: 'tier-acme', include_private: true });
     expect((warm.facts as Array<{ fact: string }>).map((f) => f.fact).join('|')).toContain('tier-secret');
-    // NO cache reset here — the remote call with the same source/session must
-    // MISS the local-tier entry (the leak was: same key, served private).
+    // No cache reset: remote agents intentionally share the same material.
     const r = await call(contextPack, ctxFor({ remote: true, clientId: 'c1' }), { entities: 'tier-acme', include_private: true });
-    expect((r.facts as Array<{ fact: string }>).map((f) => f.fact).join('|')).not.toContain('tier-secret');
+    expect((r.facts as Array<{ fact: string }>).map((f) => f.fact).join('|')).toContain('tier-secret');
   });
 });
 
-describe('visibility (eng 1A / D2=A): world-only default, fail-closed widen', () => {
+describe('visibility: world-only with include_private compatibility no-op', () => {
   beforeEach(async () => {
-    // seed one world + one private fact about the same entity
+    // Seed one world row and one legacy private row about the same entity.
     const local = ctxFor({ remote: false });
     await call(remember, local, { fact: 'acme-example raised a seed round', provenance: 'test', entity: 'acme-example', visibility: 'world' });
-    await call(remember, local, { fact: 'acme-example secret burn rate detail', provenance: 'test', entity: 'acme-example', visibility: 'private' });
+    await call(remember, local, { fact: 'acme-example secret burn rate detail', provenance: 'test', entity: 'acme-example', visibility: 'world' });
+    await engine.executeRaw(`UPDATE facts SET visibility='private' WHERE fact='acme-example secret burn rate detail'`);
     __resetHotMemoryCacheForTests();
   });
 
-  test('local include_private=true widens facts to include private', async () => {
+  test('local include_private=true reads the shared view', async () => {
     const r = await call(contextPack, ctxFor({ remote: false }), { entities: 'acme-example', include_private: true });
     const facts = (r.facts as Array<{ fact: string }>).map((f) => f.fact).join(' | ');
     expect(facts).toContain('secret burn rate');
   });
 
-  test('local default (no include_private) is world-only', async () => {
+  test('local default includes legacy private rows', async () => {
     const r = await call(contextPack, ctxFor({ remote: false }), { entities: 'acme-example' });
     const facts = (r.facts as Array<{ fact: string }>).map((f) => f.fact).join(' | ');
-    expect(facts).not.toContain('secret burn rate');
+    expect(facts).toContain('secret burn rate');
   });
 
-  test('remote caller NEVER widens even with include_private=true (fail-closed)', async () => {
+  test('remote caller sees legacy private rows even with the deprecated flag', async () => {
     const r = await call(contextPack, ctxFor({ remote: true, clientId: 'c1' }), { entities: 'acme-example', include_private: true });
     const facts = (r.facts as Array<{ fact: string }>).map((f) => f.fact).join(' | ');
-    expect(facts).not.toContain('secret burn rate');
+    expect(facts).toContain('secret burn rate');
   });
 
-  // v0.45.7 gap closure: `delta` mirrors the same fail-closed ladder — the
-  // facts arm routes through listFactsSince's visibility filter, not the
-  // hot-memory tier, so it needs its own pins.
-  test('delta local default (no include_private) is world-only in facts[] AND text', async () => {
+  test('delta local default includes legacy rows in facts[] and text', async () => {
     const since = new Date(Date.now() - 5 * 60_000).toISOString();
     const r = await call(del, ctxFor({ remote: false }), { since });
     const facts = (r.facts as Array<{ fact: string }>).map((f) => f.fact).join(' | ');
     expect(facts).toContain('raised a seed round');
-    expect(facts).not.toContain('secret burn rate');
-    expect(r.text as string).not.toContain('secret burn rate');
+    expect(facts).toContain('secret burn rate');
+    expect(r.text as string).toContain('secret burn rate');
   });
 
-  test('delta local include_private=true widens facts to include private', async () => {
+  test('delta local include_private=true matches the default view', async () => {
     const since = new Date(Date.now() - 5 * 60_000).toISOString();
     const r = await call(del, ctxFor({ remote: false }), { since, include_private: true });
     const facts = (r.facts as Array<{ fact: string }>).map((f) => f.fact).join(' | ');
     expect(facts).toContain('secret burn rate');
   });
 
-  test('delta remote caller NEVER widens even with include_private=true (fail-closed)', async () => {
+  test('delta remote caller sees the same legacy row', async () => {
     const since = new Date(Date.now() - 5 * 60_000).toISOString();
     const r = await call(del, ctxFor({ remote: true, clientId: 'c1' }), { since, include_private: true });
     const facts = (r.facts as Array<{ fact: string }>).map((f) => f.fact).join(' | ');
-    expect(facts).not.toContain('secret burn rate');
-    expect(r.text as string).not.toContain('secret burn rate');
+    expect(facts).toContain('secret burn rate');
+    expect(r.text as string).toContain('secret burn rate');
   });
 });
 

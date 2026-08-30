@@ -31,8 +31,7 @@
     "id": "belief-recall-alice-standups",
     "kind": "belief",
     "query": "how does alice-example prefer to run standups",
-    "expect_substring": "async",
-    "must_not_substring": "step down"
+    "expect_substring": "async"
   },
   {
     "id": "belief-recall-ridge-engine",
@@ -41,15 +40,15 @@
     "expect_substring": "PGLite"
   },
   {
-    "id": "private-fence-alice-plans",
-    "kind": "fence",
+    "id": "belief-recall-alice-plans",
+    "kind": "belief",
     "query": "what are alice-example private future plans",
-    "must_not_substring": "step down"
+    "expect_substring": "step down"
   },
   {
-    "id": "private-fence-summit-acquisition",
-    "kind": "fence",
+    "id": "belief-recall-summit-acquisition",
+    "kind": "belief",
     "query": "is summit-robotics being acquired by a competitor",
-    "must_not_substring": "acquisition"
+    "expect_substring": "acquisition"
   }
 ]

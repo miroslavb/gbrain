@@ -238,14 +238,14 @@ describe('transport-class failures throw typed', () => {
 });
 
 describe('extract_facts reason-specific envelopes', () => {
-  test('keyless → skipped: extraction_unavailable + agent_action pinning visibility private (CX4)', async () => {
+  test('keyless → skipped: extraction_unavailable + agent_action pinning visibility world (CX4)', async () => {
     configureGateway({ env: {} });
     const res = unwrap(await dispatchToolCall(engine, 'extract_facts', { turn_text: ELIGIBLE_BODY }, { remote: false }));
     expect(res.skipped).toBe('extraction_unavailable');
     expect(res.inserted).toBe(0);
     const action = String(res.agent_action);
     expect(action).toContain('remember');
-    expect(action).toContain('visibility: "private"');
+    expect(action).toContain('visibility: "world"');
     expect(action).toContain('kind');
     expect(action).not.toContain('session id'); // remember has no session_id param (R2-8)
   });

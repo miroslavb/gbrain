@@ -47,10 +47,8 @@ import { buildEntityCard, type EntityCard, type EntityOpenThread } from '../verb
  *   - 'delta' — heartbeat "what changed since T": pages updated after `since`
  *               + facts newer than `since` + open-thread events after `since`.
  *
- * Visibility is WORLD-ONLY by default on every arm (a pack is injected into an
- * agent context window that may be logged or synced to a cloud model). The
- * `includePrivate` opt widens ALL arms in lockstep (never a partial widen);
- * the push hook path NEVER sets it. See D2=A in the plan.
+ * Visibility is world-only at write time. Legacy private rows remain readable
+ * during convergence because every agent on this host is the same principal.
  */
 export type ContextMode = 'turn' | 'pack' | 'delta';
 
@@ -258,9 +256,7 @@ export async function assembleTurnContext(
   })();
 
   // Arm B: hot facts through the meta-hook's cache + payload shape [ENG-11].
-  //    remote: true is the load-bearing bit [S3#1]: it pins the meta-hook's
-  //    visibility tier to ['world'] so a private fact can NEVER cross the IPC
-  //    boundary, exactly matching what a remote MCP caller would see.
+  // Legacy private rows are part of the host's one shared world view.
   const factsArm = (async (): Promise<TurnContextFact[]> => {
     try {
       const metaCtx: OperationContext = {
@@ -268,7 +264,7 @@ export async function assembleTurnContext(
         config: {} as GBrainConfig,
         logger: noopLogger,
         dryRun: false,
-        remote: true, // S3#1 — never widen past the remote/world posture
+        remote: false,
         sourceId: opts.sourceId,
         sessionId: opts.sessionId,
         takesHoldersAllowList: ['world'],
@@ -407,8 +403,9 @@ async function raceDeadline(work: Promise<void>, ms?: number): Promise<string | 
 }
 
 /**
- * Hot-facts arm shared by pack/delta. World-only unless `remote === false`
- * (include_private). Fail-soft: any error empties the arm, never throws.
+ * Hot-facts arm shared by pack/delta. All legacy tiers are readable and every
+ * returned fact is projected into the world-only host view. Fail-soft: any
+ * error empties the arm, never throws.
  */
 async function fetchHotFacts(
   engine: BrainEngine,
@@ -421,7 +418,7 @@ async function fetchHotFacts(
       config: {} as GBrainConfig,
       logger: noopLogger,
       dryRun: false,
-      remote, // false only when include_private explicitly widened the pack
+      remote,
       sourceId: opts.sourceId,
       sessionId: opts.sessionId,
       takesHoldersAllowList: ['world'],
@@ -436,15 +433,15 @@ async function fetchHotFacts(
 
 /**
  * pack mode — session-start / post-compaction bundle for a set of standing
- * entities: entity cards + open-threads + hot facts. World-only by default;
- * include_private widens the card + facts arms in lockstep. Sequential card
- * builds (PGLite is single-connection) so a deadline keeps the cards already built.
+ * entities: entity cards + open-threads + hot facts. `include_private` is a
+ * compatibility no-op under the world-only host policy. Sequential card builds
+ * (PGLite is single-connection) so a deadline keeps the cards already built.
  */
 async function assemblePack(
   engine: BrainEngine,
   opts: AssembleTurnContextOpts,
 ): Promise<TurnContextResult> {
-  const remote = opts.includePrivate !== true; // fail-closed: only explicit true widens
+  const remote = false;
   const maxEntities = clampPositive(opts.maxEntities, PACK_DEFAULT_MAX_ENTITIES);
   const entities = (opts.entities ?? [])
     .filter((e) => typeof e === 'string' && e.trim())
@@ -509,7 +506,7 @@ async function assembleDelta(
   engine: BrainEngine,
   opts: AssembleTurnContextOpts,
 ): Promise<TurnContextResult> {
-  const remote = opts.includePrivate !== true;
+  const remote = false;
   const since = typeof opts.since === 'string' && opts.since.trim() ? opts.since : undefined;
   const acc: {
     pages: DeltaPage[];
@@ -555,7 +552,7 @@ async function assembleDelta(
     if (deadlineAt === null || Date.now() < deadlineAt) {
       try {
         const sinceDate = since ? new Date(since) : new Date(0);
-        const visibility = remote ? (['world'] as ('private' | 'world')[]) : undefined;
+        const visibility = undefined;
         const rows = await engine.listFactsSince(opts.sourceId, sinceDate, {
           activeOnly: true,
           limit: 50,

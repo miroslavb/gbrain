@@ -67,8 +67,8 @@ export interface FactsBackstopCtx {
   remote?: boolean;
   /** Optional entity hints (extract_facts MCP op forwards these). */
   entityHints?: string[];
-  /** Optional visibility tier (default 'private'). extract_facts forwards `world` when caller asks. */
-  visibility?: 'private' | 'world';
+  /** Host invariant: extraction writes only world-visible facts. */
+  visibility?: 'world';
   /** Override the chat model (extract_facts forwards user's model param when set). */
   model?: string;
   /**
@@ -302,10 +302,8 @@ export async function runFactsBackstop(
           .digest('hex')
           .slice(0, 16);
         const minions = new MinionQueue(ctx.engine);
-        // [ENG-8] Caller-unset visibility resolves the brain default HERE
-        // (not in the long-lived worker) so the durable payload carries the
-        // visibility that was in force at write time.
-        const { resolveDefaultVisibility } = await import('./visibility.ts');
+        // Stamp the world-only host policy into the durable payload so even a
+        // later worker never has to infer a visibility tier.
         await minions.add(
           'facts-absorb',
           {
@@ -314,7 +312,7 @@ export async function runFactsBackstop(
             source: ctx.source,
             sessionId: ctx.sessionId,
             notabilityFilter: ctx.notabilityFilter ?? 'all',
-            visibility: ctx.visibility ?? (await resolveDefaultVisibility(ctx.engine)),
+            visibility: 'world',
             ...(ctx.model ? { model: ctx.model } : {}),
           },
           {
@@ -407,8 +405,8 @@ export async function runFactsBackstop(
  *   - extract_facts MCP op — calls directly with raw turn_text. The op
  *     is an explicit user request, not a page-write hook, so eligibility
  *     doesn't apply (no slug, no PageType, no frontmatter). Operator-
- *     level visibility filter (private vs world) and kill-switch gating
- *     are the op's responsibility.
+ *     level world-only visibility normalization and kill-switch gating are
+ *     the op's responsibility.
  *
  * Inputs come from extractFactsFromTurn — the LLM extractor — but this
  * function itself is shape-agnostic: it takes a `turnText` and the same
@@ -544,10 +542,7 @@ async function runPipelineWithBody(
   const facts = outcome.facts;
 
   const filter = ctx.notabilityFilter ?? 'all';
-  // [ENG-8] Explicit ctx.visibility wins; unset resolves the operator-set
-  // facts.default_visibility (fail-closed to 'private').
-  const { resolveDefaultVisibility } = await import('./visibility.ts');
-  const visibility = ctx.visibility ?? (await resolveDefaultVisibility(ctx.engine));
+  const visibility = 'world' as const;
 
   let inserted = 0;
   let duplicate = 0;

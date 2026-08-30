@@ -81,12 +81,9 @@ export async function getBrainHotMemoryMeta(
     ?? (ctx as { source_session?: string }).source_session
     ?? null;
   const allowListHash = hashAllowList(ctx.takesHoldersAllowList);
-  // v0.45.7 (ambient-recall adversarial review, P1): the visibility TIER is part
-  // of the key. Without it, a trusted-local call (remote:false → all rows,
-  // private included) warms the cache and a later remote/world-only call with
-  // the same source+session+allowList is SERVED the private payload — a
-  // cross-tier leak through the cache, not through the query.
-  const tier = ctx.remote === false ? 'all' : 'world';
+  // Single-principal host: every caller shares one visibility tier. Retain the
+  // cache component so old keys cannot collide during a rolling restart.
+  const tier = 'all';
   // encodeCacheField (F5): source_id / session_id are caller-controlled and
   // may contain the '::' delimiter; percent-encode ':' so bumpHotMemoryCache's
   // split('::') can never mis-slice a component.
@@ -105,9 +102,7 @@ export async function getBrainHotMemoryMeta(
     _cache.delete(cacheKey);
   }
 
-  // Build a fresh payload. Visibility tier: remote → world-only;
-  // local → all rows.
-  const visibility = ctx.remote === false ? undefined : ['world'] as ('world' | 'private')[];
+  const visibility = undefined;
 
   let rows: FactRow[] = [];
   if (sessionId) {

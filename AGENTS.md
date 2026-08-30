@@ -96,6 +96,14 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   `expired_at` plus `superseded_by=new.id`. Missing, foreign-source,
   wrong-entity, or already-expired targets roll back the whole page. Normalize
   Postgres BIGINT fact ids to safe JS numbers before transporting lineage.
+- **World-only visibility:** this host is single-principal. Agent-facing fact
+  writers accept only `visibility: world`; migration v147 and runtime seams
+  normalize legacy facts/pages, the DB default, and config to world. Remote
+  reads include legacy private material during convergence, but source scopes
+  and document ACLs remain separate boundaries.
+- **Autopilot ownership:** when `gbrain-autopilot.service` exists, it is the
+  only daemon owner. The cron watchdog may start/restart the unit but must never
+  invoke `autopilot-run.sh` directly; otherwise systemd loops on the live lock.
 - **Duplicate-content signal:** doctor counts every same-source content-hash
   group, but dependency trees and exact declared distribution/fixture/locale
   replicas are non-actionable details. Any other distinct-slug group remains
@@ -321,7 +329,7 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   with regressions auto-flagged, or `gbrain founder scorecard <entity-slug>`
   for a four-signal JSON rollup (claim_accuracy / consistency /
   growth_trajectory / red_flags). MCP op `find_trajectory` exposes the
-  same data — read scope, visibility-filtered for remote callers.
+  same data — read scope, with the same world-only visibility projection.
   `gbrain think` uses this substrate automatically on temporal /
   knowledge_update intent (default ON; flip `think.trajectory_enabled=false`
   to opt out). Non-metric event rows (`meeting`, `job_change`,

@@ -21,10 +21,11 @@ beforeAll(async () => {
     { fact: 'world fact', kind: 'fact', entity_slug: 'meta-pg', visibility: 'world', source: 'test' },
     { source_id: 'default' },
   );
-  await engine.insertFact(
+  const legacy = await engine.insertFact(
     { fact: 'private fact', kind: 'fact', entity_slug: 'meta-pg', visibility: 'private', source: 'test' },
     { source_id: 'default' },
   );
+  await engine.executeRaw(`UPDATE facts SET visibility='private' WHERE id=$1`, [legacy.id]);
 });
 
 afterAll(async () => { if (RUN) await teardownDB(); });
@@ -40,13 +41,13 @@ d('_meta injection on Postgres', () => {
     expect(r._meta?.brain_hot_memory).toBeDefined();
   });
 
-  test('remote=true filters to world facts only', async () => {
+  test('remote=true includes legacy private facts in the shared view', async () => {
     const r = await dispatchToolCall(getEngine(), 'get_stats', {}, {
       remote: true, sourceId: 'default', metaHook: getBrainHotMemoryMeta,
     });
     expect(r.isError).toBeFalsy();
     const bhm = r._meta?.brain_hot_memory as { facts: { fact: string }[] } | undefined;
-    expect(bhm?.facts.find(f => f.fact === 'private fact')).toBeUndefined();
+    expect(bhm?.facts.find(f => f.fact === 'private fact')).toBeDefined();
     expect(bhm?.facts.find(f => f.fact === 'world fact')).toBeDefined();
   });
 

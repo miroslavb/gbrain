@@ -337,7 +337,7 @@ export async function extractAndInsertClaims(opts: {
       fact: c.text,
       kind: c.event_type ? 'event' : 'fact',
       entity_slug: canonical.slug,
-      visibility: 'private',
+      visibility: 'world',
       valid_from: new Date(c.valid_from),
       source: 'longmemeval:extractor',
       source_session: opts.sessionId,

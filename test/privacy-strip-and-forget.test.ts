@@ -57,11 +57,11 @@ ${FACTS_FENCE_END}
 `;
 
 // ─────────────────────────────────────────────────────────────────
-// Layer A: chunker strip — private fact text NEVER reaches chunks
+// Layer A: chunker normalizes legacy private fact rows into the world view
 // ─────────────────────────────────────────────────────────────────
 
-describe('Layer A — chunker strips private fact rows (Codex R2-#1)', () => {
-  test('chunkText drops private fact text from output', () => {
+describe('Layer A — chunker world-only fact rows', () => {
+  test('chunkText retains and normalizes legacy private fact text', () => {
     const body = FENCE_BODY(
       `| 1 | PUBLIC_FACT_PROOF | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
 | 2 | PRIVATE_FACT_PROOF | fact | 1.0 | private | high | 2026-01-01 |  | s |  |`,
@@ -69,19 +69,20 @@ describe('Layer A — chunker strips private fact rows (Codex R2-#1)', () => {
     const chunks = chunkText(body);
     const allText = chunks.map(c => c.text).join('\n');
 
-    expect(allText).toContain('PUBLIC_FACT_PROOF');     // world fact survives
-    expect(allText).not.toContain('PRIVATE_FACT_PROOF'); // private fact dropped
+    expect(allText).toContain('PUBLIC_FACT_PROOF');
+    expect(allText).toContain('PRIVATE_FACT_PROOF');
+    expect(allText).not.toContain('| private |');
   });
 
-  test('private-only fence still produces chunks (the prose around it survives)', () => {
+  test('legacy-private-only fence and surrounding prose both survive', () => {
     const body = FENCE_BODY(
       `| 1 | SECRET | fact | 1.0 | private | high | 2026-01-01 |  | s |  |`,
     );
     const chunks = chunkText(body);
     const allText = chunks.map(c => c.text).join('\n');
 
-    expect(allText).not.toContain('SECRET');
-    // The prose ("Some text.") is preserved.
+    expect(allText).toContain('SECRET');
+    expect(allText).toContain('| world |');
     expect(allText).toContain('Some text.');
   });
 
@@ -110,7 +111,7 @@ Body text.`;
 });
 
 // ─────────────────────────────────────────────────────────────────
-// Layer B: get_page strip trigger — ctx.remote drives the filter
+// Layer B: get_page projects legacy fact rows into the shared world view
 // ─────────────────────────────────────────────────────────────────
 //
 // The trigger logic lives in src/core/operations.ts (the get_page
@@ -119,12 +120,8 @@ Body text.`;
 // integration test for get_page over MCP lives in
 // test/e2e/system-of-record-invariant.test.ts (commit 10).
 
-describe('Layer B — get_page strip trigger (Codex R2-#5)', () => {
-  test('stripFactsFence({keepVisibility:["world"]}) drops private rows in body', async () => {
-    // Use the fence's own stripFactsFence helper to verify the
-    // shape that operations.ts will call. The trigger lives in
-    // operations.ts:413 (now `ctx.remote === true`); we test the
-    // helper here, and the trigger plumbing E2E in commit 10.
+describe('Layer B — get_page world-only fact projection', () => {
+  test('stripFactsFence({keepVisibility:["world"]}) retains and normalizes legacy rows', async () => {
     const { stripFactsFence } = await import('../src/core/facts-fence.ts');
     const body = FENCE_BODY(
       `| 1 | WORLD_ROW | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
@@ -132,7 +129,8 @@ describe('Layer B — get_page strip trigger (Codex R2-#5)', () => {
     );
     const stripped = stripFactsFence(body, { keepVisibility: ['world'] });
     expect(stripped).toContain('WORLD_ROW');
-    expect(stripped).not.toContain('PRIVATE_ROW');
+    expect(stripped).toContain('PRIVATE_ROW');
+    expect(stripped).not.toContain('| private |');
   });
 });
 

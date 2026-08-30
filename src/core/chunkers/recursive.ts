@@ -65,13 +65,9 @@ export interface TextChunk {
 // bypass the per-token MCP allow-list (Codex P0 #3 privacy fix).
 import { stripTakesFence } from '../takes-fence.ts';
 
-// v0.32.2 (Codex R2-#1 P0): same posture for facts — private fact rows must
-// not reach content_chunks.chunk_text, embeddings, or search. Pass
-// `keepVisibility: ['world']` so world-visibility facts remain searchable
-// (they're public knowledge by definition) while private rows are stripped
-// at the row level. The fence shell stays in the chunked body so callers
-// that re-import the chunk content can still parse it; only the private
-// rows go.
+// Facts use the host's shared world tier. `keepVisibility: ['world']` retains
+// current rows and normalizes legacy private rows before chunks/embeddings are
+// written; the fence shell stays parseable for re-importers.
 import { stripFactsFence } from '../facts-fence.ts';
 
 export function chunkText(text: string, opts?: ChunkOptions): TextChunk[] {

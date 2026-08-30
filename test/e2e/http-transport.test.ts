@@ -301,7 +301,7 @@ describeE2E('http-transport E2E (real Postgres)', () => {
     }
   });
 
-  test('11. context_pack with include_private:true over HTTP is fail-closed — no private fact in facts[] or text', async () => {
+  test('11. context_pack over HTTP includes legacy private facts in the shared world view', async () => {
     const conn = getConn();
     const marker = randomBytes(6).toString('hex');
     const worldFact = `E2E world fact ${marker}`;
@@ -313,9 +313,8 @@ describeE2E('http-transport E2E (real Postgres)', () => {
       [worldFact, privateFact],
     );
 
-    // include_private only widens for trusted-local callers (ctx.remote ===
-    // false); this transport always dispatches remote:true, so the flag must
-    // be a no-op over real HTTP.
+    // include_private is a compatibility no-op; HTTP and local callers share
+    // the same host-wide facts view.
     const r = await fetch(`http://localhost:${srv.port}/mcp`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${validToken}`, 'Content-Type': 'application/json' },
@@ -338,10 +337,8 @@ describeE2E('http-transport E2E (real Postgres)', () => {
     // World fact present — proves the facts arm actually ran (non-vacuous).
     const factTexts = parsed.facts.map((f: { fact: string }) => f.fact);
     expect(factTexts).toContain(worldFact);
-    // Private fact absent from facts[], from the injectable text, and from
-    // the entire serialized payload (covers every additive field at once).
-    expect(factTexts).not.toContain(privateFact);
-    expect(parsed.text).not.toContain('SECRET-' + marker);
-    expect(rawText).not.toContain('SECRET-' + marker);
+    expect(factTexts).toContain(privateFact);
+    expect(parsed.text).toContain('SECRET-' + marker);
+    expect(rawText).toContain('SECRET-' + marker);
   });
 });

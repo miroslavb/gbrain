@@ -1,5 +1,5 @@
 /**
- * Turn-context assembly tests (agent-bootstrap plan: S3#1 visibility fence,
+ * Turn-context assembly tests (agent-bootstrap plan: world-only visibility,
  * ENG-1 8KB budget, ENG-11 hot-memory cache reuse, CX-P1.2 subordinate
  * envelope, CX2-11 typed session identity + two-session cache isolation).
  *
@@ -73,7 +73,7 @@ async function seedPage(slug: string, title: string, body: string) {
 }
 
 async function seedFact(fact: string, visibility: 'private' | 'world', opts: { session?: string; entity?: string } = {}) {
-  await engine.insertFact(
+  const inserted = await engine.insertFact(
     {
       fact,
       kind: 'fact',
@@ -84,10 +84,14 @@ async function seedFact(fact: string, visibility: 'private' | 'world', opts: { s
     },
     { source_id: 'default' },
   );
+  // Exercise convergence reads with an actual legacy row; normal writers widen it.
+  if (visibility === 'private') {
+    await engine.executeRaw(`UPDATE facts SET visibility='private' WHERE id=$1`, [inserted.id]);
+  }
 }
 
 describe('assembleTurnContext', () => {
-  test('envelope first, pointers + world facts in; private facts NEVER [CX-P1.2, S3#1]', async () => {
+  test('envelope first, pointers + world and legacy facts share one view', async () => {
     await seedPage('people/alice-example', 'Alice Example', 'Alice Example is a founder at acme-example.');
     await seedFact('WORLD-FACT alice prefers async updates', 'world');
     await seedFact('PRIVATE-FACT sensitive valuation note', 'private');
@@ -102,9 +106,9 @@ describe('assembleTurnContext', () => {
     expect(r.pointers[0].slug).toBe('people/alice-example');
     expect(r.text).toContain('people/alice-example');
     expect(r.text).toContain('WORLD-FACT');
-    expect(r.text).not.toContain('PRIVATE-FACT');
-    expect(r.text).not.toContain('sensitive valuation note');
-    expect(r.factsCount).toBe(1);
+    expect(r.text).toContain('PRIVATE-FACT');
+    expect(r.text).toContain('sensitive valuation note');
+    expect(r.factsCount).toBe(2);
     expect(r.degradedReason).toBeUndefined();
     expect(Buffer.byteLength(r.text, 'utf8')).toBeLessThanOrEqual(TURN_CONTEXT_DEFAULT_MAX_BYTES);
   });
@@ -338,7 +342,7 @@ describe('dispatch typed session identity [CX2-11]', () => {
   });
 });
 
-describe('corpus recall on a multi-entity brain [S3#1 fence, real recall]', () => {
+describe('corpus recall on a multi-entity world-only brain', () => {
   // Deterministic proper-case surface for a slug tail so the zero-LLM,
   // proper-case-biased entity resolver fires on a page-kind query.
   //   'concepts/graph-traversal' → 'Graph Traversal'
@@ -350,22 +354,17 @@ describe('corpus recall on a multi-entity brain [S3#1 fence, real recall]', () =
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(' ');
 
-  test('every gold query: world answer surfaces, private beliefs are fenced, named pages resolve to pointers', async () => {
+  test('every gold query: world facts surface and named pages resolve to pointers', async () => {
     // beforeEach cleared pages/facts/aliases. Seed the WHOLE synthetic world
     // through the real handlers: put_page fires auto-link + search vector,
-    // insertFact honors each belief's declared visibility.
+    // insertFact stores every belief in the shared world tier.
     const slugs = await loadCorpusPages(engine, { sourceId: 'default' });
     expect(slugs.length).toBeGreaterThanOrEqual(12);
     const inserted = await loadCorpusBeliefs(engine, { sourceId: 'default' });
     expect(inserted).toBe(loadCorpusBeliefData().length);
     // Beliefs were inserted after any prior meta read this test — start the
-    // hot-memory cache clean so the world/private tiers are (re)computed.
+    // hot-memory cache clean so the shared tier is recomputed.
     __resetHotMemoryCacheForTests();
-
-    const privateTexts = loadCorpusBeliefData()
-      .filter((b) => b.visibility === 'private')
-      .map((b) => b.text);
-    expect(privateTexts.length).toBeGreaterThanOrEqual(3);
 
     const queries = loadCorpusQueries();
     expect(queries.length).toBeGreaterThan(0);
@@ -375,24 +374,15 @@ describe('corpus recall on a multi-entity brain [S3#1 fence, real recall]', () =
     const violations: string[] = [];
     for (const q of queries) {
       // Page-kind: name the entity so the reflex resolver runs against the real
-      // 12-page graph. belief / fence: the raw query — only the world/private
-      // hot-memory fence decides what surfaces.
+      // 12-page graph. Belief cases use the raw query.
       const window: WindowTurn[] =
         q.kind === 'page' && q.expect_slug
           ? [{ role: 'user', text: `the latest on ${nameFromSlug(q.expect_slug)}` }]
           : [{ role: 'user', text: q.query }];
       const r = await assembleTurnContext(engine, { sourceId: 'default', window });
 
-      // Fence (S3#1): NO private belief text ever crosses into the block,
-      // regardless of what the user asked.
-      for (const pt of privateTexts) {
-        if (r.text.includes(pt)) violations.push(`${q.id}: leaked private belief "${pt.slice(0, 40)}…"`);
-      }
-      if (q.must_not_substring && r.text.includes(q.must_not_substring)) {
-        violations.push(`${q.id}: fenced substring surfaced "${q.must_not_substring}"`);
-      }
       if (q.kind === 'belief' && q.expect_substring && !r.text.includes(q.expect_substring)) {
-        violations.push(`${q.id}: world belief not recalled "${q.expect_substring}"`);
+        violations.push(`${q.id}: belief not recalled "${q.expect_substring}"`);
       }
       if (q.kind === 'page' && q.expect_slug) {
         if (!r.pointers.some((p) => p.slug === q.expect_slug)) {

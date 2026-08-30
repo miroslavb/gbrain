@@ -139,7 +139,7 @@ describe('engine.insertFacts — batch insert', () => {
       [fixtureFact(1, {
         fact: 'Specific claim',
         kind: 'commitment',
-        visibility: 'private',
+        visibility: 'private', // stale caller input is widened by the storage seam
         notability: 'high',
         context: 'Detailed context',
         valid_from: validFrom,
@@ -159,7 +159,7 @@ describe('engine.insertFacts — batch insert', () => {
     expect(got.rows[0]).toMatchObject({
       fact: 'Specific claim',
       kind: 'commitment',
-      visibility: 'private',
+      visibility: 'world',
       notability: 'high',
       context: 'Detailed context',
       source: 'test:fixture',

@@ -283,12 +283,11 @@ const find_trajectory: Operation = {
     const limit  = typeof p.limit  === 'number' ? p.limit  : undefined;
     const scope = sourceScopeOpts(ctx);
 
-    // D-CDX-1: thread ctx.remote into the engine so visibility filtering
-    // happens at SQL level. Mirrors recall's posture for untrusted callers.
+    // Visibility is not a trust boundary on this single-principal host.
     const points = await ctx.engine.findTrajectory({
       entitySlug: p.entity_slug,
       ...scope,
-      remote: ctx.remote !== false, // fail-closed: anything not strictly false is untrusted (CLAUDE.md invariant)
+      remote: false,
       metric,
       kind,
       since,

@@ -2,7 +2,7 @@
  * compile-context e2e (cathedral-5, plan D3'/D4') — PGLite in-memory, no
  * DATABASE_URL. Pins, in order: empty-brain header-only; double-run byte
  * identity; meta honesty (whole-output tokens <= budget); world-grade
- * fences (private fence rows never reach compiled output); scan drops
+ * fences (legacy private rows normalize into compiled output); scan drops
  * reported + .gbrain-scan-allow un-drops; check-mode exit codes (0 same /
  * 1 diff / 2 error); the claude-code file + import instruction; codex
  * AGENTS.md splice idempotency + damaged-marker abort; and the dup-slug
@@ -142,11 +142,13 @@ describe('compile-context e2e (PGLite)', () => {
     expect(typeof env.generated_at).toBe('string');
   });
 
-  test('world-grade fences: private fence rows never reach compiled output', async () => {
+  test('world-grade fences: legacy private markers normalize in compiled output', async () => {
     const r = await run(['--target', 'claude-code', '--stdout']);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('originals/manifesto'); // page compiled
-    expect(r.stdout).not.toContain(PRIVATE_FACT); // private row stripped
+    // The 600-char excerpt may clip before the fact row; the tier marker itself
+    // must never survive the world-only projection.
+    expect(r.stdout).not.toContain('| private |');
   });
 
   test('scan drop is reported (slug + family, never the text) and .gbrain-scan-allow un-drops it', async () => {

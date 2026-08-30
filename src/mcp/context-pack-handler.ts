@@ -7,9 +7,8 @@
  * The RUNTIME owns the intelligence — entity resolution (request entities +
  * window extraction + the session row's banked set), the since-cursor, and
  * cursor advancement — the hook just fires the event and injects stdout.
- * World-only ALWAYS (the push path never widens; include_private is a
- * pull-verb affordance). Fail-open: session-state trouble degrades to a
- * stateless pack, never an error.
+ * World-only ALWAYS; `include_private` is a compatibility no-op. Fail-open:
+ * session-state trouble degrades to a stateless pack, never an error.
  */
 
 import { existsSync } from 'node:fs';
@@ -128,7 +127,7 @@ export function makeContextPackIpcHandler(
       since: state?.last_wake_at ?? undefined,
       maxEntities: PUSH_PACK_MAX_ENTITIES,
       deadlineMs: CONTEXT_PACK_SERVER_BUDGET_MS,
-      // includePrivate NEVER set on the push path (D2=A).
+      // includePrivate is intentionally omitted; the host has one shared tier.
       // Cathedral 5: banked checkpoint links ride the assembled pack so the
       // post-compaction SessionStart renders them (fail-open []; links that
       // missed this pack surface on the next boundary — at-least-once).

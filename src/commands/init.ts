@@ -1386,8 +1386,8 @@ function printMemoryVerbsQuickstart(opts: { emptyBrain?: boolean; onPglite?: boo
   console.log('  gbrain recall people/me');
   console.log('Then ask your agent in a NEW session — it remembers.');
   console.log('');
-  console.log('Note: memories agents save are readable by every agent connected to');
-  console.log('this brain; use visibility:"private" for local-only facts.');
+  console.log('Note: memories agents save use visibility:"world" and are readable by');
+  console.log('every agent connected to this single-principal brain.');
   console.log('Other harnesses (Codex, OpenClaw): docs/protocol/MEMORY_VERBS_v1.md');
   console.log('If `claude` is not found: install Claude Code first, or use the per-harness blocks in that doc.');
   // Secondary paths, one line, clearly subordinate to the action above.

@@ -131,40 +131,26 @@ bun run scripts/generate-tool-catalog.ts # refresh the Starter column; freshness
 slice. The advisor's drift finding (`mcp_starter_ops_drift`) is the
 standing prompt to re-run this move.
 
-## Move 5 — expose `visibility: private` pages to remote callers (opt-out)
+## Move 5 — verify the world-only host posture
 
-Pages carrying `visibility: private` frontmatter are hidden from every
-remote/untrusted read path by default (fail-closed; trusted local CLI —
-`ctx.remote === false` — always sees everything). The gate covers search +
-recall's query arm, entity cards / context_pack / delta, and the page read
-ops: `get_page` / `fetch` / `list_pages`, `get_chunks` / `get_versions` /
-`get_timeline` / `get_raw_data`, `resolve_slugs`, and
-`get_links` / `get_backlinks` / `traverse_graph`. A gated page reads exactly
-like a missing one (no existence oracle), and link/graph output never
-enumerates private slugs.
-
-Single-user brains where every connected agent is equally trusted can opt
-out:
+This host is single-principal: `facts.default_visibility=world` is the shared
+policy for facts and pages. Public write schemas accept only `world`; legacy
+private rows/pages remain readable while they converge.
 
 ```bash
-gbrain config set search.remote_private_pages visible   # also accepts true / 1
+gbrain config set facts.default_visibility world
 ```
 
-**Expected outcome:** remote reads of private pages resolve again within
-~30s (the trust resolver caches the config per engine for 30s; no restart).
-Clearing the key (`gbrain config set search.remote_private_pages ''`)
-restores enforcement on the same schedule. Resolver:
-`src/core/search/private-visibility.ts`; a failed config read counts as
-"not opted out" (enforce).
+**Expected outcome:** every connected agent can read legacy private pages and
+facts, while new writes expose only `visibility: world`. Bootstrap verify
+normalizes a stale/unset value to `world`.
 
 ## Incident levers
 
-- **`GBRAIN_REMOTE_PRIVATE_PAGES=1`** — operator escape hatch for the
-  private-pages gate (Move 5): the serving process exposes private pages to
-  remote callers regardless of config. Env wins over the config key; unset
-  it to restore the fail-closed default. Use it when the gate itself
-  misbehaves (e.g. a probe error blanking legitimate remote reads) while
-  you diagnose.
+- **`GBRAIN_REMOTE_PRIVATE_PAGES=1`** — legacy compatibility escape hatch for
+  multi-principal brains that have not adopted `facts.default_visibility=world`.
+  It is intentionally a no-op on this world-only host posture, where all pages
+  are already readable by every connected agent.
 - **`GBRAIN_MCP_FORCE_SURFACE=verbs|starter|full`** — narrow-only clamp
   (FOV-6a): it `min()`s into every resolved surface and can NEVER widen
   past the configured ceiling; widening requires an explicit `--surface`

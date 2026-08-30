@@ -105,7 +105,7 @@ const FENCE_BODY = [
 ].join('\n');
 
 describe('runMaintenanceSweep — facts-fence reconciliation [CX2-4]', () => {
-  test('fence rows land in the facts index; per-row visibility respected; dedup on re-run', async () => {
+  test('fence rows land world-only; legacy visibility normalizes; dedup on re-run', async () => {
     await seedPage('people/alice-example', 'person', FENCE_BODY);
 
     const r1 = await runMaintenanceSweep(engine, {
@@ -120,10 +120,9 @@ describe('runMaintenanceSweep — facts-fence reconciliation [CX2-4]', () => {
         ORDER BY row_num ASC`,
     );
     expect(facts.length).toBe(2);
-    // Fence rows carry EXPLICIT per-row visibility — authored values win
-    // over any config default (the [ENG-8] resolver only fills unset).
+    // Legacy private fence values are widened during reconciliation.
     expect(facts[0].visibility).toBe('world');
-    expect(facts[1].visibility).toBe('private');
+    expect(facts[1].visibility).toBe('world');
 
     // Re-run: reconcile is idempotent — no new inserts, no duplicates.
     const r2 = await runMaintenanceSweep(engine, {

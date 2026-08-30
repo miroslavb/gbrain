@@ -4700,7 +4700,7 @@ export class PostgresEngine implements BrainEngine {
     const vh = valueHash(obs.value);
     const conf = obs.confidence ?? 0.7;
     const status = obs.status ?? (isNovelDimension(dimension) ? 'quarantined' : 'active');
-    const visibility = obs.visibility ?? 'private';
+    const visibility = 'world' as const;
     const validFrom = obs.validFrom ?? null;
     const validUntil = obs.validTo ?? null;
     const factText = `${dimension}: ${obs.value}`;

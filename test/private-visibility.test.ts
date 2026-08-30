@@ -23,6 +23,7 @@ import {
   __resetPrivateVisibilityCacheForTests,
   REMOTE_PRIVATE_PAGES_KEY,
 } from '../src/core/search/private-visibility.ts';
+import { FACTS_DEFAULT_VISIBILITY_KEY } from '../src/core/facts/visibility.ts';
 import { buildEntityCard } from '../src/core/verbs/entity-card.ts';
 import { operationsByName } from '../src/core/operations.ts';
 import { withEnv } from './helpers/with-env.ts';
@@ -33,6 +34,10 @@ beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  // Most tests below pin the legacy/multi-principal fail-closed behavior.
+  // Migration v147 sets the real host posture to world, so explicitly clear
+  // it here; the dedicated world-only test opts back in and proves the bypass.
+  await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, '');
   await engine.putPage('notes/world-page', {
     title: 'Zebra Widget World',
     type: 'concept',
@@ -119,6 +124,17 @@ describe('resolveExcludePrivatePages gate (#4352)', () => {
     expect(await resolveExcludePrivatePages(engine, true)).toBe(false);
     await engine.setConfig(REMOTE_PRIVATE_PAGES_KEY, '');
     __resetPrivateVisibilityCacheForTests();
+    expect(await resolveExcludePrivatePages(engine, true)).toBe(true);
+  });
+
+  test('world-only host posture exposes legacy private pages remotely', async () => {
+    await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, 'world');
+    try {
+      expect(await resolveExcludePrivatePages(engine, true)).toBe(false);
+      expect(await resolveExcludePrivatePages(engine, undefined)).toBe(false);
+    } finally {
+      await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, '');
+    }
     expect(await resolveExcludePrivatePages(engine, true)).toBe(true);
   });
 

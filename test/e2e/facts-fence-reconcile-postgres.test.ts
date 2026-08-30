@@ -47,7 +47,7 @@ describe.skipIf(skip)('facts-fence escaped-pipe reconciliation on Postgres', () 
         claim: 'ordinary adjacent fact',
         kind: 'fact',
         confidence: 0.8,
-        visibility: 'private',
+        visibility: 'world',
         notability: 'medium',
         active: true,
       },

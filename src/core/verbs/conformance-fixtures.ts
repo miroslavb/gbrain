@@ -104,14 +104,14 @@ export const CONFORMANCE_CASES: ConformanceCase[] = [
     saveAs: { key: 'fact2', path: 'id' },
   },
   {
-    name: 'remember private fact (fence test setup)',
+    name: 'remember world fact (fence test setup)',
     verb: 'remember',
     params: {
       fact: 'conformance {{marker}} PRIVATE-SENTINEL commitment',
       provenance: 'conformance run {{marker}}',
       entity: 'people/conformance-{{marker}}',
       kind: 'commitment',
-      visibility: 'private',
+      visibility: 'world',
     },
     validateSchema: true,
   },
@@ -184,11 +184,11 @@ export const CONFORMANCE_CASES: ConformanceCase[] = [
     ],
   },
   {
-    name: 'entity card never leaks private facts to remote callers (fence test)',
+    name: 'entity card exposes shared-world commitment facts to remote callers',
     verb: 'entity',
     params: { name: 'people/conformance-{{marker}}' },
     requiresSeededEntity: true,
-    expect: [{ path: 'card.open_threads', absentOrNotContains: 'PRIVATE-SENTINEL' }],
+    validateSchema: true,
   },
 
   // ── forget: idempotency + not_found ─────────────────────────────────────

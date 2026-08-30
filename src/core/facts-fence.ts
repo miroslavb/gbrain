@@ -59,9 +59,8 @@ export const FACTS_FENCE_END   = '<!--- gbrain:facts:end -->';
 // importing engine.ts pulls a large DB-shaped transitive graph.
 export type FactKind = 'event' | 'preference' | 'commitment' | 'belief' | 'fact';
 
-// Mirror src/core/engine.ts FactVisibility ('private' | 'world'). Binary
-// gate per the existing takes D21 contract — drives the chunker strip
-// (Layer A) and the get_page response strip (Layer B).
+// `private` remains parseable only as a legacy on-disk value. Every parsed or
+// rendered row is normalized to `world` for this single-principal host.
 export type FactVisibility = 'private' | 'world';
 
 export type FactNotability = 'high' | 'medium' | 'low';
@@ -276,7 +275,7 @@ export function parseFactsFence(body: string): FactsFenceParseResult {
       claim: claimText,
       kind: kind as FactKind,
       confidence,
-      visibility: visibility as FactVisibility,
+      visibility: 'world',
       notability: notability as FactNotability,
       validFrom:  parseStringCell(validFromRaw),
       validUntil: parseStringCell(validUntilRaw),
@@ -335,7 +334,7 @@ export function renderFactsTable(facts: ParsedFact[]): string {
     : `|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|`;
   const rows = facts.map(f => {
     const claimCell = f.active ? f.claim : `~~${f.claim}~~`;
-    const base = `| ${f.rowNum} | ${escapeFenceCell(claimCell)} | ${f.kind} | ${formatConfidence(f.confidence)} | ${f.visibility} | ${f.notability} | ${escapeFenceCell(f.validFrom ?? '')} | ${escapeFenceCell(f.validUntil ?? '')} | ${escapeFenceCell(f.source ?? '')} | ${escapeFenceCell(f.context ?? '')} |`;
+    const base = `| ${f.rowNum} | ${escapeFenceCell(claimCell)} | ${f.kind} | ${formatConfidence(f.confidence)} | world | ${f.notability} | ${escapeFenceCell(f.validFrom ?? '')} | ${escapeFenceCell(f.validUntil ?? '')} | ${escapeFenceCell(f.source ?? '')} | ${escapeFenceCell(f.context ?? '')} |`;
     if (!anyTyped) return base;
     const valueCell = f.claimValue === undefined ? '' : String(f.claimValue);
     return `${base} ${escapeFenceCell(f.claimMetric ?? '')} | ${escapeFenceCell(valueCell)} | ${escapeFenceCell(f.claimUnit ?? '')} | ${escapeFenceCell(f.claimPeriod ?? '')} |`;
@@ -428,18 +427,13 @@ export interface StripFactsFenceOpts {
  *      wants the body without ANY fence content (rare in practice; the
  *      privacy-boundary callers all want partial retention).
  *
- *   2. `keepVisibility: ['world']`: retain only world-visibility rows.
- *      The fence shape stays in the body so a re-importer can still
- *      round-trip the response; private rows are dropped at the row
- *      level. This is the mode BOTH the chunker (Codex R2-#1 — keeps
- *      world rows searchable, drops private text from
- *      `content_chunks.chunk_text` + embeddings + search) AND `get_page`
- *      over remote MCP (Codex Q5 — restricted callers see world rows
- *      only) use.
+ *   2. `keepVisibility: ['world']`: retain the host's world-only view.
+ *      Legacy private rows parse as world and are rendered back with the
+ *      normalized marker. This is the mode both the chunker and remote
+ *      `get_page` use.
  *
- * The default whole-fence strip is the "deny-by-default" branch for any
- * caller that forgets to specify allowed visibility — a safer failure
- * mode at a privacy boundary than accidentally leaking.
+ * The default whole-fence strip remains the explicit no-facts mode for callers
+ * that want only ordinary page prose.
  *
  * Returns the body unchanged when no fence is present.
  */

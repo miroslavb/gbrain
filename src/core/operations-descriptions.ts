@@ -117,7 +117,7 @@ export const FIND_TRAJECTORY_DESCRIPTION =
   "regressions: [{metric, from_value, from_date, to_value, to_date, delta_pct}], " +
   "drift_score: number|null, schema_version: 1}`. Drift score 0 = stable narrative, " +
   "1 = every consecutive claim is unrelated; null when fewer than 3 typed points " +
-  "exist. Visibility-filtered for remote callers (world-only); source-scoped by " +
+  "exist. Visibility is world-only at write time; source-scoped by " +
   "the caller's OAuth source binding. Pair with `gbrain founder scorecard <slug>` " +
   "for an aggregated rollup of the same data.";
 
