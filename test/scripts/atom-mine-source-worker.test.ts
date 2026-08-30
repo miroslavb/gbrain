@@ -101,7 +101,10 @@ printf '%s\\n' '{"schema_version":"1","timestamp":"2026-01-01T00:00:00Z","durati
     });
 
     expect(result.status).toBe(1);
-    const receipts = readFileSync(join(dir, 'alpha.batches.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    const receipts = readFileSync(join(dir, 'alpha.batches.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line));
     expect(receipts).toHaveLength(2);
     expect(receipts[1]).toMatchObject({ validator_errors: 1, error_streak: 2 });
     const heartbeat = JSON.parse(readFileSync(join(dir, 'alpha.heartbeat.json'), 'utf8'));
