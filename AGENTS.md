@@ -227,6 +227,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   any otherwise extractable page. Discovery, backlog/doctor, drain, and
   autopilot must share this predicate. Do not broaden these high-volume types
   back to implicit eligibility without a measured, privacy-safe corpus canary.
+- **Parallel atom mining:** use one `scripts/atom-mine-source-worker.sh` process
+  per explicit source. Never mix the legacy unscoped cycle with source workers;
+  each worker must retain aggregate-only JSONL receipts, a heartbeat, bounded
+  infrastructure-error shutdown, and the engine's source-scoped cycle lock.
+  Raise concurrency only through measured canaries and keep provider errors,
+  validator timeouts, provisional receipts, and source-isolation drift at zero.
 - **Value-ordered reindex:** markdown queue work must be bounded and scoped with
   `--source` / `--type` / `--prefix` / `--retrieved-since`, then ordered with
   `--hot-first`. Benchmark 100 representative pages with four workers before
