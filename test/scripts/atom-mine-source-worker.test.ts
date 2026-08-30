@@ -50,6 +50,7 @@ printf '%s\\n' '{"schema_version":"1","timestamp":"2026-01-01T00:00:00Z","durati
       source_id: 'alpha',
       pages_processed: 2,
       atoms_extracted: 1,
+      validator_errors: 1,
       validator_timeouts: 1,
       provider_errors: 0,
       error_streak: 1,
@@ -77,5 +78,33 @@ printf '%s\\n' '{"schema_version":"1","timestamp":"2026-01-01T00:00:00Z","durati
       expect(result.status).toBe(2);
       expect(result.stderr).toContain('invalid source id');
     }
+  });
+
+  it('fails closed after consecutive validator operational errors', () => {
+    const dir = makeScratch();
+    const fake = join(dir, 'fake-validator-error');
+    writeFileSync(fake, `#!/usr/bin/env bash
+printf '%s\\n' '{"schema_version":"1","timestamp":"2026-01-01T00:00:00Z","duration_ms":10,"status":"partial","brain_dir":null,"phases":[{"phase":"extract_atoms","status":"warn","duration_ms":10,"summary":"validator failed","details":{"source_id":"alpha","pages_processed":0,"pages_total":1,"failures":[{"source":"semantic_validator","error":"semantic_validator_invalid_json"}]}}],"totals":{}}'
+`, { mode: 0o755 });
+    chmodSync(fake, 0o755);
+
+    const result = spawnSync('bash', [worker, 'alpha'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ATOM_MINE_REPO_DIR: repoRoot,
+        ATOM_MINE_STATE_DIR: dir,
+        ATOM_MINE_GBRAIN_BIN: fake,
+        ATOM_MINE_SLEEP_SECONDS: '0',
+        ATOM_MINE_MAX_ERROR_STREAK: '2',
+      },
+    });
+
+    expect(result.status).toBe(1);
+    const receipts = readFileSync(join(dir, 'alpha.batches.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    expect(receipts).toHaveLength(2);
+    expect(receipts[1]).toMatchObject({ validator_errors: 1, error_streak: 2 });
+    const heartbeat = JSON.parse(readFileSync(join(dir, 'alpha.heartbeat.json'), 'utf8'));
+    expect(heartbeat).toMatchObject({ state: 'failed', error_streak: 2 });
   });
 });

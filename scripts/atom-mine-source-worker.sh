@@ -178,6 +178,7 @@ while :; do
     pages_skipped_budget=$(jq -r '.details.pages_skipped_budget // 0' <<<"$phase")
     duplicates_skipped=$(jq -r '.details.duplicates_skipped // 0' <<<"$phase")
     malformed_outputs=$(jq -r '.details.malformed_outputs // 0' <<<"$phase")
+    validator_errors=$(jq -r '[.details.failures[]? | select((.error // "") | startswith("semantic_validator_"))] | length' <<<"$phase")
     validator_timeouts=$(jq -r '[.details.failures[]? | select((.error // "") == "semantic_validator_timeout")] | length' <<<"$phase")
     provider_errors=$(jq -r '[.details.failures[]? | select((.error // "") | test("rate.?limit|429|billing|auth|provider|ollama"; "i"))] | length' <<<"$phase")
     aborted_global_error=$(jq -r '.details.aborted_global_error // ""' <<<"$phase")
@@ -197,6 +198,7 @@ while :; do
     pages_skipped_budget=0
     duplicates_skipped=0
     malformed_outputs=0
+    validator_errors=0
     validator_timeouts=0
     provider_errors=0
     aborted_global_error=""
@@ -207,7 +209,7 @@ while :; do
   good_cycle=true
   if (( command_rc != 0 )) || [[ $valid_report != true ]] || [[ $report_status == failed ]] || \
      [[ $report_status == skipped && $report_reason == cycle_already_running ]] || \
-     [[ -n $aborted_global_error ]] || (( validator_timeouts > 0 || provider_errors > 0 )); then
+     [[ -n $aborted_global_error ]] || (( validator_errors > 0 || provider_errors > 0 )); then
     good_cycle=false
   fi
 
@@ -238,12 +240,13 @@ while :; do
     --argjson pages_skipped_budget "$pages_skipped_budget" \
     --argjson duplicates_skipped "$duplicates_skipped" \
     --argjson malformed_outputs "$malformed_outputs" \
+    --argjson validator_errors "$validator_errors" \
     --argjson validator_timeouts "$validator_timeouts" \
     --argjson provider_errors "$provider_errors" \
     --argjson estimated_spend_usd "$estimated_spend_usd" \
     --argjson budget_usd "$budget_usd" \
     --argjson error_streak "$error_streak" \
-    '{started_at:$started_at,finished_at:$finished_at,source_id:$source_id,batch:$batch,elapsed_ms:$elapsed_ms,command_rc:$command_rc,report_status:$report_status,report_reason:$report_reason,phase_status:$phase_status,pages_processed:$pages_processed,pages_total:$pages_total,pages_skipped_budget:$pages_skipped_budget,atoms_extracted:$atoms_extracted,candidates:$candidates,accepted:$accepted,rejected:$rejected,failures:$failures,duplicates_skipped:$duplicates_skipped,malformed_outputs:$malformed_outputs,validator_timeouts:$validator_timeouts,provider_errors:$provider_errors,aborted_global_error:$aborted_global_error,estimated_spend_usd:$estimated_spend_usd,budget_usd:$budget_usd,error_streak:$error_streak}' \
+    '{started_at:$started_at,finished_at:$finished_at,source_id:$source_id,batch:$batch,elapsed_ms:$elapsed_ms,command_rc:$command_rc,report_status:$report_status,report_reason:$report_reason,phase_status:$phase_status,pages_processed:$pages_processed,pages_total:$pages_total,pages_skipped_budget:$pages_skipped_budget,atoms_extracted:$atoms_extracted,candidates:$candidates,accepted:$accepted,rejected:$rejected,failures:$failures,duplicates_skipped:$duplicates_skipped,malformed_outputs:$malformed_outputs,validator_errors:$validator_errors,validator_timeouts:$validator_timeouts,provider_errors:$provider_errors,aborted_global_error:$aborted_global_error,estimated_spend_usd:$estimated_spend_usd,budget_usd:$budget_usd,error_streak:$error_streak}' \
     >>"$summary_log"
 
   rm -f "$stdout_file" "$stderr_file"
