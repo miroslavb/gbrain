@@ -258,7 +258,7 @@ test/sync-failures.test.ts	Bug 9 — doctor surfaces sync failures	2	doctor-sour
 test/sync-failures.test.ts	Bug 9 — sync.ts CLI flag wiring	6	bun-file,doctor-source-helper
 test/sync-include-hidden.test.ts	sync.ts delta path threads includeHidden (#4027 merge guard)	1	readFileSync
 test/sync.test.ts	buildSyncManifest	9	bun-file
-test/sync.test.ts	isSyncable	8	bun-file
+test/sync.test.ts	isSyncable	9	bun-file
 test/sync.test.ts	resolveSlugByPathOrSourcePath (CJK wave v0.32.7, codex F4)	3	bun-file
 test/sync.test.ts	sync auto-embed arguments	2	bun-file
 test/sync.test.ts	sync regression — #132 nested transaction deadlock	1	bun-file
