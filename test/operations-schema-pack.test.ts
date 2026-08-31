@@ -246,6 +246,30 @@ describe('schema_review_orphans', () => {
     const result = await operationsByName.schema_review_orphans!.handler(ctxOf(), { limit: 2 }) as Record<string, unknown>;
     expect(result.orphan_count).toBe(2);
   });
+
+  it('pack-aware arm: undeclared stored types surface with counts and samples; declared types do not', async () => {
+    await engine.executeRaw(
+      `INSERT INTO pages (slug, source_id, source_path, type, title, compiled_truth, timeline, content_hash)
+       VALUES ('weird-1', 'default', 'unknown/w1.md', 'totally-made-up-type', 'w', '', '', ''),
+              ('weird-2', 'default', 'unknown/w2.md', 'totally-made-up-type', 'w', '', '', ''),
+              ('typed-1', 'default', 'people/t1.md', 'person', 't', '', '', '')`,
+    );
+    const result = await operationsByName.schema_review_orphans!.handler(ctxOf(), {}) as {
+      pack: string | null;
+      undeclared_page_count: number;
+      undeclared_types: Array<{ type: string; count: number; sample_slugs: string[] }>;
+    };
+    // The active pack must have loaded — a null pack would mean the arm
+    // silently degraded and asserted nothing.
+    expect(result.pack).not.toBeNull();
+    const weird = result.undeclared_types.find((t) => t.type === 'totally-made-up-type');
+    expect(weird).toBeDefined();
+    expect(weird!.count).toBe(2);
+    expect(weird!.sample_slugs).toContain('weird-1');
+    // A declared canonical type never reports as undeclared.
+    expect(result.undeclared_types.find((t) => t.type === 'person')).toBeUndefined();
+    expect(result.undeclared_page_count).toBeGreaterThanOrEqual(2);
+  });
 });
 
 // ── schema_apply_mutations — batched + atomic ──────────────────────────
