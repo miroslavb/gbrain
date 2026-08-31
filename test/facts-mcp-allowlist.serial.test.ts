@@ -89,6 +89,51 @@ describe('forget_fact dispatch', () => {
     // `fact_already_expired` instead of the older opaque `fact_not_found`.
     expect(payload.error).toBe('fact_already_expired');
   });
+
+  test('forget_fact is scoped to the caller source: cross-source id reads as fact_not_found', async () => {
+    await engine.executeRaw(
+      "INSERT INTO sources (id, name) VALUES ('other-source', 'other-source') ON CONFLICT (id) DO NOTHING",
+    );
+    const inserted = await engine.insertFact(
+      { fact: 'lives in another source', kind: 'fact', source: 'test' },
+      { source_id: 'other-source' },
+    );
+    const r = await dispatchToolCall(engine, 'forget_fact', { id: inserted.id }, {
+      remote: true, sourceId: 'default',
+    });
+    expect(r.isError).toBe(true);
+    expect(JSON.parse(r.content[0].text).error).toBe('fact_not_found');
+    const rows = await engine.executeRaw<{ expired_at: string | null }>(
+      'SELECT expired_at FROM facts WHERE id = $1', [inserted.id],
+    );
+    expect(rows[0].expired_at).toBeNull();
+
+    const r2 = await dispatchToolCall(engine, 'forget_fact', { id: inserted.id }, {
+      remote: true, sourceId: 'other-source',
+    });
+    expect(r2.isError).toBeFalsy();
+  });
+
+  test('forget_fact: remote caller cannot expire a legacy private fact; local caller can', async () => {
+    const inserted = await engine.insertFact(
+      { fact: 'legacy private row', kind: 'fact', source: 'test' },
+      { source_id: 'default' },
+    );
+    // insertFact is world-only by construction; simulate a pre-migration
+    // legacy row the way it still exists in old brains.
+    await engine.executeRaw("UPDATE facts SET visibility='private' WHERE id = $1", [inserted.id]);
+
+    const r = await dispatchToolCall(engine, 'forget_fact', { id: inserted.id }, {
+      remote: true, sourceId: 'default',
+    });
+    expect(r.isError).toBe(true);
+    expect(JSON.parse(r.content[0].text).error).toBe('fact_not_found');
+
+    const r2 = await dispatchToolCall(engine, 'forget_fact', { id: inserted.id }, {
+      remote: false, sourceId: 'default',
+    });
+    expect(r2.isError).toBeFalsy();
+  });
 });
 
 describe('extract_facts dispatch (no API key)', () => {

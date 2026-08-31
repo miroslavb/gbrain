@@ -776,7 +776,16 @@ const forget_fact: Operation = {
     const id = p.id as number;
     const reason = typeof p.reason === 'string' ? p.reason : undefined;
     const { forgetFactInFence } = await import('../facts/forget.ts');
-    const result = await forgetFactInFence(ctx.engine, id, { reason });
+    // Trust boundary: scope the forget like the v1 `forget` verb does —
+    // without sourceId a remote write-scope client could expire facts in ANY
+    // source by guessing global ids. Remote callers are additionally
+    // world-only (legacy private rows read as not_found), fail-closed on
+    // ctx.remote !== false per the cross-cutting trust invariant.
+    const result = await forgetFactInFence(ctx.engine, id, {
+      reason,
+      sourceId: ctx.sourceId ?? 'default',
+      worldOnly: ctx.remote !== false,
+    });
     if (!result.ok && result.path === 'not_found') {
       throw new OperationError('fact_not_found', `Fact id ${id} not found.`);
     }
