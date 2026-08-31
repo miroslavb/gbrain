@@ -2437,6 +2437,14 @@ export async function hybridSearchCached(
   // knobsHash, so a filtered result set could be served to an unfiltered
   // lookup (and vice versa). Mirrors the #3442 date-filter bypass.
   const typeFiltered = (opts?.types?.length ?? 0) > 0;
+  // language/symbol_kind-filtered requests skip the cache — neither knob is
+  // part of knobsHash, so a code-filtered result set could be served to an
+  // unfiltered lookup (and vice versa; the 2026-08-25 retrieval audit caught
+  // `query --lang` served unfiltered rows from a prior unfiltered write).
+  // Same contamination class and same bypass shape as #3442/#3985;
+  // nearSymbol already skips above. Folding these into knobsHash +
+  // KNOBS_HASH_VERSION bump is the follow-up that would let them cache.
+  const codeFiltered = Boolean(opts?.language) || Boolean(opts?.symbolKind);
   // Offset pages are cache-hostile until the pre-slice POOL itself is what's
   // stored: the cache holds the already offset/limit-sliced page (bare
   // hybridSearch slices before returning), so a hit for any other offset
@@ -2471,6 +2479,7 @@ export async function hybridSearchCached(
     adaptiveReturnOn ||
     dateFiltered ||
     typeFiltered ||
+    codeFiltered ||
     pagedRequest;
 
   let cacheStatus: 'hit' | 'miss' | 'disabled' = skipCache ? 'disabled' : 'miss';
