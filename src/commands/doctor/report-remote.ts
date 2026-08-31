@@ -56,6 +56,8 @@ import {
   checkSchemaPackConsistency,
   checkSchemaPackSourceDrift,
 } from './schema-pack-checks.ts';
+import { buildRetrievalReflexCheck } from './checks/verbs-reflex.ts';
+import { autoDetectSkillsDirReadOnly } from '../../core/repo-root.ts';
 
 // Same alias the local doctor keeps for its own freshness checks; the alias
 // is a private one-liner in doctor.ts's check-fn library, so this module
@@ -350,6 +352,19 @@ export async function doctorReportRemote(
   // for remote callers (cross-model P1): a source-bound token must not see
   // other sources' activity counts/timestamps.
   checks.push(await checkVolunteerChannels(engine, { sourceIds: opts.sourceIds }));
+
+  // Surface parity (2026-08-25 audit): retrieval_reflex_health is a canonical
+  // SKILL_CHECK_NAMES entry whose own post-install hint tells operators to
+  // read it out of `doctor --json`, yet it only ever reached the CLI path —
+  // an agent on the MCP surface (the normal case) could never see whether the
+  // reflex fires, nor the policy-skill-not-installed hint. It is host-state,
+  // not brain content: enabled flag, engine kind, a path DESCRIPTION (never a
+  // filesystem path), the heartbeat timestamp and a boolean — the same class
+  // of metadata /health already returns. Fail-open: a detector or check
+  // failure must not break the report.
+  try {
+    checks.push(buildRetrievalReflexCheck(autoDetectSkillsDirReadOnly().dir));
+  } catch { /* engine-free check is supplementary — never fail the report */ }
 
   // 6. Sync freshness check
   checks.push(await checkSyncFreshness(engine));

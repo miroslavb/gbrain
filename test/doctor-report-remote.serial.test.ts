@@ -51,6 +51,18 @@ describe('doctorReportRemote', () => {
     expect(names).toContain('queue_health');
   });
 
+  test('retrieval_reflex_health reaches the remote surface too (parity with CLI doctor)', async () => {
+    // 2026-08-25 audit: the check is a canonical SKILL_CHECK_NAMES entry whose
+    // post-install hint tells operators to read it from `doctor --json`, but it
+    // only ever reached the CLI path — invisible to any MCP-only agent.
+    const report = await doctorReportRemote(engine);
+    const reflex = report.checks.find(c => c.name === 'retrieval_reflex_health');
+    expect(reflex).toBeDefined();
+    expect(['ok', 'warn']).toContain(reflex!.status);
+    // Host-state metadata only: never a filesystem path.
+    expect(JSON.stringify(reflex!.details ?? {})).not.toContain('/');
+  });
+
   test('connection check passes against a healthy engine', async () => {
     const report = await doctorReportRemote(engine);
     const conn = report.checks.find(c => c.name === 'connection');
