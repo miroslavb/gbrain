@@ -227,6 +227,12 @@ const list_link_sources: Operation = {
  * is 2 hops; the deepest meaningful chain in our test data is 4).
  */
 const TRAVERSE_DEPTH_CAP = 10;
+// Per-BFS-layer frontier cap defaults for traverse_graph (2026-08-25 audit
+// P2, DoS class): depth ≤ 10 bounds hops, not fanout. 500/layer keeps the
+// worst walk at ≤ depth × cap rows while staying far above any legible
+// response size; 5000 is the explicit-request ceiling.
+const TRAVERSE_FRONTIER_CAP_DEFAULT = 500;
+const TRAVERSE_FRONTIER_CAP_MAX = 5000;
 
 const traverse_graph: Operation = {
   name: 'traverse_graph',
@@ -236,6 +242,7 @@ const traverse_graph: Operation = {
     depth: { type: 'number', description: `Max traversal depth (default 5, capped at ${TRAVERSE_DEPTH_CAP})` },
     link_type: { type: 'string', description: 'Filter to one link type (per-edge filter, traversal only follows matching edges)' },
     direction: { type: 'string', enum: ['in', 'out', 'both'], description: 'Traversal direction (default out)' },
+    frontier_cap: { type: 'number', description: `Per-BFS-layer node cap (default ${TRAVERSE_FRONTIER_CAP_DEFAULT}, max ${TRAVERSE_FRONTIER_CAP_MAX}). 0 disables — trusted local callers only; a remote 0 keeps the default.` },
   },
   handler: async (ctx, p) => {
     const slug = p.slug as string;
@@ -246,6 +253,19 @@ const traverse_graph: Operation = {
     const depth = Math.max(1, Math.min(requestedDepth, TRAVERSE_DEPTH_CAP));
     const linkType = p.link_type as string | undefined;
     const direction = p.direction as 'in' | 'out' | 'both' | undefined;
+    // 2026-08-25 audit P2 (DoS class): the depth cap alone never bounds cost —
+    // a hub-heavy graph fans out combinatorially inside 10 hops. Default a
+    // per-BFS-layer frontier cap (walk rows ≤ depth × cap); trusted local
+    // callers may disable with an explicit 0, remote callers cannot.
+    const rawCap = p.frontier_cap as number | undefined;
+    let frontierCap: number | undefined = TRAVERSE_FRONTIER_CAP_DEFAULT;
+    if (rawCap !== undefined && Number.isFinite(rawCap)) {
+      if (rawCap <= 0) {
+        frontierCap = ctx.remote === false ? undefined : TRAVERSE_FRONTIER_CAP_DEFAULT;
+      } else {
+        frontierCap = Math.min(Math.floor(rawCap), TRAVERSE_FRONTIER_CAP_MAX);
+      }
+    }
     // v0.34.1 (#861 — P0 leak seal): thread caller's source scope so graph
     // walks stay within the auth'd client's accessible sources. Pre-fix,
     // traverseGraph / traversePaths happily followed edges into pages from
@@ -263,7 +283,7 @@ const traverse_graph: Operation = {
     // Backward compat: when neither link_type nor direction is provided, return
     // the legacy GraphNode[] shape. Once either is set, switch to GraphPath[].
     if (linkType === undefined && direction === undefined) {
-      const nodes = await ctx.engine.traverseGraph(slug, depth, scope);
+      const nodes = await ctx.engine.traverseGraph(slug, depth, { ...scope, ...(frontierCap !== undefined ? { frontierCap } : {}) });
       if (!excludePrivate) return nodes;
       const hidden = await findPrivateOnlySlugs(
         ctx.engine,
@@ -277,7 +297,7 @@ const traverse_graph: Operation = {
           ? { ...n, links: n.links.filter(l => !hidden.has(l.to_slug)) }
           : n));
     }
-    const paths = await ctx.engine.traversePaths(slug, { depth, linkType, direction, ...scope });
+    const paths = await ctx.engine.traversePaths(slug, { depth, linkType, direction, ...scope, ...(frontierCap !== undefined ? { frontierCap } : {}) });
     if (!excludePrivate) return paths;
     const hidden = await findPrivateOnlySlugs(
       ctx.engine,

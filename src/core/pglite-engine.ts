@@ -4172,7 +4172,7 @@ export class PGLiteEngine implements BrainEngine {
 
   async traversePaths(
     slug: string,
-    opts?: { depth?: number; linkType?: string; direction?: 'in' | 'out' | 'both'; sourceId?: string; sourceIds?: string[] },
+    opts?: { depth?: number; linkType?: string; direction?: 'in' | 'out' | 'both'; sourceId?: string; sourceIds?: string[]; frontierCap?: number },
   ): Promise<GraphPath[]> {
     const depth = opts?.depth ?? 5;
     const direction = opts?.direction ?? 'out';
@@ -4180,6 +4180,14 @@ export class PGLiteEngine implements BrainEngine {
     const linkTypeWhere = linkType !== null ? 'AND l.link_type = $3' : '';
     const params: unknown[] = [slug, depth];
     if (linkType !== null) params.push(linkType);
+    // T8-mirror (2026-08-25 audit P2): per-iteration frontier cap — see
+    // postgres-engine.traversePaths. Integer-sanitized because it is
+    // interpolated into the SQL string (parenthesized recursive-term LIMIT).
+    const cap = opts?.frontierCap !== undefined && opts.frontierCap > 0
+      ? Math.max(1, Math.floor(opts.frontierCap))
+      : undefined;
+    const capOpen = cap !== undefined ? '(' : '';
+    const capClose = cap !== undefined ? ` ORDER BY p2.slug ASC, p2.id ASC LIMIT ${cap})` : '';
 
     // v0.34.1 (#861 — P0 leak seal): source-scope filters at seed + step +
     // final SELECT joins (for the 'both' branch's pf + pt). Mirrors
@@ -4215,7 +4223,7 @@ export class PGLiteEngine implements BrainEngine {
           SELECT p.id, p.slug, 0::int AS depth, ARRAY[p.id] AS visited
           FROM pages p WHERE p.slug = $1 AND p.deleted_at IS NULL ${seedScope}
           UNION ALL
-          SELECT p2.id, p2.slug, w.depth + 1, w.visited || p2.id
+          ${capOpen}SELECT p2.id, p2.slug, w.depth + 1, w.visited || p2.id
           FROM walk w
           JOIN links l ON l.from_page_id = w.id
           JOIN pages p2 ON p2.id = l.to_page_id
@@ -4223,7 +4231,7 @@ export class PGLiteEngine implements BrainEngine {
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL
             ${linkTypeWhere}
-            ${stepScope}
+            ${stepScope}${capClose}
         )
         SELECT w.slug AS from_slug, p2.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
@@ -4242,7 +4250,7 @@ export class PGLiteEngine implements BrainEngine {
           SELECT p.id, p.slug, 0::int AS depth, ARRAY[p.id] AS visited
           FROM pages p WHERE p.slug = $1 AND p.deleted_at IS NULL ${seedScope}
           UNION ALL
-          SELECT p2.id, p2.slug, w.depth + 1, w.visited || p2.id
+          ${capOpen}SELECT p2.id, p2.slug, w.depth + 1, w.visited || p2.id
           FROM walk w
           JOIN links l ON l.to_page_id = w.id
           JOIN pages p2 ON p2.id = l.from_page_id
@@ -4250,7 +4258,7 @@ export class PGLiteEngine implements BrainEngine {
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL
             ${linkTypeWhere}
-            ${stepScope}
+            ${stepScope}${capClose}
         )
         SELECT p2.slug AS from_slug, w.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
@@ -4271,7 +4279,7 @@ export class PGLiteEngine implements BrainEngine {
           SELECT p.id, 0::int AS depth, ARRAY[p.id] AS visited
           FROM pages p WHERE p.slug = $1 AND p.deleted_at IS NULL ${seedScope}
           UNION ALL
-          SELECT p2.id, w.depth + 1, w.visited || p2.id
+          ${capOpen}SELECT p2.id, w.depth + 1, w.visited || p2.id
           FROM walk w
           JOIN links l ON (l.from_page_id = w.id OR l.to_page_id = w.id)
           JOIN pages p2 ON p2.id = CASE WHEN l.from_page_id = w.id THEN l.to_page_id ELSE l.from_page_id END
@@ -4279,7 +4287,7 @@ export class PGLiteEngine implements BrainEngine {
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL
             ${linkTypeWhere}
-            ${stepScope}
+            ${stepScope}${capClose}
         )
         SELECT pf.slug AS from_slug, pt.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth

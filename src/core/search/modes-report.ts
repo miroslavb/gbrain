@@ -73,26 +73,14 @@ export async function buildModesReport(engine: BrainEngine): Promise<SearchModes
   const input = await loadSearchModeConfig(engine);
   const resolved = resolveSearchMode(input);
 
-  const knobs: Array<keyof ModeBundle> = [
-    'cache_enabled',
-    'cache_similarity_threshold',
-    'cache_ttl_seconds',
-    'intentWeighting',
-    'keywordOrFallback',
-    'tokenBudget',
-    'expansion',
-    'searchLimit',
-    // v0.35.6.0 — floor-ratio surfaced in `gbrain search modes` dashboard
-    // so config drift is legible. Default undefined renders as 'undefined'
-    // in the bundle column, 'mode' source when unset by config/per-call.
-    'floor_ratio',
-    // v0.46.15 retrieval wave — evidence floor (label-only) + autocut weak-top
-    // floor surfaced so config drift on the new knobs is legible.
-    'evidence_cosine_floor',
-    'autocut_min_top',
-    // #3621 — the documented autocut floor, surfaced alongside the weak-top floor.
-    'autocut_min_keep',
-  ];
+  // Derive the knob list from the bundle shape itself (2026-08-25 audit P2):
+  // the previous hardcoded 12-knob list silently omitted every knob added
+  // since it was written — reranker_*, cross-modal, graph_signals,
+  // contextual retrieval, autocut, relational recall — while this report is
+  // exactly what operators read to verify config drift. Every ModeBundle key
+  // carries a KNOB_DESCRIPTIONS entry by type, so the report stays
+  // exhaustive as bundles grow instead of drifting again.
+  const knobs = Object.keys(MODE_BUNDLES.balanced) as Array<keyof ModeBundle>;
 
   const attributions = {} as SearchModesReport['resolved'];
   for (const k of knobs) {

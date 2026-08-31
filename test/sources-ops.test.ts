@@ -492,16 +492,16 @@ describe('getSourceStatus', () => {
     await withEnv2(async () => {
       const userPath = join(GBRAIN_HOME, 'na-fixture');
       mkdirSync(userPath, { recursive: true });
-      // path-only source still gets validateRepoState — but with no expected
-      // URL, it just probes existence + .git. Path exists with no .git → 'no-git'.
-      // To match contract docstring we'd want 'not-applicable' only when
-      // local_path is null. Test the truthful behavior. #2707: this fixture
-      // is deliberately no-git (that's what's under test for getSourceStatus)
-      // — force past the registration-time git check to construct it.
+      // 2026-08-25 audit P2: a remote-less `--path` source is now judged by
+      // the same #2707 isInsideGitRepo check that gates registration (a
+      // subdir-of-repo path and a repo with no `origin` are both legitimate,
+      // and validateRepoState misreported them as no-git/corrupted). Under
+      // THIS file's fake-git harness that probe reports success, so the
+      // fixture reads 'healthy'; the real no-git-outside-any-repo branch runs
+      // against real git in test/p2-local-fixes.test.ts.
       await addSource(engine, { id: 'status-no-url', localPath: userPath, force: true });
       const s = await getSourceStatus(engine, 'status-no-url');
-      // local_path set but no .git: returns 'no-git'
-      expect(s.clone_state).toBe('no-git');
+      expect(s.clone_state).toBe('healthy');
       expect(s.remote_url).toBeNull();
       rmSync(userPath, { recursive: true, force: true });
     });

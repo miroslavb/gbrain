@@ -9,6 +9,7 @@
  */
 
 import type { Operation } from './contract.ts';
+import { OperationError } from './contract.ts';
 import { routeCodeIntelScope } from './context.ts';
 import {
   CODE_CALLERS_DESCRIPTION,
@@ -276,8 +277,19 @@ const code_traversal_cache_clear: Operation = {
     // admin/destructive op with its own D8 all_sources guard. The read-side
     // trust+grant resolver does not apply here (no remote caller reaches it).
     const { clearTraversalCache } = await import('../code-intel/traversal-cache.ts');
-    const sourceId = (p.source_id as string | undefined) ?? ctx.sourceId;
+    // D8 (2026-08-25 audit P2): destructive scope must be EXPLICIT. The old
+    // `?? ctx.sourceId` fallback silently substituted the ambient source, so
+    // the core's specify-source-or-all-sources guard could never fire through
+    // this op — a bare `{}` call from a source-pinned cwd cleared that
+    // source's cache without the caller ever naming a target.
+    const sourceId = p.source_id as string | undefined;
     const allSources = (p.all_sources as boolean) ?? false;
+    if (!sourceId && !allSources) {
+      throw new OperationError(
+        'invalid_params',
+        'code_traversal_cache_clear: pass source_id OR all_sources=true — destructive scope must be explicit (D8 guard).',
+      );
+    }
     if (ctx.dryRun) {
       return { dry_run: true, action: 'code_traversal_cache_clear', source_id: sourceId, all_sources: allSources };
     }

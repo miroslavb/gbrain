@@ -547,12 +547,17 @@ export function safeSynopsis(
   const body = row.compiled_truth ?? '';
   if (!body) return '';
   const stripped = stripFactsFence(stripTakesFence(body), { keepVisibility });
-  // Drop frontmatter block, markdown headings, and blank lines; first real prose line.
+  // Drop frontmatter block, markdown headings, and blank lines; first real
+  // prose line. Table rows are NOT prose (2026-08-25 audit P2): a fence-first
+  // entity page keeps its world fact rows after the strip above, so without
+  // the `|` skip the "synopsis" came back as the bare table header
+  // (`| # | claim | kind | …`) — an empty-looking pointer for every
+  // fence-first projects/* page.
   const firstProse = stripped
     .replace(/^---[\s\S]*?---\s*/m, '')
     .split('\n')
     .map((l) => l.trim())
-    .find((l) => l && !l.startsWith('#') && !l.startsWith('<!--'));
+    .find((l) => l && !l.startsWith('#') && !l.startsWith('<!--') && !l.startsWith('|'));
   if (!firstProse) return '';
   // first sentence-ish
   const sentence = firstProse.split(/(?<=[.!?])\s/)[0];

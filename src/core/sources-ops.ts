@@ -996,7 +996,19 @@ export async function getSourceStatus(
       : ((src.config ?? {}) as Record<string, unknown>);
   let cloneState: SourceStatus['clone_state'] = 'not-applicable';
   if (src.local_path && sourceConfig.kind !== 'github') {
-    cloneState = validateRepoState(src.local_path, remoteUrl ?? undefined);
+    if (remoteUrl) {
+      cloneState = validateRepoState(src.local_path, remoteUrl);
+    } else {
+      // A plain `--path` source manages its own repo: it may be a SUBDIR of
+      // a git repo (#753/#774) and may legitimately have no `origin` remote —
+      // validateRepoState misreports both ('no-git' / 'corrupted'), teaching
+      // operators to ignore the field (2026-08-25 audit P2). Mirror the
+      // #2707 registration check instead; when it fails, fall back to
+      // validateRepoState for the granular missing/not-a-dir/no-git reason.
+      cloneState = isInsideGitRepo(src.local_path)
+        ? 'healthy'
+        : validateRepoState(src.local_path, undefined);
+    }
   }
 
   return {

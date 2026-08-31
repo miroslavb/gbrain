@@ -1493,11 +1493,14 @@ export interface BrainEngine {
    * - direction: 'in' (follow to->from), 'out' (follow from->to), 'both'
    * - depth: max depth from root (default 5)
    * - sourceId/sourceIds: v0.34.1 source-isolation filter, see traverseGraph
+   * - frontierCap: per-iteration node cap in the recursive term (approximates
+   *   per-BFS-layer; same T8 semantics as traverseGraph). Bounds hub-fanout
+   *   walks that a depth cap alone cannot.
    * Uses cycle prevention (visited array in recursive CTE).
    */
   traversePaths(
     slug: string,
-    opts?: { depth?: number; linkType?: string; direction?: 'in' | 'out' | 'both'; sourceId?: string; sourceIds?: string[] },
+    opts?: { depth?: number; linkType?: string; direction?: 'in' | 'out' | 'both'; sourceId?: string; sourceIds?: string[]; frontierCap?: number },
   ): Promise<GraphPath[]>;
   /**
    * Typed-edge relational fan-out for the relational recall arm (v0.43).
