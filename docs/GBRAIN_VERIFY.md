@@ -287,10 +287,13 @@ Verify the repair succeeded.
 gbrain repair-jsonb --dry-run --json
 ```
 
-**Expected:** `totalRepaired: 0` across all 5 columns (`pages.frontmatter`,
+**Expected:** `total_repaired: 0` across all 8 targets (`pages.frontmatter`,
 `raw_data.data`, `ingest_log.pages_updated`, `files.metadata`,
-`page_versions.frontmatter`). A zero count means every row is properly-typed
-JSON objects, not string-encoded JSON.
+`page_versions.frontmatter`, `subagent_messages.content_blocks`,
+`subagent_tool_executions.input`, `subagent_tool_executions.output`). A zero
+count means every row is properly-typed JSON objects, not string-encoded JSON.
+(The JSON key is snake_case — a `jq '.totalRepaired'` filter silently yields
+`null`, which reads as a pass.)
 
 **If the count is > 0:** The repair didn't run or was interrupted. Re-run
 without `--dry-run`:

@@ -28,7 +28,7 @@ the response: a coherent 14-type taxonomy with subtypes/format/origin
 pushed to frontmatter, alias-table rows for redirects, real link-table
 rows for edge-shaped pages.
 
-## The 14 canonical types (+ `note` catch-all)
+## The canonical types (+ `note` catch-all)
 
 | Type | Primitive | What it holds | Examples |
 |------|-----------|---------------|----------|
@@ -48,7 +48,9 @@ rows for edge-shaped pages.
 | `project` | concept | Initiatives, workstreams | Internal projects |
 | `note` | concept | **Catch-all** for one-offs (legacy_type preserved) | Memos, anecdotes, insights, etc. |
 
-15 types total (14 canonical + `note`). The catch-all retype rule
+The pack declares the canonical set plus the `note` catch-all; the exact
+count tracks the shipped pack (read `page_types` length rather than trusting
+a number in prose). The catch-all retype rule
 binds any uncovered legacy type to `note` with
 `frontmatter.legacy_type = <original>` preserved for rollback.
 

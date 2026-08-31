@@ -166,9 +166,12 @@ export const CODE_REFS_DESCRIPTION =
   "Find every reference to a symbol across the codebase (every file, every line). " +
   "Differs from code_callers in two ways: (1) catches references in comments, " +
   "strings, imports, type annotations — not just call sites; (2) returns line " +
-  "numbers, not symbol-qualified edges. Use this when planning a rename or " +
+  "spans, not symbol-qualified edges. Use this when planning a rename or " +
   "deprecation where you need to touch every literal mention. " +
-  "Returns: `{symbol, count, refs: [{slug, file, language, line, context}]}`.";
+  "Returns: `{symbol, count, status, ready, refs: [{slug, file, language, " +
+  "symbol_name, symbol_type, start_line, end_line, snippet}]}` — `status`/`ready` " +
+  "are the code-graph readiness signal (a brain whose chunks predate symbol " +
+  "extraction reports `no_symbols`, not an empty match).";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PR1 — skill catalog over MCP (list_skills / get_skill). The agent repo's

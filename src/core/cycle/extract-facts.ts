@@ -356,10 +356,13 @@ export async function runExtractFacts(
     // rows can instead be drained through `forget_fact` (soft-expired
     // rows stop counting).
     result.warnings.push(
-      `extract_facts: ${legacyCount} legacy v0.31 fact rows in source "${sourceId}" ` +
-      `(entity page present, not yet fenced) pending fence backfill. Re-run the v0.32.2 ` +
-      `fence backfill: \`gbrain apply-migrations --force-retry 0.32.2\` then ` +
-      `\`gbrain apply-migrations --yes\`. Or drain individual rows via \`forget_fact\`.`,
+      `extract_facts: ${legacyCount} DB-only fact rows in source "${sourceId}" carry no ` +
+      `fence row_num while their entity page exists, so the phase is halted. These are ` +
+      `NOT necessarily "legacy v0.31" rows — the backstop write path still produces them ` +
+      `today (a fence-less \`remember\`/\`put_page\` write), so the set can regrow and this ` +
+      `backfill is a RECURRING remedy, not a one-time migration. Clear it with ` +
+      `\`gbrain apply-migrations --force-retry 0.32.2\` then \`gbrain apply-migrations --yes\`. ` +
+      `Or drain individual rows via \`forget_fact\`.`,
     );
     // #3683: book the halt BEFORE the early return. The end-of-run rollup
     // write below is unreachable from this path, so pre-fix a guard-triggered

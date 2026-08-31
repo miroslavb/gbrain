@@ -124,7 +124,7 @@ Modes (mutually exclusive — first match wins):
   gbrain capture --stdin            read content from stdin (piped)
 
 Options:
-  --slug SLUG          Override the default inbox/YYYY-MM-DD-<hash6> slug
+  --slug SLUG          Override the default inbox/YYYY-MM-DD-<hash8> slug
   --type TYPE          Override the page type (default: note)
   --source ID          Multi-source brains: write under a non-default source.
                        Resolution: --source flag > GBRAIN_SOURCE env >

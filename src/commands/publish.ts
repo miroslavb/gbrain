@@ -38,8 +38,24 @@ export function makeShareable(content: string): string {
   clean = clean.replace(/Confirmation[:#]?\s*[A-Z0-9]{6,}/gi, 'Confirmation: on file');
   clean = clean.replace(/\bconf\s*#?\s*[A-Z0-9]{6,}/gi, 'Confirmation: on file');
 
-  // Remove brain cross-links but keep display text
-  clean = clean.replace(/\[([^\]]+)\]\(\.[^)]*\/[^)]+\)/g, '$1');
+  // Remove brain cross-links but keep display text. The href pattern must
+  // cover BOTH relative (./x, ../x) and root-relative (people/alice-example)
+  // slug links: the original `\(\.` anchor only matched a literal leading
+  // dot, so every `[Alice](people/alice-example)` link shipped the brain's
+  // internal slug taxonomy into a published page. External http(s)/mailto
+  // links are deliberately preserved.
+  clean = clean.replace(
+    /\[([^\]]+)\]\((?!https?:|mailto:|#)(?:\.{1,2}\/)*[^)\s]+\)/g,
+    '$1',
+  );
+  // Wikilinks were never stripped at all — `[[wiki/people/alice-example]]`
+  // and `[[people/alice-example|Alice]]` both leaked verbatim. Keep the
+  // display half when the link carries one, else the slug tail.
+  clean = clean.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, target: string, label?: string) => {
+    if (label) return label;
+    const tail = target.includes('/') ? target.slice(target.lastIndexOf('/') + 1) : target;
+    return tail;
+  });
 
   // Remove "See also" brain-internal lines
   clean = clean.replace(/^-?\s*See also:.*$/gm, '');

@@ -1472,7 +1472,7 @@ async function runPhaseExtractFacts(
         phase: 'extract_facts',
         status: 'warn',
         duration_ms: 0,
-        summary: `extract_facts skipped: ${result.legacyRowsPending} legacy v0.31 facts pending fence backfill`,
+        summary: `extract_facts skipped: ${result.legacyRowsPending} DB-only facts with no fence row_num pending backfill`,
         details: {
           legacyRowsPending: result.legacyRowsPending,
           // A bare `apply-migrations --yes` no-ops once the v0.32.2 ledger

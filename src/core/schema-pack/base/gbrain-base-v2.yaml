@@ -1,13 +1,15 @@
-# gbrain-base-v2 — 15-type DRY/MECE canonical taxonomy
+# gbrain-base-v2 — the DRY/MECE canonical taxonomy
 #
 # v0.42 (T22) — the response to issue #1479. A production gbrain brain
 # (186K pages) had accreted 94 distinct `pages.type` values in 9 clusters
-# of redundancy. This pack collapses them to 14 canonical types plus
-# `note` as the catch-all (15 total) using subtypes/aliases/mapping_rules.
+# of redundancy. This pack collapses them to a small canonical set plus
+# `note` as the catch-all, using subtypes/aliases/mapping_rules. The count
+# is NOT restated in prose anywhere — it grows with the pack (v1.2.1 added
+# extract_receipt); read `page_types` length if you need the number.
 #
 # STANDALONE pack (D11/F1): NO `extends:` field. Declaring inheritance
-# would compose gbrain-base's 24 types on top of the 15 declared here,
-# breaking the "14 canonical types" claim. Old types are reached via
+# would compose gbrain-base's 24 types on top of the ones declared here,
+# breaking the canonical-set claim. Old types are reached via
 # the alias graph (query closure) plus the catch-all retype rule (data
 # migration).
 #

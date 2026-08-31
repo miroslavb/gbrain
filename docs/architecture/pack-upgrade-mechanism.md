@@ -173,7 +173,7 @@ migration_from:
   version: "1.x"
 
 page_types:
-  # Inherit gbrain-base-v2's 15 types here (or declare `extends:
+  # Inherit gbrain-base-v2's types here (or declare `extends:
   # gbrain-base-v2` and let the merge contract in schema-packs.md merge them)
   - { name: person, primitive: entity, path_prefixes: [people/], expert_routing: true }
   - { name: company, primitive: entity, path_prefixes: [companies/], expert_routing: true }

@@ -5,7 +5,7 @@
 //
 // v0.39 T8 — gbrain-base + gbrain-recommended.
 // v0.41 T4 — lens packs: creator, investor, engineer, everything (meta-pack).
-// v0.42 type-unification — gbrain-base-v2, the 15-type canonical successor.
+// v0.42 type-unification — gbrain-base-v2, the canonical successor pack.
 
 export const BUNDLED_PACK_NAMES = [
   'gbrain-base',

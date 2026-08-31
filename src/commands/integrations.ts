@@ -43,12 +43,22 @@ interface RecipeSecret {
  */
 type InstallKind = 'local-managed' | 'copy-into-host-repo';
 
+/**
+ * The recipe category vocabulary — ONE source of truth for the type union,
+ * the `integrations test` validator and the `integrations list` grouping.
+ * They used to disagree three ways (the union had 4 values, the validator
+ * accepted 2, the listing bucketed 3), so shipped recipes were both
+ * unlistable and unvalidatable.
+ */
+export const RECIPE_CATEGORIES = ['infra', 'sense', 'reflex', 'voice'] as const;
+export type RecipeCategory = (typeof RECIPE_CATEGORIES)[number];
+
 interface RecipeFrontmatter {
   id: string;
   name: string;
   version: string;
   description: string;
-  category: 'infra' | 'sense' | 'reflex' | 'voice';
+  category: RecipeCategory;
   install_kind: InstallKind;
   requires: string[];
   secrets: RecipeSecret[];
@@ -702,6 +712,12 @@ function cmdList(args: string[]): void {
   const infra = recipes.filter(r => r.frontmatter.category === 'infra');
   const senses = recipes.filter(r => r.frontmatter.category === 'sense');
   const reflexes = recipes.filter(r => r.frontmatter.category === 'reflex');
+  // Every declared category needs a bucket or its recipes are invisible in
+  // both the JSON and the dashboard — `voice` (agent-voice) was dropped on
+  // the floor. `other` catches any category added to RECIPE_CATEGORIES later.
+  const voice = recipes.filter(r => r.frontmatter.category === 'voice');
+  const known = new Set(['infra', 'sense', 'reflex', 'voice']);
+  const other = recipes.filter(r => !known.has(r.frontmatter.category));
 
   if (jsonMode) {
     const toJson = (r: ParsedRecipe) => ({
@@ -718,6 +734,8 @@ function cmdList(args: string[]): void {
       infra: infra.map(toJson),
       senses: senses.map(toJson),
       reflexes: reflexes.map(toJson),
+      voice: voice.map(toJson),
+      ...(other.length > 0 ? { other: other.map(toJson) } : {}),
     }, null, 2));
     return;
   }
@@ -740,6 +758,8 @@ function cmdList(args: string[]): void {
   printSection('INFRASTRUCTURE (set up first)', infra);
   printSection('SENSES (data inputs)', senses);
   printSection('REFLEXES (automated responses)', reflexes);
+  printSection('VOICE (spoken interfaces)', voice);
+  printSection('OTHER', other);
 
   // Stats summary
   const allHeartbeats = recipes.flatMap(r => readHeartbeat(r.frontmatter.id));
@@ -975,8 +995,12 @@ function cmdTest(args: string[]): void {
   if (!f.name) warnings.push('Missing: name (will default to id)');
   if (!f.description) warnings.push('Missing: description');
   if (!f.version) warnings.push('Missing: version');
-  if (!['sense', 'reflex'].includes(f.category)) {
-    errors.push(`Invalid category: '${f.category}' (must be 'sense' or 'reflex')`);
+  // Must match the declared RecipeFrontmatter union — the old two-value list
+  // rejected recipes this very repo ships (`infra`: ngrok-tunnel,
+  // credential-gateway; `voice`: agent-voice), so `integrations test` failed
+  // on valid files.
+  if (!RECIPE_CATEGORIES.includes(f.category as RecipeCategory)) {
+    errors.push(`Invalid category: '${f.category}' (must be one of ${RECIPE_CATEGORIES.join(', ')})`);
   }
 
   // Check secrets format
@@ -1024,6 +1048,8 @@ USAGE
   gbrain integrations doctor [--json]  Run health checks
   gbrain integrations stats [--json]   Show signal statistics
   gbrain integrations test <file>      Validate a recipe file
+  gbrain integrations install <id> --target <repo>
+                                       Copy an install-manifest recipe into a host repo
 `);
 }
 

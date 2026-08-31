@@ -764,7 +764,7 @@ const delta: Operation = {
 
 const forget_fact: Operation = {
   name: 'forget_fact',
-  description: 'v0.32.2: forget a fact. Rewrites the page\'s `## Facts` fence to strike through the row and set valid_until=today (the DB\'s expired_at derives via valid_until + now() on the next reconcile so the forget survives `gbrain rebuild`). Falls back to legacy DB-only expire for pre-v51 / thin-client rows. Idempotent on already-expired or unknown ids.',
+  description: 'v0.32.2: forget a fact. Rewrites the page\'s `## Facts` fence to strike through the row and set valid_until=today (the DB\'s expired_at derives via valid_until + now() on the next reconcile so the forget survives `gbrain rebuild`). Falls back to legacy DB-only expire for pre-v51 / thin-client rows. Scoped to the caller\'s source (and, for remote callers, to world-visible rows): an out-of-scope id reads as fact_not_found. NOT idempotent — an unknown id raises fact_not_found and an already-expired one raises fact_already_expired (the v1 `forget` verb is the idempotent surface).',
   params: {
     id: { type: 'number', required: true, description: 'Fact id to forget.' },
     reason: { type: 'string', required: false, description: 'Optional reason; written to the fence row\'s context cell as "forgotten: <reason>". Default: "forgotten".' },

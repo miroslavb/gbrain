@@ -15,7 +15,7 @@ layer in `src/core/schema-pack/`.
 
 Seven bundled packs (`src/core/schema-pack/base/`):
 
-- **`gbrain-base-v2`** — the 15-type canonical taxonomy. Fresh installs
+- **`gbrain-base-v2`** — the canonical DRY/MECE taxonomy. Fresh installs
   (`gbrain init`) activate this by default. See
   [`type-taxonomy.md`](./type-taxonomy.md) for the full type list and the
   upgrade path from `gbrain-base`.

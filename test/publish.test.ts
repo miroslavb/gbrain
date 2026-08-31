@@ -17,6 +17,31 @@ describe('makeShareable', () => {
     expect(result).toContain('Public content.');
   });
 
+  test('strips ROOT-relative brain links, keeping display text', () => {
+    // 2026-08-25 audit: the old `\(\.` anchor only matched ./ and ../ hrefs,
+    // so root-relative slug links shipped the internal taxonomy verbatim.
+    const input = 'Met [Alice](people/alice-example) about [the deal](deals/acme-seed).';
+    const result = makeShareable(input);
+    expect(result).toBe('Met Alice about the deal.');
+    expect(result).not.toContain('people/');
+    expect(result).not.toContain('deals/');
+  });
+
+  test('strips wikilinks (plain and piped), keeping the readable half', () => {
+    const input = 'See [[wiki/people/alice-example]] and [[people/bob-example|Bob]].';
+    const result = makeShareable(input);
+    expect(result).toBe('See alice-example and Bob.');
+    expect(result).not.toContain('[[');
+    expect(result).not.toContain('wiki/');
+  });
+
+  test('preserves external links', () => {
+    const input = 'Docs at [the site](https://example.com/x) and [mail](mailto:a@example.com).';
+    const result = makeShareable(input);
+    expect(result).toContain('https://example.com/x');
+    expect(result).toContain('mailto:a@example.com');
+  });
+
   test('strips [Source: ...] citations', () => {
     const input = 'Jane is CTO [Source: Crustdata enrichment, 2026-04-01] of Acme.';
     expect(makeShareable(input)).toBe('Jane is CTO of Acme.');

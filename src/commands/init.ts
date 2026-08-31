@@ -42,7 +42,7 @@ export async function runInit(args: string[]) {
   const pathIndex = args.indexOf('--path');
   const customPath = pathIndex !== -1 ? args[pathIndex + 1] : null;
   // v0.42 (T17): pack selection on fresh installs. New brains default to
-  // gbrain-base-v2 (the 15-type canonical taxonomy); --schema-pack
+  // gbrain-base-v2 (the canonical DRY/MECE taxonomy); --schema-pack
   // gbrain-base opts back to the legacy 24-type pack for users who don't
   // want the new taxonomy on day one. Existing brains stay on whatever
   // schema_pack their config.json already says.
