@@ -56,6 +56,15 @@ export type WalkResult =
       truncation: 'none' | 'max_nodes' | 'depth_cap' | 'both';
       freshness: 'fresh' | 'partial';
       terminal_nodes?: { symbol: string; sink_kind: SinkKind }[];
+      /**
+       * Present when the start symbol could not be resolved through
+       * content_chunks.symbol_name* (unpopulated — the `no_symbols`
+       * readiness state) and the walk was seeded from the short-name edge
+       * tables instead. Symbol-grain edges carry bare names, so collisions
+       * across files/modules are possible; treat depth groups as
+       * lower-confidence than a qualified-symbol walk.
+       */
+      seeded_via?: 'symbol_edges';
     }
   | { result: 'not_found'; did_you_mean: { symbol_qualified: string; score: number }[] }
   | { result: 'ambiguous'; candidates: { symbol_qualified: string; lang?: string; file?: string; lines?: string }[] }
@@ -156,16 +165,36 @@ export async function runRecursiveWalk(
 
   // Step 1: disambiguate bare name (skip when --exact).
   let qualifiedStart = symbol;
+  let seededVia: 'symbol_edges' | undefined;
   if (!opts.exact && !symbol.includes('::')) {
     const { matches, suggestions } = await disambiguateSymbol(engine, symbol, opts.sourceId);
-    if (matches.length === 0) return { result: 'not_found', did_you_mean: suggestions };
-    if (matches.length > 1) {
+    if (matches.length === 0) {
+      // Seed fallback (2026-08-25 audit P1-2 #6): content_chunks.symbol_name*
+      // can be entirely unpopulated (chunks predate symbol extraction — the
+      // `no_symbols` readiness state) while code_edges_symbol still holds a
+      // traversable short-name graph. Before declaring not_found, probe the
+      // walk's own direction for edges on the bare name; the single-hop
+      // engine methods already read both edge tables, so the BFS below
+      // traverses fine from a bare-name seed.
+      let probe: CodeEdgeResult[] = [];
+      try {
+        probe =
+          opts.direction === 'callers'
+            ? await engine.getCallersOf(symbol, { sourceId: opts.sourceId, limit: 1 })
+            : await engine.getCalleesOf(symbol, { sourceId: opts.sourceId, limit: 1 });
+      } catch {
+        probe = [];
+      }
+      if (probe.length === 0) return { result: 'not_found', did_you_mean: suggestions };
+      seededVia = 'symbol_edges';
+    } else if (matches.length > 1) {
       return {
         result: 'ambiguous',
         candidates: matches.map((m) => ({ symbol_qualified: m })),
       };
+    } else {
+      qualifiedStart = matches[0]!;
     }
-    qualifiedStart = matches[0]!;
   }
 
   // Step 2: language gate (per D18 honest scope).
@@ -252,6 +281,7 @@ export async function runRecursiveWalk(
     cycles_detected: cyclesDetected,
     truncation,
     freshness,
+    ...(seededVia ? { seeded_via: seededVia } : {}),
   };
   if (opts.direction === 'callees' && terminalNodes.length > 0) {
     (result as Extract<WalkResult, { result: 'ok' }>).terminal_nodes = terminalNodes;

@@ -193,6 +193,16 @@ export async function getCachedOrCompute<T>(
   engine: BrainEngine,
   key: Omit<CacheKey, 'cluster_generation'>,
   compute: () => Promise<T>,
+  cacheOpts?: {
+    /**
+     * Return false to skip the cache WRITE for this result (the lookup
+     * still ran). code_blast/code_flow pass `result === 'ok'` so a
+     * not_found/ambiguous envelope is never pinned — those answers change
+     * as soon as edges/symbols are (re)built, and a pinned not_found also
+     * masks the walk's symbol-edge seed fallback.
+     */
+    shouldCache?: (result: T) => boolean;
+  },
 ): Promise<T> {
   const cluster_generation = await getClusterGeneration(engine);
   const fullKey: CacheKey = { ...key, cluster_generation };
@@ -200,6 +210,7 @@ export async function getCachedOrCompute<T>(
   if (hit) return hit.response;
 
   const result = await compute();
+  if (cacheOpts?.shouldCache && !cacheOpts.shouldCache(result)) return result;
 
   // Best-effort write. v0.34.1 will wire REPEATABLE READ + real xmin_max
   // capture; v0.34.0.0 ships with `xmin_max = 0` (sentinel = no snapshot

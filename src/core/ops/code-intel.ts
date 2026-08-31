@@ -178,7 +178,7 @@ const code_blast: Operation = {
     // exactly preserving pre-fix local behavior.
     const { sourceId: scopedSourceId } = await routeCodeIntelScope(ctx, typeof p.source_id === 'string' ? p.source_id : undefined);
     const sourceId = scopedSourceId ?? ctx.sourceId;
-    return getCachedOrCompute(
+    const walk = await getCachedOrCompute(
       ctx.engine,
       { symbol_qualified: symbol, depth, source_id: sourceId },
       () => runRecursiveWalk(ctx.engine, symbol, {
@@ -188,7 +188,24 @@ const code_blast: Operation = {
         sourceId,
         exact,
       }),
+      // Never pin not_found/ambiguous: those answers flip when edges or
+      // symbols get (re)built, and a pinned not_found masks the walk's
+      // symbol-edge seed fallback.
+      { shouldCache: (r) => r.result === 'ok' },
     );
+    // Readiness on the empty answer (mirrors code_callers): an agent must
+    // be able to tell "symbol truly absent" from "graph/symbols not built".
+    if (walk.result === 'not_found') {
+      const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');
+      const readiness = await resolveCodeReadiness(ctx.engine, {
+        kind: 'edge', count: 0, sourceId, remote: ctx.remote,
+      });
+      return {
+        ...walk, status: readiness.status, ready: readiness.ready,
+        ...(readiness.scoped_source_id ? { scoped_source_id: readiness.scoped_source_id } : {}),
+      };
+    }
+    return walk;
   },
   cliHints: { name: 'code_blast', hidden: true },
 };
@@ -214,7 +231,7 @@ const code_flow: Operation = {
     // Single trust+grant resolver (see code_blast).
     const { sourceId: scopedSourceId } = await routeCodeIntelScope(ctx, typeof p.source_id === 'string' ? p.source_id : undefined);
     const sourceId = scopedSourceId ?? ctx.sourceId;
-    return getCachedOrCompute(
+    const walk = await getCachedOrCompute(
       ctx.engine,
       { symbol_qualified: symbol + ':flow', depth, source_id: sourceId },
       () => runRecursiveWalk(ctx.engine, symbol, {
@@ -224,7 +241,20 @@ const code_flow: Operation = {
         sourceId,
         exact,
       }),
+      // See code_blast: never pin non-ok envelopes.
+      { shouldCache: (r) => r.result === 'ok' },
     );
+    if (walk.result === 'not_found') {
+      const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');
+      const readiness = await resolveCodeReadiness(ctx.engine, {
+        kind: 'edge', count: 0, sourceId, remote: ctx.remote,
+      });
+      return {
+        ...walk, status: readiness.status, ready: readiness.ready,
+        ...(readiness.scoped_source_id ? { scoped_source_id: readiness.scoped_source_id } : {}),
+      };
+    }
+    return walk;
   },
   cliHints: { name: 'code_flow', hidden: true },
 };
