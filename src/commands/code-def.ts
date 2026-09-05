@@ -18,6 +18,7 @@ import { errorFor, serializeError } from '../core/errors.ts';
 import { resolveCodeReadiness, readinessHint } from '../core/code-graph-readiness.ts';
 
 export interface CodeDefResult {
+  source_id: string;
   slug: string;
   file: string | null;
   language: string | null;
@@ -39,29 +40,36 @@ export { DEF_TYPES };
 export async function findCodeDef(
   engine: BrainEngine,
   symbol: string,
-  opts: { limit?: number; language?: string } = {},
+  opts: { limit?: number; language?: string; sourceId?: string } = {},
 ): Promise<CodeDefResult[]> {
   const limit = opts.limit ?? 20;
-  const params: unknown[] = [symbol, limit];
+  const params: unknown[] = [symbol];
   let whereLang = '';
   if (opts.language) {
-    params.splice(1, 0, opts.language);
+    params.push(opts.language);
     whereLang = 'AND cc.language = $2';
   }
+  let whereSource = '';
+  if (opts.sourceId) {
+    params.push(opts.sourceId);
+    whereSource = `AND p.source_id = $${params.length}`;
+  }
+  params.push(limit);
   // Deterministic ordering: exact type matches first (functions before
   // export_statement wrappers), then page slug, then line number.
   const rows = await engine.executeRaw<{
-    slug: string; file: string | null; language: string | null;
+    source_id: string; slug: string; file: string | null; language: string | null;
     symbol_type: string | null; start_line: number | null; end_line: number | null;
     chunk_text: string;
   }>(
-    `SELECT p.slug, (p.frontmatter->>'file') AS file, cc.language, cc.symbol_type,
+    `SELECT p.source_id, p.slug, (p.frontmatter->>'file') AS file, cc.language, cc.symbol_type,
             cc.start_line, cc.end_line, cc.chunk_text
      FROM content_chunks cc
      JOIN pages p ON p.id = cc.page_id
      WHERE cc.symbol_name = $1
        ${whereLang}
-       AND p.page_kind = 'code'
+       ${whereSource}
+       AND p.page_kind = 'code' AND p.deleted_at IS NULL
        AND cc.symbol_type IN ('${DEF_TYPES.join("','")}', 'export statement')
      ORDER BY
        CASE cc.symbol_type
@@ -74,6 +82,7 @@ export async function findCodeDef(
     params,
   );
   return rows.map((r) => ({
+    source_id: r.source_id,
     slug: r.slug,
     file: r.file,
     language: r.language,
@@ -110,7 +119,7 @@ export async function probeFilteredSymbolTypes(
      JOIN pages p ON p.id = cc.page_id
      WHERE cc.symbol_name = $1
        ${whereLang}
-       AND p.page_kind = 'code'
+       AND p.page_kind = 'code' AND p.deleted_at IS NULL
      ORDER BY cc.symbol_type
      LIMIT 20`,
     params,

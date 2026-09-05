@@ -436,3 +436,15 @@ Markdown-first fact insertion, retirement and same-entity supersession must keep
 canonical file and source-scoped page body/facts consistent on success. Preserve
 content_hash as the last fully indexed hash so sync still refreshes chunks. Test
 PGLite and PostgreSQL, failure compensation, source isolation and rebuild lineage.
+
+## Code-index repair acceptance
+
+Code storage identity is `page_kind=code`, independent of taxonomy `type`.
+Doctor and reindex include code-kind plus legacy code-typed pages and exclude
+retired pages. Reindex/sync preserve the current taxonomy type inside the page
+transaction; valid empty files remain empty. Language metadata is required even
+when a chunk has no named symbol. Verify known `code_def` definitions after sync
+and upgrades; code-edge counts alone do not certify symbol lookup or graph tools.
+Definition/reference results include `source_id` for source/path attribution.
+Regression: `test/reindex-code.test.ts`, `test/reindex-code-recovery.test.ts`,
+`test/code-def-refs.test.ts`, `test/e2e/reindex-code-kind-postgres.test.ts`.

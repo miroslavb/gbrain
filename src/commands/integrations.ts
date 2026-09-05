@@ -1077,7 +1077,7 @@ USAGE
 // The v0 install command implements the COPY path; refresh is a follow-up.
 // =============================================================================
 
-import { createHash } from 'node:crypto';
+import { sha256OfFile, sha256OfBuffer, validateManifestTarget } from './integrations-file-helpers.ts';
 import {
   copyFileSync,
   statSync as fsStatSync,
@@ -1117,25 +1117,6 @@ interface GbrainSourceJson {
   install_kind: InstallKind;
   copied_at: string;
   files: InstalledFileRecord[];
-}
-
-function sha256OfFile(path: string): string {
-  const h = createHash('sha256');
-  h.update(readFileSync(path));
-  return h.digest('hex');
-}
-
-/**
- * Validate a target path inside the host repo. Rejects:
- *   - Absolute paths
- *   - Paths containing '..' segments
- *   - Paths that escape via symlink (resolved real path leaves target root)
- */
-function validateManifestTarget(target: string): string | null {
-  if (target.startsWith('/')) return `absolute path not allowed: ${target}`;
-  if (target.includes('..')) return `parent-dir escape not allowed: ${target}`;
-  if (target.includes('\0')) return `null byte in path: ${target}`;
-  return null;
 }
 
 /**
@@ -1225,15 +1206,6 @@ interface RefreshClassification {
   recordedSha?: string;
   currentSrcSha?: string;
   currentHostSha?: string;
-}
-
-/**
- * Compute SHA-256 of a string buffer.
- */
-function sha256OfBuffer(buf: Buffer): string {
-  const h = createHash('sha256');
-  h.update(buf);
-  return h.digest('hex');
 }
 
 /**

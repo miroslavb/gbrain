@@ -10,7 +10,7 @@
 
 import type { Operation } from './contract.ts';
 import { OperationError } from './contract.ts';
-import { routeCodeIntelScope } from './context.ts';
+import { resolveCodeIntelScope, routeCodeIntelScope } from './context.ts';
 import {
   CODE_CALLERS_DESCRIPTION,
   CODE_CALLEES_DESCRIPTION,
@@ -113,18 +113,22 @@ const code_def: Operation = {
   params: {
     symbol: { type: 'string', required: true, description: 'Symbol name (bare token; e.g., parseMarkdown, BrainEngine).' },
     limit: { type: 'number', description: 'Max definition sites returned. Default 20.' },
+    source_id: { type: 'string', description: 'Explicit source filter applied before the result limit; checked against caller grants. Omit for legacy brain-wide lookup.' },
     lang: { type: 'string', description: "Filter by content_chunks.language (e.g. 'typescript', 'python')." },
   },
   scope: 'read',
   handler: async (ctx, p) => {
+    const sourceId = typeof p.source_id === 'string'
+      ? resolveCodeIntelScope(ctx, p.source_id).sourceId : undefined;
     const { findCodeDef } = await import('../../commands/code-def.ts');
     const defs = await findCodeDef(ctx.engine, p.symbol as string, {
       limit: (p.limit as number) ?? 20,
       language: (p.lang as string) || undefined,
+      sourceId,
     });
-    // code_def is brain-wide (not source-scoped); readiness is 'symbol' grain.
+    // code_def is brain-wide unless source_id is explicit; readiness is 'symbol' grain.
     const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');
-    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: defs.length });
+    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: defs.length, sourceId, remote: ctx.remote });
     return { symbol: p.symbol as string, count: defs.length, status: readiness.status, ready: readiness.ready, defs };
   },
   cliHints: { name: 'code_def', hidden: true },
@@ -136,18 +140,22 @@ const code_refs: Operation = {
   params: {
     symbol: { type: 'string', required: true, description: 'Symbol to find references to.' },
     limit: { type: 'number', description: 'Max references returned. Default 50.' },
+    source_id: { type: 'string', description: 'Explicit source filter applied before the result limit; checked against caller grants. Omit for legacy brain-wide lookup.' },
     lang: { type: 'string', description: "Filter by content_chunks.language." },
   },
   scope: 'read',
   handler: async (ctx, p) => {
+    const sourceId = typeof p.source_id === 'string'
+      ? resolveCodeIntelScope(ctx, p.source_id).sourceId : undefined;
     const { findCodeRefs } = await import('../../commands/code-refs.ts');
     const refs = await findCodeRefs(ctx.engine, p.symbol as string, {
       limit: (p.limit as number) ?? 50,
       language: (p.lang as string) || undefined,
+      sourceId,
     });
-    // code_refs is brain-wide (not source-scoped); readiness is 'symbol' grain.
+    // code_refs is brain-wide unless source_id is explicit; readiness is 'symbol' grain.
     const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');
-    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: refs.length });
+    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: refs.length, sourceId, remote: ctx.remote });
     return { symbol: p.symbol as string, count: refs.length, status: readiness.status, ready: readiness.ready, refs };
   },
   cliHints: { name: 'code_refs', hidden: true },

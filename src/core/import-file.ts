@@ -1,3 +1,4 @@
+import { codePageType } from './code-page-type.ts';
 import { readFileSync, statSync, lstatSync } from 'fs';
 import { basename, extname } from 'path';
 import { createHash } from 'crypto';
@@ -1534,9 +1535,8 @@ export async function importCodeFile(
   // under the schema DEFAULT.
   await engine.transaction(async (tx) => {
     if (existing) await tx.createVersion(slug, txOpts);
-
     await tx.putPage(slug, {
-      type: 'code' as string,
+      type: await codePageType(tx, slug, txOpts.sourceId),
       page_kind: 'code',
       title,
       compiled_truth: storageContent,

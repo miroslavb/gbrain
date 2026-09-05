@@ -48,9 +48,8 @@
  * partial `idx_content_chunks_edges_backfill` index. Fail-open: any DB error
  * yields `status: 'unknown'` so a supplementary signal never breaks the command.
  *
- * Scope must match the result query exactly: `code-def` / `code-refs` do NOT
- * filter `deleted_at`, so neither do these probes (else readiness could say
- * `not_built` while results came from soft-deleted code pages).
+ * Scope must match the result query exactly: active code pages only, matching definition/reference lookups; retired
+ * source files cannot certify a usable index.
  */
 
 import type { BrainEngine } from './engine.ts';
@@ -102,7 +101,7 @@ export async function codeChunksExist(engine: BrainEngine, sourceId: string | un
     `SELECT EXISTS(
        SELECT 1 FROM content_chunks cc
          JOIN pages p ON p.id = cc.page_id
-        WHERE p.page_kind = 'code' ${scopeClause}
+        WHERE p.page_kind = 'code' AND p.deleted_at IS NULL ${scopeClause}
      ) AS e`,
     params,
   );
@@ -128,7 +127,7 @@ async function symbolChunksExist(engine: BrainEngine, sourceId: string | undefin
     `SELECT EXISTS(
        SELECT 1 FROM content_chunks cc
          JOIN pages p ON p.id = cc.page_id
-        WHERE p.page_kind = 'code'
+        WHERE p.page_kind = 'code' AND p.deleted_at IS NULL
           AND cc.symbol_name IS NOT NULL
           ${scopeClause}
      ) AS e`,
@@ -149,7 +148,7 @@ async function pendingEdgeChunksExist(engine: BrainEngine, sourceId: string | un
     `SELECT EXISTS(
        SELECT 1 FROM content_chunks cc
          JOIN pages p ON p.id = cc.page_id
-        WHERE p.page_kind = 'code'
+        WHERE p.page_kind = 'code' AND p.deleted_at IS NULL
           AND (cc.edges_backfilled_at IS NULL
                OR cc.edges_backfilled_at < $1::timestamptz)
           ${scopeClause}

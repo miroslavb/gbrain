@@ -368,3 +368,26 @@ describe('probeFilteredSymbolTypes (#3789)', () => {
     expect(filtered).toEqual([]);
   });
 });
+
+// The same path/name in two code sources is a normal multi-project case.
+test('definition and reference results retain their source identity', async () => {
+  await engine.executeRaw("INSERT INTO sources (id, name) VALUES ('other-code', 'Other code') ON CONFLICT DO NOTHING");
+  const code = 'export function attributionCanary() { return 42; }';
+  await importCodeFile(engine, 'src/attribution.ts', code, { noEmbed: true });
+  await importCodeFile(engine, 'src/attribution.ts', code, { noEmbed: true, sourceId: 'other-code' });
+  for (const lookup of [findCodeDef, findCodeRefs]) {
+    const rows = await lookup(engine, 'attributionCanary');
+    expect(new Set(rows.map(row => row.source_id))).toEqual(new Set(['default', 'other-code']));
+  }
+});
+
+test('source filtering precedes top-k and retired definitions disappear', async () => {
+  for (const lookup of [findCodeDef, findCodeRefs]) {
+    const rows = await lookup(engine, 'attributionCanary', { sourceId: 'other-code', limit: 1 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.source_id).toBe('other-code');
+  }
+  await engine.executeRaw("UPDATE pages SET deleted_at=NOW() WHERE source_id='other-code' AND frontmatter->>'file'='src/attribution.ts'");
+  expect(await findCodeDef(engine, 'attributionCanary', { sourceId: 'other-code' })).toEqual([]);
+  expect(await findCodeRefs(engine, 'attributionCanary', { sourceId: 'other-code' })).toEqual([]);
+});

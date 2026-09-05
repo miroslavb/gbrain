@@ -186,9 +186,8 @@ describe('A13 — code_def / code_refs are brain-wide by design (documented deci
     };
     expect(result.count).toBe(1);
     expect(result.defs[0]!.slug).toBe('src/beta-lib.ts');
-    // Rows do not project source_id; the slug is the only source signal.
-    // Pinned so a future projection/scoping change fails here consciously.
-    expect('source_id' in result.defs[0]!).toBe(false);
+    // Legacy unqualified lookup remains brain-wide; provenance is now explicit.
+    expect((result.defs[0] as any).source_id).toBe('srcbeta');
     // Sanity: the same brain-wide read also sees the caller's own source.
     const own = (await op.handler(remoteAlpha(), { symbol: 'alphaTargetFn' })) as { count: number };
     expect(own.count).toBe(1);
@@ -218,8 +217,8 @@ describe('A13 — code_def / code_refs are brain-wide by design (documented deci
     expect(result.count).toBe(1);
     expect(result.refs[0]!.slug).toBe('src/beta-lib.ts');
     expect(String(result.refs[0]!.snippet)).toContain('betaSecretFn');
-    // No source_id projection on ref rows either — pinned (see code_def above).
-    expect('source_id' in result.refs[0]!).toBe(false);
+    // References also retain source provenance.
+    expect((result.refs[0] as any).source_id).toBe('srcbeta');
   });
 });
 
@@ -370,5 +369,20 @@ describe('A13 — code_callees remote isolation (mirrors code_callers, pinned in
       callees: Array<{ to_symbol_qualified: string }>;
     };
     expect(control.callees.map((c) => c.to_symbol_qualified)).toContain('betaSecretFn');
+  });
+});
+
+
+describe('explicit code lookup source filter', () => {
+  test('applies a local source before lookup and rejects an out-of-grant remote source', async () => {
+    await seedTwoSourceCodeGraph();
+    for (const name of ['code_def', 'code_refs']) {
+      const op = operationsByName[name]!;
+      const empty = await op.handler(localAlpha(), { symbol: 'betaSecretFn', source_id: 'srcalpha' }) as any;
+      expect(empty.count).toBe(0);
+      const found = await op.handler(localAlpha(), { symbol: 'betaSecretFn', source_id: 'srcbeta' }) as any;
+      expect(found.count).toBeGreaterThan(0);
+      await expect(op.handler(remoteFederatedAlpha(), { symbol: 'betaSecretFn', source_id: 'srcbeta' })).rejects.toThrow();
+    }
   });
 });

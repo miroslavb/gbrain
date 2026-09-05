@@ -15,6 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { runReindexCode } from '../src/commands/reindex-code.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
+import { importCodeFile } from '../src/core/import-file.ts';
 
 describe('Layer 13 E2 — runReindexCode', () => {
   let engine: PGLiteEngine;
@@ -128,4 +129,33 @@ describe('Layer 13 E2 — runReindexCode', () => {
     });
     expect(result.codePages).toBe(3);
   });
+
+  test('force rebuild finds retyped code-kind pages and excludes deleted pages', async () => {
+    const isolated = new PGLiteEngine();
+    await isolated.connect({});
+    await isolated.initSchema();
+    try {
+      await importCodeFile(isolated, 'src/retyped.ts', 'export function retyped() { return 7; }', { noEmbed: true });
+      await importCodeFile(isolated, 'src/deleted.ts', 'export function deleted() { return 8; }', { noEmbed: true });
+      await importCodeFile(isolated, 'src/empty.py', '', { noEmbed: true });
+      await isolated.executeRaw("UPDATE pages SET type = 'note' WHERE page_kind = 'code'");
+      await isolated.executeRaw("UPDATE pages SET deleted_at = NOW() WHERE frontmatter->>'file' = 'src/deleted.ts'");
+      await isolated.executeRaw('UPDATE content_chunks SET symbol_name = NULL, language = NULL');
+      const preview = await runReindexCode(isolated, { dryRun: true, noEmbed: true });
+      expect(preview.codePages).toBe(2);
+      const result = await runReindexCode(isolated, { force: true, noEmbed: true, batchSize: 1 });
+      expect(result.reindexed).toBe(2);
+      expect(result.failed).toBe(0);
+    const types = await isolated.executeRaw<{ type: string }>("SELECT DISTINCT type FROM pages WHERE page_kind='code'");
+    expect(types.map(r => r.type)).toEqual(['note']);
+      const rows = await isolated.executeRaw<{ n: number }>(
+        "SELECT COUNT(*)::int AS n FROM content_chunks c JOIN pages p ON p.id=c.page_id WHERE p.deleted_at IS NULL AND c.language = 'typescript'",
+      );
+      expect(rows[0]!.n).toBeGreaterThan(0);
+      const retired = await isolated.executeRaw<{ n: number }>("SELECT COUNT(*)::int AS n FROM pages WHERE deleted_at IS NOT NULL");
+      expect(retired[0]!.n).toBe(1);
+    } finally {
+      await isolated.disconnect();
+    }
+  }, 60_000);
 });

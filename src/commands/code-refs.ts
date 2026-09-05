@@ -23,6 +23,7 @@ import { errorFor, serializeError } from '../core/errors.ts';
 import { resolveCodeReadiness, readinessHint } from '../core/code-graph-readiness.ts';
 
 export interface CodeRefResult {
+  source_id: string;
   slug: string;
   file: string | null;
   language: string | null;
@@ -36,7 +37,7 @@ export interface CodeRefResult {
 export async function findCodeRefs(
   engine: BrainEngine,
   symbol: string,
-  opts: { limit?: number; language?: string } = {},
+  opts: { limit?: number; language?: string; sourceId?: string } = {},
 ): Promise<CodeRefResult[]> {
   const limit = opts.limit ?? 50;
   const params: unknown[] = [`%${symbol}%`];
@@ -45,26 +46,33 @@ export async function findCodeRefs(
     params.push(opts.language);
     whereLang = `AND cc.language = $${params.length}`;
   }
+  let whereSource = '';
+  if (opts.sourceId) {
+    params.push(opts.sourceId);
+    whereSource = `AND p.source_id = $${params.length}`;
+  }
   params.push(limit);
   const rows = await engine.executeRaw<{
-    slug: string; file: string | null; language: string | null;
+    source_id: string; slug: string; file: string | null; language: string | null;
     symbol_name: string | null; symbol_type: string | null;
     start_line: number | null; end_line: number | null;
     chunk_text: string;
   }>(
-    `SELECT p.slug, (p.frontmatter->>'file') AS file, cc.language,
+    `SELECT p.source_id, p.slug, (p.frontmatter->>'file') AS file, cc.language,
             cc.symbol_name, cc.symbol_type, cc.start_line, cc.end_line,
             cc.chunk_text
      FROM content_chunks cc
      JOIN pages p ON p.id = cc.page_id
-     WHERE p.page_kind = 'code'
+     WHERE p.page_kind = 'code' AND p.deleted_at IS NULL
        AND cc.chunk_text ILIKE $1
        ${whereLang}
+       ${whereSource}
      ORDER BY p.slug, cc.start_line NULLS LAST
      LIMIT $${params.length}`,
     params,
   );
   return rows.map((r) => ({
+    source_id: r.source_id,
     slug: r.slug,
     file: r.file,
     language: r.language,

@@ -54,13 +54,13 @@ describe('doctor code_chunk_metadata (#3970 surface 2)', () => {
 
   async function addPageWithChunk(
     slug: string,
-    opts: { type?: string; symbolName?: string | null; language?: string | null; deleted?: boolean } = {},
+    opts: { type?: string; pageKind?: string; symbolName?: string | null; language?: string | null; deleted?: boolean } = {},
   ): Promise<void> {
     const rows = await engine.executeRaw<{ id: number }>(
       `INSERT INTO pages (slug, source_id, type, page_kind, title, compiled_truth, timeline, frontmatter, deleted_at)
-       VALUES ($1, 'default', $2, 'markdown', $1, 'body', '', '{}'::jsonb, $3)
+       VALUES ($1, 'default', $2, $4, $1, 'body', '', '{}'::jsonb, $3)
        RETURNING id`,
-      [slug, opts.type ?? 'code', opts.deleted ? new Date().toISOString() : null],
+      [slug, opts.type ?? 'code', opts.deleted ? new Date().toISOString() : null, opts.pageKind ?? 'markdown'],
     );
     await engine.executeRaw(
       `INSERT INTO content_chunks (page_id, chunk_index, chunk_text, symbol_name, language)
@@ -94,7 +94,7 @@ describe('doctor code_chunk_metadata (#3970 surface 2)', () => {
     expect((c.details as { pages_affected: number }).pages_affected).toBe(2);
   });
 
-  test('chunk with only language populated (symbol_name NULL) does not count — both must be NULL', async () => {
+  test('chunk with only language populated (symbol_name NULL) does not count — non-symbol chunks are valid', async () => {
     // e.g. a chunk between symbols still stamped with the file language.
     await addPageWithChunk('src-partial-go', { symbolName: null, language: 'go' });
 
@@ -102,6 +102,22 @@ describe('doctor code_chunk_metadata (#3970 surface 2)', () => {
     // Still warns from the previous test's rows, but the count is unchanged.
     expect((c.details as { chunks_missing_metadata: number }).chunks_missing_metadata).toBe(2);
   });
+
+  test('taxonomy retyping cannot hide code-kind pages; deleted pages stay excluded', async () => {
+    await addPageWithChunk('src-retyped-ts', { type: 'note', pageKind: 'code' });
+    await addPageWithChunk('src-retired-ts', { type: 'note', pageKind: 'code', deleted: true });
+    const c = await checkCodeChunkMetadata(engine);
+    expect(c.status).toBe('warn');
+    expect((c.details as { chunks_missing_metadata: number }).chunks_missing_metadata).toBe(3);
+    expect((c.details as { pages_affected: number }).pages_affected).toBe(3);
+  });
+  test('a populated symbol cannot hide missing language metadata', async () => {
+    await addPageWithChunk('src-broken-language-ts', { pageKind: 'code', type: 'note', symbolName: 'knownDefinition' });
+    const check = await checkCodeChunkMetadata(engine);
+    expect(check.status).toBe('warn');
+    expect((check.details as { chunks_missing_metadata: number }).chunks_missing_metadata).toBe(4);
+  });
+
 });
 
 describe('CLI help line (#3970 surface 1)', () => {

@@ -4,7 +4,7 @@
  * Explicit backfill for v0.19.0 → v0.21.0 brains. Layer 12's
  * `sources.chunker_version` gate forces a re-walk next sync on any source
  * whose working tree hasn't drifted, but users who want the benefits NOW
- * (before the next sync) get this: walk every page where type='code', read
+ * (before the next sync) get this: walk code-kind pages (plus legacy type='code'), read
  * compiled_truth + frontmatter.file, re-import via importCodeFile. Pages
  * flow through the same code path as normal sync (chunker + embeddings +
  * content_hash folding), so a reindex is bit-identical to a fresh sync.
@@ -142,7 +142,7 @@ async function fetchCodePages(
   const rows = await engine.executeRaw<CodePageRow>(
     `SELECT p.slug, p.source_id, p.compiled_truth, p.frontmatter
      FROM pages p
-     WHERE p.type = 'code' ${sourceClause}
+     WHERE (p.page_kind = 'code' OR p.type = 'code') AND p.deleted_at IS NULL ${sourceClause}
      ORDER BY p.slug
      LIMIT ${batchSize} OFFSET ${offset}`,
   );
@@ -152,7 +152,8 @@ async function fetchCodePages(
 async function countCodePages(engine: BrainEngine, sourceId: string | undefined): Promise<number> {
   const sourceClause = sourceId ? `AND p.source_id = '${sourceId.replace(/'/g, "''")}'` : '';
   const rows = await engine.executeRaw<{ n: string | number }>(
-    `SELECT COUNT(*)::text AS n FROM pages p WHERE p.type = 'code' ${sourceClause}`,
+    `SELECT COUNT(*)::text AS n FROM pages p
+     WHERE (p.page_kind = 'code' OR p.type = 'code') AND p.deleted_at IS NULL ${sourceClause}`,
   );
   if (rows.length === 0) return 0;
   const raw = rows[0]!.n;
@@ -283,7 +284,9 @@ export async function runReindexCode(
               reporter.tick();
               return;
             }
-            if (!row.compiled_truth) {
+            // Empty source files are valid; reindex must preserve them and
+            // clear obsolete chunks through importCodeFile's empty path.
+            if (typeof row.compiled_truth !== 'string') {
               failed++;
               failures.push({ slug: row.slug, error: 'missing compiled_truth' });
               reporter.tick();

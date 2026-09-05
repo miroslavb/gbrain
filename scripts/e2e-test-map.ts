@@ -15,6 +15,8 @@
 // No brace expansion, no ?, no [ ].
 
 export const E2E_TEST_MAP: Record<string, string[]> = {
+  "src/commands/reindex-code.ts": ["test/e2e/reindex-code-kind-postgres.test.ts"],
+  "src/commands/doctor/checks/extraction-sync.ts": ["test/e2e/reindex-code-kind-postgres.test.ts"],
   "src/core/facts/page-projection.ts": [
     "test/e2e/fact-page-projection-postgres.test.ts",
     "test/e2e/fact-decision-transitions-postgres.test.ts",

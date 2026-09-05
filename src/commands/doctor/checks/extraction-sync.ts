@@ -321,20 +321,20 @@ export async function checkCodeChunkMetadata(engine: BrainEngine): Promise<Check
       `SELECT COUNT(*)::text AS chunks, COUNT(DISTINCT c.page_id)::text AS pages
          FROM content_chunks c
          JOIN pages p ON p.id = c.page_id
-        WHERE p.type = 'code' AND p.deleted_at IS NULL
-          AND c.symbol_name IS NULL AND c.language IS NULL`,
+        WHERE (p.page_kind = 'code' OR p.type = 'code') AND p.deleted_at IS NULL
+          AND c.language IS NULL`,
     );
     const chunks = Number(rows[0]?.chunks ?? 0);
     const pages = Number(rows[0]?.pages ?? 0);
     if (chunks === 0) {
-      return { name, status: 'ok', message: 'All code-page chunks carry symbol metadata' };
+      return { name, status: 'ok', message: 'All active code-page chunks carry language metadata; verify known definitions separately' };
     }
     return {
       name,
       status: 'warn',
       message:
-        `${chunks} chunk(s) on ${pages} code page(s) have no symbol metadata ` +
-        `(symbol_name and language both NULL) — code-def/code-refs and ` +
+        `${chunks} chunk(s) on ${pages} code page(s) have no language metadata ` +
+        `(language NULL) — code-def/code-refs and ` +
         `--lang/--symbol-kind filters miss them. A plain sync/reindex skips ` +
         `unchanged pages via the content_hash short-circuit. ` +
         `Fix: gbrain reindex-code --force`,

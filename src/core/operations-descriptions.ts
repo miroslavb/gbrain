@@ -159,7 +159,8 @@ export const CODE_DEF_DESCRIPTION =
   "reaching for grep when you want to read a definition. Single-result is the common " +
   "case; multiple results indicate same-name symbols across files (which is information " +
   "in itself). " +
-  "Returns: `{symbol, count, defs: [{slug, file, language, symbol_type, start_line, end_line, snippet}]}`. " +
+  "Returns: `{symbol, count, defs: [{source_id, slug, file, language, symbol_type, start_line, end_line, snippet}]}`. " +
+  "Pass source_id to filter before the result limit; omitted source retains legacy brain-wide behavior. " +
   "Filter by --lang to scope a polyglot brain (e.g., lang='typescript').";
 
 export const CODE_REFS_DESCRIPTION =
@@ -168,10 +169,11 @@ export const CODE_REFS_DESCRIPTION =
   "strings, imports, type annotations — not just call sites; (2) returns line " +
   "spans, not symbol-qualified edges. Use this when planning a rename or " +
   "deprecation where you need to touch every literal mention. " +
-  "Returns: `{symbol, count, status, ready, refs: [{slug, file, language, " +
+  "Returns: `{symbol, count, status, ready, refs: [{source_id, slug, file, language, " +
   "symbol_name, symbol_type, start_line, end_line, snippet}]}` — `status`/`ready` " +
   "are the code-graph readiness signal (a brain whose chunks predate symbol " +
-  "extraction reports `no_symbols`, not an empty match).";
+  "extraction reports `no_symbols`, not an empty match). Pass source_id to filter before top-k. " +
+  "This is bounded substring retrieval, not exhaustive semantic references.";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PR1 — skill catalog over MCP (list_skills / get_skill). The agent repo's
