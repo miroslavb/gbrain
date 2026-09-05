@@ -427,6 +427,11 @@ publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork
 
 ## Fact page projection contract
 
+Timeline writes must derive the projected timeline from the final canonical file,
+including trailing facts/takes sections. Independently appending to the previous
+DB timeline can place the same event after a fence while the file places it before.
+The both-engine fact-page contract and timeline-write-through test pin this case.
+
 Markdown-first fact insertion, retirement and same-entity supersession must keep
 canonical file and source-scoped page body/facts consistent on success. Preserve
 content_hash as the last fully indexed hash so sync still refreshes chunks. Test

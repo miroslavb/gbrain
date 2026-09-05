@@ -31,6 +31,7 @@ import {
 import { writeFactsToFence } from '../src/core/facts/fence-write.ts';
 import type { FenceInputFact } from '../src/core/facts/fence-write.ts';
 import { extractTimelineFromContent } from '../src/commands/extract.ts';
+import { parseMarkdown } from '../src/core/markdown.ts';
 
 const addTimelineEntryOp = operations.find((o) => o.name === 'add_timeline_entry') as Operation;
 if (!addTimelineEntryOp) throw new Error('add_timeline_entry op missing');
@@ -380,6 +381,8 @@ describe('wave-C review: splice-under-lock, never whole-file regeneration', () =
     // past the trailing `## Facts` fence.
     expect(fenceBegin).toBeGreaterThan(bullet);
     expect(extractTimelineFromContent(disk, slug).length).toBe(2);
+    expect((await engine.getPage(slug, { sourceId: 'default' }))?.timeline)
+      .toBe(parseMarkdown(disk, slug + '.md').timeline);
   });
 
   test('concurrent fence + timeline writers both land (page-lock serialization pin)', async () => {

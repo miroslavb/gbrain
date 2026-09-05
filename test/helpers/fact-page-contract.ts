@@ -8,9 +8,10 @@ import { forgetFactInFence } from '../../src/core/facts/forget.ts';
 import { parseMarkdown } from '../../src/core/markdown.ts';
 import { parseFactsFence } from '../../src/core/facts-fence.ts';
 import { extractFactsFromFenceText } from '../../src/core/facts/extract-from-fence.ts';
+import { writeTimelineEntryThrough } from '../../src/core/timeline-write-through.ts';
 
 export function factPageContract(getEngine: () => BrainEngine) {
-  for (const scenario of ['supersession-rebuild', 'insert-rollback', 'forget-rollback', 'source-isolation']) {
+  for (const scenario of ['supersession-rebuild', 'insert-rollback', 'forget-rollback', 'source-isolation', 'timeline-tail']) {
     test(`fact projection contract: ${scenario}`, async () => {
       const engine = getEngine();
       const root = mkdtempSync(join(tmpdir(), 'fact-projection-'));
@@ -25,7 +26,8 @@ export function factPageContract(getEngine: () => BrainEngine) {
       const target = { sourceId: source, slug, localPath: root, resolutionSource: 'exact_page' as const };
       await engine.executeRaw('INSERT INTO sources (id, name, local_path) VALUES ($1, $1, $2)', [source, root]);
       try {
-        writeFileSync(file, '---\ntype: project\ntitle: Decision\n---\n\n# Current\n\nKeep independent source evidence.\n');
+        writeFileSync(file, '---\ntype: project\ntitle: Decision\n---\n\n# Current\n\nKeep independent source evidence.\n'
+          + (scenario === 'timeline-tail' ? '\n<!-- timeline -->\n## Timeline\n\n- **2026-07-01** | test — Started.\n' : ''));
         const first = await writeFactsToFence(engine, target, [input('Use manual mode.')]);
         const before = readFileSync(file, 'utf8');
         const pageBefore = await engine.getPage(slug, { sourceId: source });
@@ -53,6 +55,18 @@ export function factPageContract(getEngine: () => BrainEngine) {
           expect(readFileSync(file, 'utf8')).toBe(before);
           await forgetFactInFence(engine, first.ids[0], { sourceId: source });
           expect((await engine.getPage(slug, { sourceId: 'default' }))?.compiled_truth).toBe('Foreign body');
+        } else if (scenario === 'timeline-tail') {
+          // A timeline followed by a managed fence must project the same
+          // bullet placement on disk and through get_page, on both engines.
+          const result = await writeTimelineEntryThrough(engine, slug, source,
+            { date: '2026-07-02', source: 'test', summary: 'Changed the decision.' });
+          expect(result.handled).toBe(true);
+          const parsed = parseMarkdown(readFileSync(file, 'utf8'), slug + '.md');
+          const page = await engine.getPage(slug, { sourceId: source });
+          expect(page?.compiled_truth).toBe(parsed.compiled_truth);
+          expect(page?.timeline).toBe(parsed.timeline);
+          expect(parsed.timeline.indexOf('Changed the decision.'))
+            .toBeLessThan(parsed.timeline.indexOf('gbrain:facts:begin'));
         } else {
           const second = await writeFactsToFence(engine, target, [input('Use automatic mode.', first.ids[0])]);
           const body = readFileSync(file, 'utf8');

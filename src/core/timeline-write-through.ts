@@ -19,7 +19,7 @@
  *      edits) that the pages row doesn't know about, and regenerating from
  *      the row silently reverted them (fence loss then cascaded to
  *      fact-row reconcile deletions),
- *   3. spliced date-ordered into the page row's `timeline` text, and
+ *   3. projected from that exact file into the page row's `timeline` text, and
  *   4. inserted into `timeline_entries` with the tuple the FS extractor
  *      (`extractTimelineFromContent`) recovers from that exact bullet.
  *
@@ -56,7 +56,7 @@ import {
   type WriteThroughResult,
 } from './write-through.ts';
 import { withPageLock } from './page-lock.ts';
-import { findTimelineSplitIndex } from './markdown.ts';
+import { findTimelineSplitIndex, parseMarkdown } from './markdown.ts';
 import {
   isDurabilityHardened, commitWriteThroughFile, currentBranch, getLastPushOutcome,
   type PushLogOutcome,
@@ -402,7 +402,10 @@ export async function writeTimelineEntryThrough(
         onDisk = rendered.canonical;
 
         const newTimeline = sanitizeForJsonb(
-          spliceTimelineBlock(page.timeline ?? '', entry.date, rendered.block),
+          // The file splice is bullet-bounded; the DB splice used to append
+          // past trailing facts/takes fences. Project the actual merge point
+          // instead of reconstructing a second, differently ordered timeline.
+          parseMarkdown(afterText, slug + '.md').timeline,
         );
         await engine.executeRaw(
           `UPDATE pages SET timeline = $1, updated_at = now()

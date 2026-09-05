@@ -9,7 +9,7 @@ For the link-only index, see `llms.txt`. Source of truth: https://github.com/gar
 
 ## AGENTS.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/AGENTS.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/AGENTS.md
 
 # Agents working on GBrain
 
@@ -440,6 +440,11 @@ publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork
 
 ## Fact page projection contract
 
+Timeline writes must derive the projected timeline from the final canonical file,
+including trailing facts/takes sections. Independently appending to the previous
+DB timeline can place the same event after a fence while the file places it before.
+The both-engine fact-page contract and timeline-write-through test pin this case.
+
 Markdown-first fact insertion, retirement and same-entity supersession must keep
 canonical file and source-scoped page body/facts consistent on success. Preserve
 content_hash as the last fully indexed hash so sync still refreshes chunks. Test
@@ -449,7 +454,7 @@ PGLite and PostgreSQL, failure compensation, source isolation and rebuild lineag
 
 ## CLAUDE.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/CLAUDE.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/CLAUDE.md
 
 # CLAUDE.md
 
@@ -1407,7 +1412,7 @@ Key routing rules:
 
 ## INSTALL_FOR_AGENTS.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/INSTALL_FOR_AGENTS.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/INSTALL_FOR_AGENTS.md
 
 # GBrain Installation Guide for AI Agents
 
@@ -1929,7 +1934,7 @@ Init + upgrade banners auto-skip in non-TTY too.
 
 ## skills/RESOLVER.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/skills/RESOLVER.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/skills/RESOLVER.md
 
 # GBrain Skill Resolver
 
@@ -2108,7 +2113,7 @@ These apply to ALL brain-writing skills:
 
 ## README.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/README.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/README.md
 
 # GBrain
 
@@ -2688,7 +2693,7 @@ Community PR contributors are credited in `CHANGELOG.md` per release. ZeroEntrop
 
 ## docs/ENGINES.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/ENGINES.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/ENGINES.md
 
 # Pluggable Engine Architecture
 
@@ -3204,7 +3209,7 @@ Note: The original SQLite engine plan (`docs/SQLITE_ENGINE.md`) was superseded b
 
 ## docs/what-schemas-unlock.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/what-schemas-unlock.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/what-schemas-unlock.md
 
 # What schemas unlock
 
@@ -3388,7 +3393,7 @@ That's what we built. Try it on a corpus you actually have and the numbers go up
 
 ## docs/schema-author-tutorial.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/schema-author-tutorial.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/schema-author-tutorial.md
 
 # Tutorial: Build your first schema pack
 
@@ -3617,7 +3622,7 @@ gbrain schema lint --with-db
 
 ## docs/guides/live-sync.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/live-sync.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/guides/live-sync.md
 
 # Live Sync: Keep the Index Current
 
@@ -3858,7 +3863,7 @@ vars — incident-time escape hatches, not everyday knobs.
 
 ## docs/guides/cron-schedule.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/cron-schedule.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/guides/cron-schedule.md
 
 # Reference Cron Schedule
 
@@ -4168,7 +4173,7 @@ echo "Dream cycle complete at $(date)"
 
 ## docs/guides/quiet-hours.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/quiet-hours.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/guides/quiet-hours.md
 
 # Quiet Hours and Timezone-Aware Delivery
 
@@ -4371,7 +4376,7 @@ Set `enabled: false` to disable quiet hours entirely (e.g., for 24/7 monitoring)
 
 ## docs/guides/scaling-skills.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/scaling-skills.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/guides/scaling-skills.md
 
 # Scaling skills past 300 without drowning the context window
 
@@ -4721,7 +4726,7 @@ the bundled resolver lives at [`skills/RESOLVER.md`](../../skills/RESOLVER.md).
 
 ## docs/guides/push-context.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/push-context.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/guides/push-context.md
 
 # Push-based context (#2095, v0.42.43.0)
 
@@ -4851,7 +4856,7 @@ never reach a prompt regardless of caller trust.
 
 ## docs/guides/github-source.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/github-source.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/guides/github-source.md
 
 # GitHub source kind: issues and PRs live in the brain
 
@@ -5017,7 +5022,7 @@ gbrain sources remove gh --confirm-destructive
 
 ## docs/mcp/DEPLOY.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/mcp/DEPLOY.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/mcp/DEPLOY.md
 
 # Deploy GBrain Remote MCP Server
 
@@ -5420,7 +5425,7 @@ built-in server is the recommended path.
 
 ## docs/protocol/MEMORY_VERBS_v1.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/protocol/MEMORY_VERBS_v1.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/protocol/MEMORY_VERBS_v1.md
 
 # MEMORY_VERBS v1 — the memory wire protocol
 
@@ -5843,7 +5848,7 @@ dominates (~minutes); the measured calls report p50/p99 + the ratio guard.
 
 ## docs/GBRAIN_VERIFY.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/GBRAIN_VERIFY.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/GBRAIN_VERIFY.md
 
 # GBrain Installation Verification Runbook
 
@@ -6200,7 +6205,7 @@ end-to-end sync test (4c), push a real change and verify it appears in search.
 
 ## docs/guides/minions-fix.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/minions-fix.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/guides/minions-fix.md
 
 # Minions fix — repairing a half-migrated install
 
@@ -6372,7 +6377,7 @@ Each phase is idempotent. Re-running is safe. Common failure modes:
 
 ## docs/integrations/reliability-repair.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/integrations/reliability-repair.md
+Source: https://raw.githubusercontent.com/miroslavb/gbrain/fix/fact-write-projection-20260905/docs/integrations/reliability-repair.md
 
 # Reliability repair (v0.12.2)
 
