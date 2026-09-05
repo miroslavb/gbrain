@@ -1,0 +1,12 @@
+{
+  "version": "temporal-decisions-v1-20260905",
+  "scope": "Synthetic source-maintenance protocol gold; not a natural-work or retrieval-quality score",
+  "entity": "projects/decision-transition",
+  "stages": [
+    {"id": "initial", "action": "remember", "claim": "Current release decision: manual approval.", "active": ["Current release decision: manual approval."], "history_count": 1},
+    {"id": "changed-decision", "action": "supersede", "claim": "Current release decision: automatic approval.", "active": ["Current release decision: automatic approval."], "history_count": 2},
+    {"id": "cancelled-decision", "action": "forget", "active": [], "history_count": 2},
+    {"id": "rollback", "action": "remember", "claim": "Current release decision: manual approval.", "active": ["Current release decision: manual approval."], "history_count": 3}
+  ],
+  "oracles": ["file_equals_get_page", "active_recall_matches_current_decision", "historical_recall_retains_changed_and_cancelled_claims", "rollback_creates_a_new_epoch_without_resurrecting_old_fact_ids"]
+}

@@ -15,6 +15,14 @@
 // No brace expansion, no ?, no [ ].
 
 export const E2E_TEST_MAP: Record<string, string[]> = {
+  "src/core/facts/page-projection.ts": [
+    "test/e2e/fact-page-projection-postgres.test.ts",
+    "test/e2e/fact-decision-transitions-postgres.test.ts",
+  ],
+  "src/core/facts/file-rollback.ts": [
+    "test/e2e/fact-page-projection-postgres.test.ts",
+    "test/e2e/fact-decision-transitions-postgres.test.ts",
+  ],
   // Serve-delegated sync: wire types, job runner, CLI ladder, and the IPC
   // plumbing all feed the delegation-under-serve E2E.
   "src/core/context/sync-ipc.ts": ["test/e2e/sync-delegation-under-serve.serial.test.ts"],

@@ -19,6 +19,8 @@ export interface FactPageReconcileOpts {
 }
 
 export interface FactBatchInsertOpts {
+  /** Markdown-first writer projection; committed atomically with new facts. */
+  pageProjection?: import('./page-projection.ts').FactPageProjection;
   deleteForPageFirst?: FactPageReconcileOpts;
   /**
    * Final source-of-truth check run after the page precondition is locked but
@@ -35,6 +37,9 @@ export function validateFactBatchReconcile(
   rows: readonly { source: string; source_markdown_slug: string }[],
   opts?: FactBatchInsertOpts,
 ): void {
+  if (opts?.pageProjection && rows.some(row => row.source_markdown_slug !== opts.pageProjection!.slug)) {
+    throw new Error('insertFacts: projection slug must match every inserted row');
+  }
   const reconcile = opts?.deleteForPageFirst;
   if (!reconcile) return;
   const included = reconcile.includeSourcePrefixes;

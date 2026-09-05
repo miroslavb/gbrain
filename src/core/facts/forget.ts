@@ -34,6 +34,9 @@
 
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 
+import { relative } from 'node:path';
+import { rollbackFactFile } from './file-rollback.ts';
+import { factPageProjection, projectFactPageBody } from './page-projection.ts';
 import type { BrainEngine } from '../engine.ts';
 import { withPageLock } from '../page-lock.ts';
 import { resolvePageWriteTarget } from '../write-through.ts';
@@ -238,11 +241,20 @@ export async function forgetFactInFence(
     // This keeps DB query patterns (active facts WHERE expired_at IS NULL)
     // accurate the moment the forget commits, without waiting for the
     // next extract_facts cycle phase to reconcile.
-    await engine.executeRaw(
-      `UPDATE facts SET valid_until = $1, expired_at = now()
-       WHERE id = $2 AND expired_at IS NULL`,
-      [today, factId],
-    );
+    try {
+      await engine.transaction(async tx => {
+      await tx.executeRaw(
+        `UPDATE facts SET valid_until = $1, expired_at = now()
+         WHERE id = $2 AND source_id = $3 AND expired_at IS NULL`,
+        [today, factId, row.source_id],
+      );
+      await projectFactPageBody((sql, params) => tx.executeRaw(sql, params), row.source_id,
+        factPageProjection(newBody, slug, relative(localPath, filePath)));
+      });
+    } catch (error) {
+      rollbackFactFile(filePath, newBody, body);
+      throw error;
+    }
 
     return { ok: true, path: 'fence', reason };
   }, { timeoutMs: 5_000 });

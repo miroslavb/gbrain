@@ -1,3 +1,4 @@
+import { projectFactPageBody } from '../facts/page-projection.ts';
 /**
  * v0.31: Hot memory — facts table operations, peeled out of PostgresEngine
  * (containment sprint C15). Free functions over a NARROW deps surface — the
@@ -330,7 +331,9 @@ export async function insertFacts(
         }
         const updated = await tx<Array<{ id: number }>>`
           UPDATE facts
-             SET expired_at = now(), superseded_by = ${newId}
+             SET expired_at = now(),
+                 valid_until = CASE WHEN ${Boolean(opts?.pageProjection)} THEN CURRENT_DATE ELSE valid_until END,
+                 superseded_by = ${newId}
            WHERE id = ${oldId}
              AND source_id = ${ctx.source_id}
              AND entity_slug IS NOT DISTINCT FROM ${rows[i].entity_slug ?? null}
@@ -340,6 +343,9 @@ export async function insertFacts(
         if (!updated[0]) {
           throw new Error(`insertFacts: supersession target ${oldId} is missing, foreign, or inactive`);
         }
+      }
+      if (opts?.pageProjection) {
+        await projectFactPageBody(async (sql, params) => Array.from(await tx.unsafe(sql, params as never[])), ctx.source_id, opts.pageProjection);
       }
       if (opts?.postCommitCheck) await opts.postCommitCheck();
       return out;

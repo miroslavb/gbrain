@@ -46,8 +46,10 @@ import { withPageLock } from '../page-lock.ts';
 import { gbrainPath } from '../config.ts';
 import { isWriteThroughDisabled, resolvePageWriteTarget } from '../write-through.ts';
 import { isDurabilityHardened, commitWriteThroughFile } from '../brain-repo-durability.ts';
-import { upsertFactRow, parseFactsFence } from '../facts-fence.ts';
+import { upsertFactRow, parseFactsFence, renderFactsTable } from '../facts-fence.ts';
 import { extractFactsFromFenceText } from './extract-from-fence.ts';
+import { rollbackFactFile } from './file-rollback.ts';
+import { factPageProjection } from './page-projection.ts';
 import { logStubGuardEvent } from './stub-guard-audit.ts';
 
 /** Resolved source binding for the entity page. */
@@ -88,6 +90,7 @@ export interface FenceInputFact {
   validUntil?: Date | null;
   embedding: Float32Array | null;
   sessionId: string | null;
+  supersedesFactId?: number;
 }
 
 export interface FenceWriteResult {
@@ -313,6 +316,7 @@ export async function writeFactsToFence(
     target.slug,
     async () => {
       // 1. Read existing body or stub-create.
+      const originalBody = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
       let body: string;
       if (existsSync(filePath)) {
         body = readFileSync(filePath, 'utf-8');
@@ -439,6 +443,32 @@ export async function writeFactsToFence(
         assignedRowNums.push(rowNum);
       }
 
+      // Supersession is one file rewrite and one DB transaction. The durable
+      // pointer is a fence row coordinate, never a rebuild-unstable DB id.
+      for (let i = 0; i < facts.length; i++) {
+        const oldId = facts[i].supersedesFactId;
+        if (oldId === undefined) continue;
+        const rows = await engine.executeRaw<{ row_num: number | null; source_markdown_slug: string | null }>(
+          `SELECT row_num, source_markdown_slug FROM facts
+           WHERE id = $1 AND source_id = $2 AND entity_slug = $3 AND expired_at IS NULL`,
+          [oldId, target.sourceId, target.slug]);
+        const old = rows[0];
+        if (!old) throw new Error('Fact supersession target is missing, foreign, or inactive');
+        if (old.row_num === null) continue; // Legacy DB-only target; retire atomically below.
+        const parsed = parseFactsFence(body);
+        if (old.source_markdown_slug !== target.slug || !parsed.facts.some(f => f.rowNum === old.row_num && f.active)) {
+          throw new Error('Fact supersession target disagrees with canonical fence');
+        }
+        const updated = parsed.facts.map(f => f.rowNum === old.row_num ? {
+          ...f, active: false, validUntil: new Date().toISOString().slice(0, 10),
+          context: `superseded by #${assignedRowNums[i]}` + (f.context ? `; ${f.context}` : ''),
+          supersededBy: assignedRowNums[i], forgotten: false,
+        } : f);
+        const begin = body.indexOf('<!--- gbrain:facts:begin -->');
+        const end = body.indexOf('<!--- gbrain:facts:end -->', begin);
+        body = body.slice(0, begin) + renderFactsTable(updated) + body.slice(end + '<!--- gbrain:facts:end -->'.length);
+      }
+
       // Snapshot the prewrite git state INSIDE the lock, immediately before
       // the write: an out-of-lock snapshot raced concurrent fence writers — a
       // waiter observed the holder's not-yet-committed rename as pre-existing
@@ -482,9 +512,19 @@ export async function writeFactsToFence(
         ...row,
         embedding:      facts[i].embedding,
         source_session: facts[i].sessionId,
+        supersedes_fact_id: facts[i].supersedesFactId,
       }));
 
-      const result = await engine.insertFacts(enriched, { source_id: target.sourceId }); // gbrain-allow-direct-insert: writeFactsToFence is the markdown-first reconcile path; runs only after the atomic fence write commits
+      let result;
+      try {
+        result = await engine.insertFacts(enriched, { source_id: target.sourceId }, { // gbrain-allow-direct-insert: markdown-first reconcile, page projection shares the transaction
+          pageProjection: factPageProjection(body, target.slug, relative(writeRoot, filePath)),
+          requireAllRows: true,
+        });
+      } catch (error) {
+        rollbackFactFile(filePath, body, originalBody);
+        throw error;
+      } // gbrain-allow-direct-insert: writeFactsToFence is the markdown-first reconcile path; runs only after the atomic fence write commits
       // v0.46 (#3014) — an unresolvable `superseded by #N` reference (self
       // / dangling / struck target) leaves superseded_by NULL; log it rather
       // than swallow it. The row still lands (expired_at set for struck

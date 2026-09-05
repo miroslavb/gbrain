@@ -424,3 +424,10 @@ use generic placeholders (`alice-example`, `acme-example`, `fund-a`).
 
 If you are a fork, regenerate `llms.txt` + `llms-full.txt` with your own URL base before
 publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork/main bun run build:llms`.
+
+## Fact page projection contract
+
+Markdown-first fact insertion, retirement and same-entity supersession must keep
+canonical file and source-scoped page body/facts consistent on success. Preserve
+content_hash as the last fully indexed hash so sync still refreshes chunks. Test
+PGLite and PostgreSQL, failure compensation, source isolation and rebuild lineage.

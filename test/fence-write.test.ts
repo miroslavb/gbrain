@@ -28,6 +28,7 @@ import { writeSingleFact } from '../src/core/facts/write-single.ts';
 import { _resetWriteThroughCacheForTest } from '../src/core/write-through.ts';
 import { resetGateway } from '../src/core/ai/gateway.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { parseMarkdown } from '../src/core/markdown.ts';
 
 let engine: PGLiteEngine;
 let brainDir: string;
@@ -101,6 +102,28 @@ function installFakeDurabilityHook(repoPath: string): void {
 }
 
 describe('writeFactsToFence — happy path', () => {
+  test('write and forget project the authoritative file into getPage without marking chunks fresh', async () => {
+    const slug = 'projects/projection-regression';
+    const file = join(brainDir, slug + '.md');
+    mkdirSync(join(brainDir, 'projects'), { recursive: true });
+    await engine.putPage(slug, { type: 'project', title: 'Projection', compiled_truth: 'old body', content_hash: 'old-index-hash' }, { sourceId: 'default' });
+    writeFileSync(file, '---\ntype: project\ntitle: Projection\n---\n\n# Current\n\nFile-only constraint change.\n\n## Timeline\n\n- **2026-01-02** | test — Older evidence.\n');
+    const result = await writeFactsToFence(engine,
+      { sourceId: 'default', localPath: brainDir, slug, resolutionSource: 'exact_page' },
+      [baseInput({ fact: 'The selected mode is manual.' })]);
+    let expected = parseMarkdown(readFileSync(file, 'utf8'), slug + '.md');
+    let page = await engine.getPage(slug, { sourceId: 'default' });
+    expect(page?.compiled_truth).toBe(expected.compiled_truth);
+    expect(page?.timeline).toBe(expected.timeline);
+    expect(page?.content_hash).toBe('old-index-hash');
+    await forgetFactInFence(engine, result.ids[0], { reason: 'cancelled decision' });
+    expected = parseMarkdown(readFileSync(file, 'utf8'), slug + '.md');
+    page = await engine.getPage(slug, { sourceId: 'default' });
+    expect(page?.compiled_truth).toBe(expected.compiled_truth);
+    expect(page?.timeline).toBe(expected.timeline);
+    expect(page?.content_hash).toBe('old-index-hash');
+    expect(await engine.listFactsByEntity('default', slug)).toHaveLength(0);
+  });
   test('stub-creates entity page when none exists, writes fence, stamps DB', async () => {
     const result = await writeFactsToFence(
       engine,

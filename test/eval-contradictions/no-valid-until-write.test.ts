@@ -42,6 +42,11 @@ import { join } from 'node:path';
 const VALID_UNTIL_WRITE_ALLOWLIST: ReadonlySet<string> = new Set([
   'src/core/cycle/phases/consolidate.ts',
   'src/core/facts/forget.ts',
+  // Explicit markdown-first remember supersession: close the old fence row
+  // in the same transaction as its replacement/page projection. Guarded by
+  // pageProjection; the contradiction probe remains strictly read-only.
+  'src/core/postgres-engine/facts.ts',
+  'src/core/pglite-engine/facts.ts',
   'src/core/postgres-engine.ts',
   'src/core/pglite-engine.ts',
 ]);

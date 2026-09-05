@@ -157,6 +157,7 @@ export async function writeSingleFact(
           validUntil,
           embedding,
           sessionId: input.sessionId ?? null,
+          supersedesFactId: supersedeId ?? undefined,
         },
       ],
     );
@@ -171,7 +172,6 @@ export async function writeSingleFact(
     if (!result.stubGuardBlocked && !result.legacyFallback && !result.targetUnresolvable) {
       const newId = result.ids[0];
       if (supersedeId !== null && newId !== undefined) {
-        await expireSuperseded(engine, supersedeId, newId);
         return {
           id: newId,
           status: 'superseded',
@@ -205,27 +205,6 @@ export async function writeSingleFact(
     valid_until: validUntil,
     degraded_dedup: degradedDedup,
   };
-}
-
-/**
- * Fence-path supersession bookkeeping: expire the old row through the fence
- * (strikethrough + valid_until, the same surface `forget` uses) and link
- * `superseded_by` for the audit trail. Both steps best-effort — the new fact
- * is already durably written; a partial supersede is an audit gap, not data
- * loss.
- */
-async function expireSuperseded(engine: BrainEngine, oldId: number, newId: number): Promise<void> {
-  try {
-    const { forgetFactInFence } = await import('./forget.ts');
-    await forgetFactInFence(engine, oldId, { reason: `superseded by fact #${newId}` });
-  } catch {
-    /* best-effort */
-  }
-  try {
-    await engine.executeRaw(`UPDATE facts SET superseded_by = $1 WHERE id = $2`, [newId, oldId]);
-  } catch {
-    /* best-effort */
-  }
 }
 
 function collapse(s: string): string {

@@ -1,3 +1,4 @@
+import { projectFactPageBody } from '../facts/page-projection.ts';
 /**
  * v0.31: Hot memory — facts table operations, peeled out of PGLiteEngine
  * (containment sprint C15). Free functions over a NARROW deps surface — the
@@ -340,16 +341,19 @@ export async function insertFacts(
         }
         const updated = await tx.query<{ id: number }>(
           `UPDATE facts
-              SET expired_at = now(), superseded_by = $1
+              SET expired_at = now(), valid_until = CASE WHEN $5 THEN CURRENT_DATE ELSE valid_until END, superseded_by = $1
             WHERE id = $2 AND source_id = $3
               AND entity_slug IS NOT DISTINCT FROM $4
               AND expired_at IS NULL
             RETURNING id`,
-          [newId, oldId, ctx.source_id, rows[i].entity_slug ?? null],
+          [newId, oldId, ctx.source_id, rows[i].entity_slug ?? null, Boolean(opts?.pageProjection)],
         );
         if (!updated.rows[0]) {
           throw new Error(`insertFacts: supersession target ${oldId} is missing, foreign, or inactive`);
         }
+      }
+      if (opts?.pageProjection) {
+        await projectFactPageBody(async (sql, params) => (await tx.query(sql, params)).rows, ctx.source_id, opts.pageProjection);
       }
       if (opts?.postCommitCheck) await opts.postCommitCheck();
       return out;
