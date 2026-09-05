@@ -172,7 +172,7 @@ const entity: Operation = {
   name: 'entity',
   description:
     'MEMORY VERB (v1): inspect ONE known person/company/project card — zero LLM calls, sub-100ms. ' +
-    'Resolution: alias > exact title > slug-suffix; ties break on most-recently-touched. ' +
+    'Resolution: canonical ID > alias > exact title > slug-suffix; tied cards carry ambiguous:true and require source review. ' +
     'NEVER errors on a miss: returns found:false plus near-miss suggestions with create_safety hints ' +
     '(exists | probable | unknown — whether writing a new page would duplicate). ' +
     'Routing: for facts/snippets retrieval use recall; for broad questions needing reasoning use synthesize (expensive).',
@@ -200,6 +200,7 @@ const entity: Operation = {
     return {
       protocol_version: MEMORY_VERBS_VERSION,
       found: result.found,
+      ...(result.ambiguous !== undefined ? { ambiguous: result.ambiguous } : {}),
       latency_ms: Date.now() - t0,
       ...(result.card ? { card: result.card } : {}),
       ...(result.suggestions !== undefined ? { suggestions: result.suggestions } : {}),

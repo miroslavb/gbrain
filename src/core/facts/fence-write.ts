@@ -51,6 +51,7 @@ import { extractFactsFromFenceText } from './extract-from-fence.ts';
 import { rollbackFactFile } from './file-rollback.ts';
 import { factPageProjection } from './page-projection.ts';
 import { logStubGuardEvent } from './stub-guard-audit.ts';
+import { selectExactFenceFacts } from './fence-exact-dedup.ts';
 
 /** Resolved source binding for the entity page. */
 export interface FenceTarget {
@@ -94,6 +95,8 @@ export interface FenceInputFact {
 }
 
 export interface FenceWriteResult {
+  /** Exact source/date/kind/context replays, checked under the page lock. */
+  duplicate?: number;
   /** Number of new rows written + indexed. */
   inserted: number;
   /** DB ids assigned to the inserted rows, in input order. */
@@ -379,6 +382,15 @@ export async function writeFactsToFence(
         body = stubEntityPage(target.slug, activePack?.manifest ?? null);
       }
 
+      const initialFence = parseFactsFence(body);
+      if (initialFence.warnings.length) {
+        recordWriteFailure(target.slug, target.sourceId, initialFence.warnings, filePath);
+        return { inserted: 0, ids: [], fenceWriteFailed: true };
+      }
+      const selection = await selectExactFenceFacts(engine, target, initialFence.facts, facts);
+      facts = selection.facts;
+      if (!facts.length) return { inserted: 0, ids: selection.resolveIds([]), duplicate: selection.duplicate };
+
       // 2. Upsert each fact onto the fence in input order. row_num
       //    monotonically increases (max-existing + 1 per call, append-only).
       //
@@ -542,7 +554,7 @@ export async function writeFactsToFence(
           durabilityPrewriteState,
         );
       }
-      return { inserted: result.inserted, ids: result.ids };
+      return { inserted: result.inserted, ids: selection.resolveIds(result.ids), duplicate: selection.duplicate };
     },
     { timeoutMs: 5_000 },
   );

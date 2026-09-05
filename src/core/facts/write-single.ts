@@ -182,7 +182,7 @@ export async function writeSingleFact(
       }
       return {
         id: newId,
-        status: 'inserted',
+        status: result.duplicate ? 'duplicate' : 'inserted',
         entity_slug: resolvedSlug,
         valid_until: validUntil,
         degraded_dedup: degradedDedup,

@@ -68,6 +68,39 @@ function chatStub(facts: Array<{ fact: string; kind: string; notability: 'high' 
 }
 
 describe('runFactsPipeline (extract_facts MCP op path) — response shape stability', () => {
+  test('automatic extraction retains ambiguous claims without guessing or dropping other facts', async () => {
+    const sourceId='test-quality-ambiguous';
+    await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)',[sourceId]);
+    try {
+      for(const slug of ['projects/example','hosts/example']) {
+        await engine.putPage(slug,{type:'concept',title:slug,compiled_truth:'fixture'},{sourceId});
+        await engine.setPageAliases(slug,sourceId,['example']);
+      }
+      chatStub([{fact:'Ambiguous source statement.',kind:'fact',notability:'high',entity:'example'},
+        {fact:'Explicit source statement.',kind:'fact',notability:'high',entity:'projects/example'}]);
+      const r=await runFactsPipeline('Two source statements.',{engine,sourceId,sessionId:null,
+        source:'mcp:extract_facts',sourceSlug:'meetings/quality-ambiguous'});
+      expect(r.inserted).toBe(2);
+      const rows=await engine.executeRaw<{fact:string;entity_slug:string|null;context:string}>(
+        'SELECT fact,entity_slug,context FROM facts WHERE source_id=$1 ORDER BY fact',[sourceId]);
+      expect(rows[0].entity_slug).toBeNull();expect(rows[1].entity_slug).toBe('projects/example');
+      expect(rows.every(r=>r.context==='meetings/quality-ambiguous')).toBe(true);
+    } finally { await engine.executeRaw('DELETE FROM sources WHERE id=$1',[sourceId]); }
+  });
+  test('page extraction retains its source when a fact has no entity', async () => {
+    chatStub([{ fact:'A global preference with a known origin.',kind:'preference',notability:'high' }]);
+    const r = await runFactsBackstop({slug:'meetings/quality-origin',type:'meeting',
+      compiled_truth:LONG_BODY,frontmatter:{}}, {
+      engine,sourceId:'default',sessionId:'test-quality-origin',source:'mcp:put_page',mode:'inline',
+    });
+    expect(r.mode).toBe('inline');
+    if (r.mode !== 'inline') throw new Error('Unexpected queue');
+    expect(r.inserted).toBe(1);
+    const rows = await engine.executeRaw<{context:string;entity_slug:string|null}>(
+      'SELECT context,entity_slug FROM facts WHERE id=$1',r.fact_ids);
+    expect(rows[0].context).toBe('meetings/quality-origin');
+    expect(rows[0].entity_slug).toBeNull();
+  });
   test('returns {inserted, duplicate, superseded, fact_ids} on successful extraction', async () => {
     chatStub([
       { fact: 'pipeline-shape-1', kind: 'fact', notability: 'medium', entity: null },

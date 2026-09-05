@@ -29,8 +29,8 @@ import { isUndefinedTableError } from '../utils.ts';
  * Canonicalize a free-form entity reference to a page slug.
  *
  * Resolution order:
- *   1. If `raw` is already a page slug shape (contains a "/" or matches an
- *      exact pages.slug row in this source), return it untouched.
+ *   1. Verify a qualified canonical slug first; then a unique curated alias;
+ *      then an exact root slug. Ambiguous aliases throw before fuzzy matching.
  *   2. Resolve a bare name only when prefix expansion finds one candidate.
  *   3. For multi-token input, require a high-specificity fuzzy match against
  *      pages.slug + pages.title within the source (case-insensitive).
@@ -52,7 +52,7 @@ export async function resolveEntitySlug(
 
   // 1. Exact match on slug. If raw already looks like a slug (or matches
   //    a row exactly), use it.
-  if (looksLikeSlug(trimmed)) {
+  if (looksLikeSlug(trimmed) && trimmed.includes('/')) {
     const exact = await tryExactSlug(engine, source_id, trimmed);
     if (exact) return exact;
   }
@@ -63,6 +63,13 @@ export async function resolveEntitySlug(
   //      while fuzzy is a guess. Live-page verified (page_aliases has no FK).
   const aliased = await tryAliasExact(engine, source_id, trimmed);
   if (aliased) return aliased;
+
+  // A curated alias outranks a legacy root stub. Fully qualified canonical
+  // slugs above remain exact: an alias must never hijack another page's ID.
+  if (looksLikeSlug(trimmed)) {
+    const exact = await tryExactSlug(engine, source_id, trimmed);
+    if (exact) return exact;
+  }
 
   // 2. Prefix-expansion match: when the input looks like a bare first name
   //    (no slash, no prefix, slugifies to a single short token), try
@@ -111,6 +118,10 @@ function fallbackSlugify(trimmed: string): string {
  * Fail-open on undefined-table (pre-v110 brains have no page_aliases table);
  * other errors warn once per process so degradation isn't silent.
  */
+export class AmbiguousEntityAliasError extends Error {
+  constructor() { super('Ambiguous entity alias; provide an explicit canonical source and slug'); }
+}
+
 let aliasExactWarned = false;
 async function tryAliasExact(engine: BrainEngine, source_id: string, raw: string): Promise<string | null> {
   const norm = normalizeAlias(raw);
@@ -123,8 +134,10 @@ async function tryAliasExact(engine: BrainEngine, source_id: string, raw: string
       [source_id, [...new Set(hits.map((h) => h.slug))]],
     );
     const live = [...new Set(rows.map((r) => r.slug))];
+    if (live.length > 1) throw new AmbiguousEntityAliasError();
     return live.length === 1 ? live[0] : null;
   } catch (err) {
+    if (err instanceof AmbiguousEntityAliasError) throw err;
     if (!isUndefinedTableError(err) && !aliasExactWarned) {
       aliasExactWarned = true;
       console.error(`[gbrain] alias-exact resolution degraded (falling through to fuzzy): ${err instanceof Error ? err.message : String(err)}`);
@@ -190,13 +203,18 @@ export async function resolveEntitySlugWithSource(
   if (!trimmed) return null;
 
   // Mirror resolveEntitySlug's resolution chain but tag each branch.
-  if (looksLikeSlug(trimmed)) {
+  if (looksLikeSlug(trimmed) && trimmed.includes('/')) {
     const exact = await tryExactSlug(engine, source_id, trimmed);
     if (exact) return { slug: exact, source: 'exact_page' };
   }
 
   const aliased = await tryAliasExact(engine, source_id, trimmed);
   if (aliased) return { slug: aliased, source: 'alias_exact' };
+
+  if (looksLikeSlug(trimmed)) {
+    const exact = await tryExactSlug(engine, source_id, trimmed);
+    if (exact) return { slug: exact, source: 'exact_page' };
+  }
 
   if (isBareName(trimmed)) {
     const expanded = await tryUnambiguousPrefixExpansion(engine, source_id, slugify(trimmed));

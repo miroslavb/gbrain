@@ -85,6 +85,8 @@ export interface EntitySuggestion {
 
 export interface EntityCardResult {
   found: boolean;
+  /** A legacy ranked card is a candidate, not a resolved identity, on a tie. */
+  ambiguous?: boolean;
   card?: EntityCard;
   suggestions?: EntitySuggestion[];
 }
@@ -207,6 +209,10 @@ export async function buildEntityCard(
         : 0)
       || lastTouchedMs(b.row) - lastTouchedMs(a.row));
 
+  // A caller-supplied canonical ID is stronger than a display-name alias.
+  const canonical = trimmed.includes('/') ? candidates.find(c => c.slug === trimmed) : undefined;
+  if (canonical) candidates.splice(0, candidates.length, canonical, ...candidates.filter(c => c !== canonical));
+
   if (candidates.length === 0) {
     return { found: false, suggestions: await nearMissSuggestions(engine, sourceId, trimmed, excludePrivate) };
   }
@@ -222,6 +228,7 @@ export async function buildEntityCard(
   const card = await assembleCard(engine, sourceId, best.row, opts.remote);
   return {
     found: true,
+    ambiguous: !canonical && candidates.filter(c => c.rank === best.rank).length > 1,
     card,
     ...(runnersUp.length ? { suggestions: runnersUp } : {}),
   };

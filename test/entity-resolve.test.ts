@@ -383,7 +383,7 @@ describe('alias_exact — liveness before uniqueness (v0.46.15 codex ship-review
     } as never);
     await engine.setPageAliases('people/twin-a', 'default', ['twinsy']);
     await engine.setPageAliases('people/twin-b', 'default', ['twinsy']);
-    const r = await resolveEntitySlugWithSource(engine as unknown as BrainEngine, 'default', 'twinsy');
-    expect(r!.source).not.toBe<ResolutionSource>('alias_exact');
+    await expect(resolveEntitySlugWithSource(engine as unknown as BrainEngine, 'default', 'twinsy'))
+      .rejects.toThrow('Ambiguous entity alias');
   });
 });

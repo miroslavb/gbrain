@@ -77,6 +77,17 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Common tasks
 
+- **Fact identity/provenance (host priority6):** qualified canonical IDs outrank
+  aliases; curated aliases outrank legacy root stubs. Multiple live alias holders
+  are ambiguous, never popularity-resolved on a write. Automatic extraction holds
+  the claim without entity attribution and preserves its source page; manual
+  writes require an explicit ID. `entity.ambiguous` qualifies its legacy ranked
+  card. The page backstop carries origin across queue/inline execution. Exact
+  fence replay dedup runs under the page lock without embeddings, compares
+  file/DB source/time/kind/context/session coordinates and returns IDs in input
+  order. Events/commitments and supersession bypass this shortcut. Retain
+  independent evidence; dimensions need a concrete comparison.
+
 - **Verification hygiene:** generated skill/plugin gates describe the committed
   tree. Do not make them green by staging or deleting unrelated local reference
   packs; reproduce branch health in a clean clone. Pay module-size ratchets down

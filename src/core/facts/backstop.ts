@@ -236,6 +236,10 @@ export async function runFactsBackstop(
   parsedPage: ParsedPageInput,
   ctx: FactsBackstopCtx,
 ): Promise<FactsBackstopResult> {
+  // Page writers already know the origin. Keep it on every fence/legacy row,
+  // including durable jobs (the worker re-enters here with its source page).
+  // Never substitute this page for an unresolved fact's actual entity.
+  ctx = { ...ctx, sourceSlug: ctx.sourceSlug ?? parsedPage.slug };
   const mode = ctx.mode ?? 'queue';
 
   // --- Eligibility + kill-switch gates (run before any LLM cost) ---
@@ -521,7 +525,7 @@ async function runPipelineBodyInner(
   abortSignal?: AbortSignal,
 ): Promise<{ inserted: number; duplicate: number; superseded: number; fact_ids: number[]; entity_slugs: string[]; skipped_reason?: import('./extract.ts').ExtractFailureReason }> {
   const { extractFactsFromTurnWithOutcome, FactsExtractionError } = await import('./extract.ts');
-  const { resolveEntitySlugWithSource } = await import('../entities/resolve.ts');
+  const { resolveEntitySlugWithSource, AmbiguousEntityAliasError } = await import('../entities/resolve.ts');
   const { cosineSimilarity } = await import('./classify.ts');
   const { writeFactsToFence, lookupSourceLocalPath } = await import('./fence-write.ts');
 
@@ -594,9 +598,17 @@ async function runPipelineBodyInner(
     // D4: notability filter applied post-extraction, pre-insert.
     if (filter === 'high-only' && f.notability !== 'high') continue;
 
-    const resolved = f.entity_slug
-      ? await resolveEntitySlugWithSource(ctx.engine, ctx.sourceId, f.entity_slug)
-      : null;
+    let resolved = null;
+    try {
+      resolved = f.entity_slug
+        ? await resolveEntitySlugWithSource(ctx.engine, ctx.sourceId, f.entity_slug)
+        : null;
+    } catch (error) {
+      if (!(error instanceof AmbiguousEntityAliasError)) throw error;
+      // Preserve the claim with its source, without guessing its subject or
+      // retrying/dropping an entire mixed-entity page indefinitely.
+      console.warn('[facts] ambiguous entity alias: held without entity attribution; source review required');
+    }
     const resolvedSlug = resolved?.slug ?? null;
     const resolutionSource = resolved?.source ?? null;
 
@@ -826,6 +838,7 @@ async function runPipelineBodyInner(
     }
 
     inserted += result.inserted;
+    duplicate += result.duplicate ?? 0;
     fact_ids.push(...result.ids);
     if (result.inserted > 0) fencedSlugs.add(slug);
   }
