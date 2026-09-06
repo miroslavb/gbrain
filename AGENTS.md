@@ -64,6 +64,13 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 ## Common tasks
 
+- **Sync strategy inheritance:** every sync entry resolves an explicit strategy
+  first, then the selected source's saved `config.strategy`, then `markdown`.
+  Omission must never narrow an `auto`/`code` source and soft-delete modified
+  code. Invalid selected strategies fail before imports, cleanup or bookmarks;
+  explicit narrowing remains supported and source-scoped. The `--all` CLI and
+  worker wrapper use the same validated precedence.
+
 - **Fact identity/provenance (host priority6):** qualified canonical IDs outrank
   aliases; curated aliases outrank legacy root stubs. Multiple live alias holders
   are ambiguous, never popularity-resolved on a write. Automatic extraction holds

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, statSync, lstatSync, realpathSync } from 'fs';
 import { join, relative, resolve as pathResolve } from 'path';
 import type { BrainEngine } from '../core/engine.ts';
+import { parseSyncStrategyArg, resolveSyncStrategy, selectSyncStrategy } from '../core/sync-strategy.ts';
 import { DELETE_BATCH_SIZE } from '../core/engine-constants.ts';
 import { importFile, importImageFile, isImageFilePath as isImageImportPath, MAX_FILE_SIZE } from '../core/import-file.ts';
 import { parseMarkdown } from '../core/markdown.ts';
@@ -602,6 +603,8 @@ See also:
 export { SyncLockBusyError, runBreakLock } from '../core/sync-lock.ts';
 
 export async function performSync(engine: BrainEngine, opts: SyncOpts): Promise<SyncResult> {
+  // Resolve once before any imports, cleanup, full-walk fallback or lock writes.
+  opts = { ...opts, strategy: await resolveSyncStrategy(engine, opts.strategy, opts.sourceId) };
   // v0.22.13 CODEX-2: cross-process writer lock prevents two concurrent
   // syncs from racing on the same last_commit anchor (last writer wins,
   // bookmark regresses, silent corruption).
@@ -610,11 +613,7 @@ export async function performSync(engine: BrainEngine, opts: SyncOpts): Promise<
   // (default + zion-brain) take distinct lock rows and don't serialize.
   // SYNC_LOCK_ID is now a back-compat alias for syncLockId('default').
   //
-  // v0.40.6.0 (D11 from PR #1314 review): pair the per-source lock with
-  // `withRefreshingLock` so long-running sources (media-corpus, 250K+
-  // chunks) don't lose their lock at the 30-minute TTL mid-run. Closes
-  // the bug class where a >30min sync could let a parallel acquire steal
-  // the lock and race on the final commit + bookmark write.
+  // D11/#1314: renew the source lease to prevent concurrent bookmark writers.
   //
   // skipLock is reserved for callers that already serialize via another
   // mechanism (e.g. cycle.ts holds gbrain-cycle for the broader scope).
@@ -4370,6 +4369,8 @@ Options:
                        diff is >100 files, else serial.
   --source <id>        Scope sync to a single source. Defaults to the
                        brain's default source.
+  --strategy <mode>    markdown, code or auto; defaults to the source's saved
+                       strategy, then markdown. An explicit mode wins.
   --repo <path>        Path to the brain repo. Defaults to the path
                        saved by 'gbrain init'.
   --full               Force a full re-sync (rare; usually incremental).
@@ -4600,7 +4601,7 @@ See also:
     console.error(`Invalid --max-sources value: "${maxSourcesStr}". Must be a positive integer.`);
     process.exit(1);
   }
-  const strategyArg = args.find((a, i) => args[i - 1] === '--strategy') as SyncOpts['strategy'] | undefined;
+  const strategyArg = parseSyncStrategyArg(args);
   // #753/#774: monorepo subdir-source flags. --exclude is repeatable.
   const srcSubpath = args.find((a, i) => args[i - 1] === '--src-subpath') || undefined;
   const excludePatterns: string[] = [];
@@ -4883,9 +4884,8 @@ See also:
     const onAllSigint = () => { try { allInterrupt.abort(new Error('SIGINT')); } catch { /* */ } };
 
     const runOne = async (src: typeof sources[number]): Promise<SyncResult> => {
-      const cfg = (src.config || {}) as { strategy?: 'markdown' | 'code' | 'auto' };
-      // D18/#2139: planned fan-out or a cost-gate auto-defer skips inline
-      // embedding; the post-run delivery below reports/queues each source.
+      const strategy = selectSyncStrategy(strategyArg, src.config);
+      // D18/#2139: fan-out/auto-defer skips inline embeds; delivery reports each source.
       // v0.41.13.0 (T6 / D-V3-3 / D-V4-mech-6) — per-source AbortController.
       //
       // When the user passes --timeout, each source gets its OWN
@@ -4917,7 +4917,7 @@ See also:
         includeGitignored,
         workingTree,
         sourceId: src.id,
-        strategy: cfg.strategy,
+        strategy,
         concurrency,
         signal: composeAbortSignals(allInterrupt.signal, controller?.signal),
       };
@@ -5453,9 +5453,9 @@ export async function syncOneSource(
     includeGitignored?: boolean;
     /** Untracked-gap fix: propagate --working-tree into every per-source sync. */
     workingTree?: boolean;
+    strategy?: SyncOpts['strategy'];
   },
 ): Promise<{ result: SyncResult; log: string }> {
-  const cfg = (src.config || {}) as { strategy?: 'markdown' | 'code' | 'auto' };
   const log = `\n--- Syncing source: ${src.name} ---\n`;
   const repoOpts: SyncOpts = {
     repoPath: msysToNativePath(src.local_path!), // #2955: heal MSYS /c/... before joins
@@ -5470,7 +5470,7 @@ export async function syncOneSource(
     includeGitignored: shared.includeGitignored,
     workingTree: shared.workingTree,
     sourceId: src.id,
-    strategy: cfg.strategy,
+    strategy: selectSyncStrategy(shared.strategy, src.config),
     concurrency: shared.concurrency,
     // lockId defaults to `gbrain-sync:${src.id}` via the performSync invariant (sourceId triggers it).
   };

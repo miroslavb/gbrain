@@ -1,5 +1,17 @@
 # Key files — per-file index (gbrain repo)
 
+- `src/core/sync-strategy.ts` — validated sync scope precedence: explicit argument,
+  selected source's `config.strategy`, legacy `markdown`. `performSync` resolves
+  this before imports, cleanup, full-walk fallback and lock writes, including
+  delegated/library callers. The CLI parser rejects a bare/invalid `--strategy`;
+  `--all` and `syncOneSource` use the same selector. Invalid saved settings fail
+  closed when selected; a valid explicit override remains usable. String/object
+  JSON configs are supported; source lookup is parameter-bound. This prevents an
+  omitted flag from soft-deleting modified code in a saved `auto` source, while
+  retaining explicit narrowing and source isolation. Regression coverage:
+  `test/sync-source-strategy.serial.test.ts` (real disposable Git/PGLite) and
+  `test/sync-strategy-selection.test.ts` (boundary/precedence controls).
+
 On-demand reference. CLAUDE.md (the always-loaded orientation file) routes here
 via its Reference map. **Read a file's entry before editing that file.**
 
