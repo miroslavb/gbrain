@@ -535,14 +535,24 @@ export async function findCandidateDuplicates(
     const k = Math.min(Math.max(opts?.k ?? 5, 1), 20);
     if (opts?.embedding) {
       const lit = toPgVectorLiteral(opts.embedding);
+      // Rank within the source/entity bucket. A global HNSW scan applies these
+      // filters after ANN candidate selection and can lose eligible neighbours.
+      // Materialize IDs/vectors only, then hydrate the unchanged bounded result.
       const rows = await sql<FactRowSqlShape[]>`
-        SELECT * FROM facts
-        WHERE source_id = ${source_id}
-          AND entity_slug = ${entitySlug}
-          AND expired_at IS NULL
-          AND embedding IS NOT NULL
-        ORDER BY embedding <=> ${sql.unsafe(`'${lit}'::vector`)}
-        LIMIT ${k}
+        WITH scoped AS MATERIALIZED (
+          SELECT id, embedding FROM facts
+          WHERE source_id = ${source_id}
+            AND entity_slug = ${entitySlug}
+            AND expired_at IS NULL
+            AND embedding IS NOT NULL
+        ), nearest AS (
+          SELECT id, embedding <=> ${sql.unsafe(`'${lit}'::vector`)} AS distance
+          FROM scoped
+          ORDER BY distance, id
+          LIMIT ${k}
+        )
+        SELECT f.* FROM nearest n JOIN facts f ON f.id = n.id
+        ORDER BY n.distance, n.id
       `;
       return rows.map(rowToFactPg);
     }

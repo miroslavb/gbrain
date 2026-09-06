@@ -438,6 +438,14 @@ publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork
 
 ## Fact page projection contract
 
+Fact candidate lookup on PostgreSQL must rank inside the active source/entity
+bucket. Materialize only its IDs/vectors before exact cosine ordering, then
+hydrate the selected rows. A global HNSW scan followed by scope filtering can
+omit even a known close candidate. Preserve k and the no-vector recency fallback;
+do not turn this into a brain-wide exact scan or semantic deduplication rule.
+The pg_temp regression covers closer foreign-source/entity vectors, expiry/NULL
+exclusions and the existing cap/fallback without writing persistent fixtures.
+
 Timeline writes must derive the projected timeline from the final canonical file,
 including trailing facts/takes sections. Independently appending to the previous
 DB timeline can place the same event after a fence while the file places it before.
