@@ -4,6 +4,16 @@ This is your install + operating protocol. Claude Code reads `./CLAUDE.md` autom
 Everyone else (Codex, Cursor, OpenClaw, Aider, Continue, or an LLM fetching via URL):
 start here.
 
+## Maintenance-only closure candidate (2026-09-06)
+
+This branch starts at production 260986 and contains only source-grant isolation,
+saved-source sync strategy precedence/validation, and financial seed-edge
+inference. It excludes the rejected 8962f retrieval/autocut/title changes. Verify
+the targeted source-grant, sync and graph suites plus typecheck under isolated
+GBRAIN_HOME before the parent considers deployment; a retrieval gate FAIL cannot
+be relabeled as acceptance. Runtime source grants bound ambient memory/metadata
+reads before any recall; permissive default fallback must not cross a grant.
+
 > **Becoming someone's persistent personal agent** (identity + memory + private repo)?
 > Follow [`BOOTSTRAP_FOR_AGENTS.md`](./BOOTSTRAP_FOR_AGENTS.md) — the `gbrain bootstrap`
 > flow — instead of the plain install below, then come back here for the operating
@@ -485,3 +495,7 @@ and upgrades; code-edge counts alone do not certify symbol lookup or graph tools
 Definition/reference results include `source_id` for source/path attribution.
 Regression: `test/reindex-code.test.ts`, `test/reindex-code-recovery.test.ts`,
 `test/code-def-refs.test.ts`, `test/e2e/reindex-code-kind-postgres.test.ts`.
+
+Maintenance test fixtures keep the existing v1.2.1/atom-phase manifest contract
+explicit and supply the worker wrapper’s required concurrency option. These
+fixture corrections change no runtime phase, policy, queue or model setting.

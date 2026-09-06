@@ -104,7 +104,7 @@ describe('sync inherits the selected source strategy', () => {
 
   test('worker wrapper applies explicit override and otherwise keeps saved scope', async () => {
     const src = { id: 'fixture-b', name: 'Fixture B', local_path: repo, config: { strategy: 'markdown' } };
-    const shared = { dryRun: false, full: true, noPull: true, noEmbed: true, noExtract: true, noSchemaPack: true, skipFailed: false, retryFailed: false };
+    const shared = { dryRun: false, full: true, noPull: true, noEmbed: true, noExtract: true, noSchemaPack: true, skipFailed: false, retryFailed: false, concurrency: undefined };
     await syncOneSource(engine, src, shared);
     expect(await page('fixture-b')).toBeNull();
     await syncOneSource(engine, src, { ...shared, strategy: 'auto' });

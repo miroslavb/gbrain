@@ -1,5 +1,12 @@
 # Key files — per-file index (gbrain repo)
 
+Maintenance-only closure 2026-09-06: `src/core/single-source-read.ts` resolves an
+allowed source for ambient fact and metadata reads before lookup; its callers
+in `src/core/ops/facts.ts` and `src/core/facts/meta-hook.ts` must preserve explicit
+source grants. The separate sync-strategy and investment-inference entries below
+document the other two repair boundaries. This maintenance branch contains no
+title/autocut changes from the failed 8962f retrieval candidate.
+
 - `src/core/sync-strategy.ts` — validated sync scope precedence: explicit argument,
   selected source's `config.strategy`, legacy `markdown`. `performSync` resolves
   this before imports, cleanup, full-walk fallback and lock writes, including

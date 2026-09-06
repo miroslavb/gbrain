@@ -249,14 +249,14 @@ describe('v0.41 T4: gbrain-everything meta-pack shape', () => {
 // #2117 — gbrain-base-v2 must ship the NER inference regexes. gbrain-base
 // (v1) ships 4 (founded/invested_in/advises/works_at); pre-fix v2 shipped
 // ZERO, so extract-ner returned pack_unavailable and NER was inert for any
-// brain on the default successor pack. The explicit `phases: []` documents
-// that lens-pack cycle phases (extract_atoms, synthesize_concepts) stay
-// opt-in via lens packs or a manifest edit.
+// brain on the default successor pack. The reviewed host manifest additionally
+// declares extract_atoms, whose page-level opt-in and safety/budget gates remain
+// independently tested; it does not enable synthesize_concepts by default.
 describe('#2117: gbrain-base-v2 ships link-inference regexes + explicit phases', () => {
   const pack = loadPack('gbrain-base-v2');
 
-  test('version bumped to 1.2.0 (open-loop link verbs owes_to/awaiting_reply_from)', () => {
-    expect(pack.version).toBe('1.2.0');
+  test('host successor pack pins the reviewed 1.2.1 taxonomy', () => {
+    expect(pack.version).toBe('1.2.1');
   });
 
   test('declares the 4 v1 inference regexes (founded/invested_in/advises/works_at)', () => {
@@ -269,8 +269,8 @@ describe('#2117: gbrain-base-v2 ships link-inference regexes + explicit phases',
     }
   });
 
-  test('declares an explicit (empty) phases list — lens packs opt in', () => {
+  test('host pack declares only the gated atom extraction phase', () => {
     expect(pack.phases).toBeDefined();
-    expect(pack.phases).toEqual([]);
+    expect(pack.phases).toEqual(['extract_atoms']);
   });
 });
