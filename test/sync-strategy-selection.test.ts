@@ -19,9 +19,22 @@ describe('sync strategy boundary validation', () => {
     });
   }
 
-  test('malformed source config is never silently reinterpreted as markdown', () => {
-    for (const invalid of ['{', 'null', '[]', 'false', 42, []]) {
-      expect(() => selectSyncStrategy(undefined, invalid)).toThrow('Invalid source config');
+  test('legacy configs without a recoverable strategy retain heal-on-write eligibility', () => {
+    for (const legacy of ['{', 'null', '[]', 'false', 42, [], null, false, '"not-an-object"']) {
+      expect(selectSyncStrategy(undefined, legacy)).toBe('markdown');
+    }
+  });
+
+  test('recovers nested strings and array fragments without dropping a saved code strategy', () => {
+    expect(selectSyncStrategy(undefined, JSON.stringify(JSON.stringify({ strategy: 'auto' })))).toBe('auto');
+    expect(selectSyncStrategy(undefined, [false, { strategy: 'markdown' }, '{"strategy":"code"}'])).toBe('code');
+    expect(selectSyncStrategy(undefined, JSON.stringify([{ strategy: 'auto' }, null]))).toBe('auto');
+  });
+
+  test('a recovered invalid strategy still fails closed unless explicitly overridden', () => {
+    for (const config of [JSON.stringify(JSON.stringify({ strategy: 'typo' })), [null, { strategy: 'auto' }, { strategy: false }]]) {
+      expect(() => selectSyncStrategy(undefined, config)).toThrow('Invalid sync strategy');
+      expect(selectSyncStrategy('auto', config)).toBe('auto');
     }
   });
 

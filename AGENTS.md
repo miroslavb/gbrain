@@ -80,6 +80,10 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   code. Invalid selected strategies fail before imports, cleanup or bookmarks;
   explicit narrowing remains supported and source-scoped. The `--all` CLI and
   worker wrapper use the same validated precedence.
+  Use the canonical source-config parser before selecting a saved strategy:
+  historical scalar/null configs without settings remain eligible for sync's
+  heal-on-write, and recoverable nested strings/array fragments retain settings.
+  A recovered invalid `strategy` still fails before sync mutations.
 
 - **Fact identity/provenance (host priority6):** qualified canonical IDs outrank
   aliases; curated aliases outrank legacy root stubs. Multiple live alias holders

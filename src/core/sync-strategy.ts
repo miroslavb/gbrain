@@ -1,5 +1,6 @@
 import type { BrainEngine } from './engine.ts';
 import type { SyncStrategy } from './sync.ts';
+import { parseSourceConfig } from './sources-load.ts';
 
 function checkedStrategy(value: unknown, origin: string): SyncStrategy | undefined {
   if (value === undefined || value === 'markdown' || value === 'code' || value === 'auto') return value;
@@ -10,15 +11,10 @@ function checkedStrategy(value: unknown, origin: string): SyncStrategy | undefin
 export function selectSyncStrategy(explicit: unknown, sourceConfig: unknown): SyncStrategy {
   const override = checkedStrategy(explicit, '--strategy');
   if (override !== undefined) return override;
-  let config = sourceConfig ?? {};
-  if (typeof config === 'string') {
-    try { config = JSON.parse(config); }
-    catch { throw new Error('Invalid source config: expected a JSON object.'); }
-  }
-  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
-    throw new Error('Invalid source config: expected a JSON object.');
-  }
-  return checkedStrategy((config as Record<string, unknown>).strategy, 'source config') ?? 'markdown';
+  // Match existing config readers so legacy scalar/array shapes can reach
+  // sync's heal-on-write path. A recovered strategy still requires validation.
+  const config = parseSourceConfig(sourceConfig);
+  return checkedStrategy(config.strategy, 'source config') ?? 'markdown';
 }
 
 /** Preserve missing versus explicitly malformed CLI flags, including bare flags. */

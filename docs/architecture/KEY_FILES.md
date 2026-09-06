@@ -13,7 +13,9 @@ title/autocut changes from the failed 8962f retrieval candidate.
   delegated/library callers. The CLI parser rejects a bare/invalid `--strategy`;
   `--all` and `syncOneSource` use the same selector. Invalid saved settings fail
   closed when selected; a valid explicit override remains usable. String/object
-  JSON configs are supported; source lookup is parameter-bound. This prevents an
+  JSON configs use `parseSourceConfig`, preserving nested-string/array-fragment
+  recovery and scalar/null heal-on-write; only an actual invalid strategy is
+  rejected. Source lookup is parameter-bound. This prevents an
   omitted flag from soft-deleting modified code in a saved `auto` source, while
   retaining explicit narrowing and source isolation. Regression coverage:
   `test/sync-source-strategy.serial.test.ts` (real disposable Git/PGLite) and
