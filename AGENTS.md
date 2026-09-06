@@ -143,6 +143,14 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   and must not make an installed unit look absent. The canonical host script is
   `scripts/host/autopilot-watchdog.sh`; deploy it to
   `/root/.gbrain/autopilot-watchdog.sh` and keep the exact 10-minute cron row.
+- **Investment inference:** bundled schema packs require a financial phrase
+  such as `seed funding` or `seed capital`; bare `seeded` also describes data,
+  aliases and other initialization. Preserve genuine investment cues, including
+  when technical words appear nearby. Pack regexes run before legacy inference,
+  so precision regressions must test the bundled manifests and page extraction.
+  Updating a pack does not remove historical graph edges; repair those only
+  within the separately reviewed scope.
+
 - **Duplicate-content signal:** doctor counts every same-source content-hash
   group, but dependency trees and exact declared distribution/fixture/locale
   replicas are non-actionable details. Any other distinct-slug group remains

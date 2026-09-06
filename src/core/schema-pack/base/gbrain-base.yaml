@@ -339,7 +339,9 @@ link_types:
 
   - name: invested_in
     inference:
-      regex: \b(invested in|backed|seeded|funded|wrote a check)\b
+      # Bare "seeded" also describes data, aliases and gardens. Require an
+      # explicit financial seed phrase; other investment cues remain.
+      regex: \b(invested in|backed|funded|wrote a check|seed[- ](?:funding|capital|investment|round))\b
 
   - name: advises
     inference:
