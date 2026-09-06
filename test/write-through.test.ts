@@ -44,6 +44,9 @@ beforeEach(async () => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gbrain-wt-helper-'));
   brainDir = path.join(tmpRoot, 'brain');
   fs.mkdirSync(brainDir, { recursive: true });
+  // Pin the scanner's root locally, as the scoped-source fixtures do below.
+  // An ancestor /tmp/.git must not turn this fixture into a scoped subdirectory.
+  fs.mkdirSync(path.join(brainDir, '.git'));
 });
 
 afterEach(() => {

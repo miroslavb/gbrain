@@ -713,3 +713,14 @@ permission to run them — see the "run without asking" rule above.
 
 Never leave `gbrain-test-pg` running. If you find a stale one from a previous run,
 stop and remove it before starting a new one.
+
+
+## Production maintenance acceptance
+
+Run supported unit, slow, verify and PostgreSQL E2E wrappers on the frozen
+production candidate itself, preserving its deployed search policy. Use an
+allowlisted keyless environment and a private disposable PostgreSQL database,
+with owned-container cleanup; production is never the E2E target. Preserve failed
+runs and explicit provider/optional skips. Migration-lifecycle fixtures disable
+the current PGLite snapshot while connecting, so the empty/rewound-state premise
+is exercised. World-only fact visibility remains separate from source grants.

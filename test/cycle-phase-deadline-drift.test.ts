@@ -75,7 +75,8 @@ describe('propose_takes deadline < job timeout (#4168)', () => {
     // test-reads-source-ok: this is a deliberate CLI-to-cycle structural
     // wiring guard; the runtime behavior otherwise requires a full dream run.
     const dream = readFileSync(new URL('../src/commands/dream.ts', import.meta.url), 'utf-8');
-    expect(dream).toContain("phase !== 'propose_takes'");
+    // Runtime phase confinement is exercised by test/dream.test.ts, including
+    // multi-phase rejection. Do not pin the old single-phase variable spelling.
     expect(dream).toContain('proposeTakesPageLimit: opts.proposeMaxPages ?? undefined');
     expect(cycleSrc).toContain('pageLimit: opts.proposeTakesPageLimit');
   });

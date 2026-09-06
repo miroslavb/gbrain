@@ -503,3 +503,14 @@ Regression: `test/reindex-code.test.ts`, `test/reindex-code-recovery.test.ts`,
 Maintenance test fixtures keep the existing v1.2.1/atom-phase manifest contract
 explicit and supply the worker wrapper’s required concurrency option. These
 fixture corrections change no runtime phase, policy, queue or model setting.
+
+## Production maintenance validation boundary
+
+The production validation candidate retains the deployed search/autocut/title/cache
+implementation and its tests. Regenerate CLI flags and llms artifacts from this
+checkout; removing a duplicate known-config entry preserves the accepted key set.
+Current-contract fixtures pin the pre-shutdown clock, explicitly enable proposal
+work only inside keyless disposable tests, preserve world-only/source isolation,
+and disable the latest-schema snapshot only for migration-lifecycle assertions.
+Run full unit, slow, verify and isolated PostgreSQL E2E against this exact frozen
+candidate. Results from a separate retrieval experiment cannot certify production.

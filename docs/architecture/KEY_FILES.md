@@ -697,3 +697,8 @@ operation: `skills/google-loops/SKILL.md`.
 - `src/commands/integrations-file-helpers.ts` — pure file hashing and static manifest target checks used by integrations; kept separate to preserve the command module size ceiling.
 
 - `src/core/facts/fence-exact-dedup.ts` — under-lock exact replay selection for fence-write. Requires matching active file/DB coordinates, no typed metrics/dimensions; preserves sources, days, kind, confidence, notability, context/session and input ID order. Events/commitments and supersession bypass it. `backstop.ts` supplies the originating page slug and holds ambiguous extracted entities unresolved. Tested by the shared fact-quality contract on both engines.
+
+- `src/core/config.ts` — `KNOWN_CONFIG_KEYS` contains each accepted exact key once;
+  deduplicating a repeated entry must not change the key set or any config value.
+  `src/core/cli-flag-registry.generated.ts` is rebuilt from the current handlers;
+  keep existing enrichment language flags admitted without hand-editing output.

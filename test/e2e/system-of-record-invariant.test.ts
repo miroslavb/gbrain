@@ -23,10 +23,9 @@
  *   6. Snapshot again; diff. Assert row sets match.
  *
  * Plus three supporting tests:
- *   - Chunker strip: search for the verbatim text of a private fact
- *     must return zero matches (Codex R2-#1 P0).
- *   - get_page privacy strip: ctx.remote=true strips private rows
- *     from the response body (Codex R2-#5).
+ *   - World-only migration: legacy private labels normalize to world in
+ *     search and get_page, including a fence below the timeline sentinel.
+ *   - Source-scoped get_page still excludes a same-slug foreign source.
  *   - serializeMarkdown round-trip: page → import → DB state matches
  *     re-extract from re-rendered markdown (the canonical idempotency
  *     property that lets gbrain rebuild work).
@@ -350,13 +349,9 @@ ${remoteBody}`, { noEmbed: true, sourceId: 'default', remote: true });
     expect(parseFactsFence(after?.compiled_truth ?? '').facts).toHaveLength(1);
   });
 
-  // #3625 escalation: splitBody() routes a `## Facts` fence placed below the
-  // timeline sentinel into page.timeline instead of compiled_truth. The
-  // get_page strip trigger above only covered compiled_truth, so an
-  // untrusted remote caller could read a private fence row verbatim via the
-  // `timeline` field. Exercises the real get_page operation handler (not
-  // just the stripFactsFence helper) with ctx.remote=true.
-  test('a below-sentinel facts fence in page.timeline is stripped for untrusted remote readers too', async () => {
+  // #3625 below-sentinel path still needs normalization after the world-only
+  // migration. Source boundaries remain independent of legacy visibility labels.
+  test('a below-sentinel facts fence normalizes legacy visibility while retaining source isolation', async () => {
     const slug = 'people/timeline-fence-leak';
     await engine.putPage(slug, {
       title: 'Timeline Fence Leak',
@@ -377,9 +372,17 @@ ${remoteBody}`, { noEmbed: true, sourceId: 'default', remote: true });
     const ctx = { engine, remote: true, sourceId: 'default' } as unknown as OperationContext;
     const remote = await operationsByName.get_page.handler(ctx, { slug }) as { timeline?: string };
     expect(remote.timeline).toContain('WORLD_TIMELINE_ROW');
-    expect(remote.timeline).not.toContain('PRIVATE_TIMELINE_ROW');
+    expect(remote.timeline).toContain('PRIVATE_TIMELINE_ROW');
+    expect(remote.timeline).not.toContain('| private |');
 
-    // Local CLI callers still see the full fence, unaffected by the strip.
+    // A same-slug foreign source must not enter this source-scoped response.
+    await engine.executeRaw("INSERT INTO sources (id,name) VALUES ('timeline-foreign','Timeline Foreign')");
+    await engine.putPage(slug, { type: 'person', title: 'Foreign', compiled_truth: 'Foreign body', timeline: 'FOREIGN_TIMELINE_ROW' }, { sourceId: 'timeline-foreign' });
+    const scoped = await operationsByName.get_page.handler(ctx, { slug }) as { timeline?: string };
+    expect(scoped.timeline).toContain('PRIVATE_TIMELINE_ROW');
+    expect(scoped.timeline).not.toContain('FOREIGN_TIMELINE_ROW');
+
+    // Local CLI callers use the same world-only projection.
     const local = await operationsByName.get_page.handler(
       { engine, remote: false, sourceId: 'default' } as unknown as OperationContext,
       { slug },

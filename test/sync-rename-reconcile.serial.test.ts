@@ -2500,7 +2500,12 @@ describe('#3583 review: GATE25 — the upgrade path for someone already wedged b
 describe('rename destination import: an errored skip must not checkpoint the rename as done', () => {
   test('a frontmatter slug-authority rejection at the destination is retried, never falsely checkpointed', async () => {
     const { performSync } = await import('../src/commands/sync.ts');
-    const repo = mkRepo({ 'people/alpha.md': personMd('Alpha', 'Alpha is a person.') });
+    // Retain enough content that adding one frontmatter field is a rename,
+    // not delete+add under Git's similarity threshold. Assert that premise below.
+    const originalBody = 'Alpha is a person.\n\n' +
+      'This stable biography records the same responsibilities, work history, ' +
+      'and project context before and after the file is renamed.';
+    const repo = mkRepo({ 'people/alpha.md': personMd('Alpha', originalBody) });
     await performSync(engine, { repoPath: repo, ...SYNC_OPTS });
     expect(await engine.getPage('people/alpha')).not.toBeNull();
 
@@ -2515,11 +2520,13 @@ describe('rename destination import: an errored skip must not checkpoint the ren
     execSync('git mv people/alpha.md people/beta.md', { cwd: repo, stdio: 'pipe' });
     writeFileSync(join(repo, 'people/beta.md'), [
       '---', 'type: person', 'title: Alpha', 'slug: totally-different', '---',
-      '', 'Alpha is a person.',
+      '', originalBody,
     ].join('\n'));
     execSync('git add -A && git commit -m "rename alpha to beta, corrupted frontmatter"', {
       cwd: repo, stdio: 'pipe',
     });
+    expect(execSync('git diff --name-status -M HEAD^ HEAD', { cwd: repo, stdio: 'pipe' }).toString().trim())
+      .toMatch(/^R\d+\tpeople\/alpha\.md\tpeople\/beta\.md$/);
 
     const first = await performSync(engine, { repoPath: repo, ...SYNC_OPTS });
     expect(first.status).toBe('blocked_by_failures');
@@ -2529,7 +2536,7 @@ describe('rename destination import: an errored skip must not checkpoint the ren
     // rejected file): compiled_truth still reads the pre-rename body.
     const afterFirst = await engine.getPage('people/beta');
     expect(afterFirst).not.toBeNull();
-    expect(afterFirst?.compiled_truth).toBe('Alpha is a person.');
+    expect(afterFirst?.compiled_truth).toBe(originalBody);
 
     // Discriminating assertion: without importErrored gating the checkpoint,
     // run 1 falsely marks `to` as done despite the recorded failure, so this
@@ -2539,7 +2546,7 @@ describe('rename destination import: an errored skip must not checkpoint the ren
     // is never falsely marked, so compiled_truth still has not moved.
     const second = await performSync(engine, { repoPath: repo, ...SYNC_OPTS });
     expect(second.status).toBe('blocked_by_failures');
-    expect((await engine.getPage('people/beta'))?.compiled_truth).toBe('Alpha is a person.');
+    expect((await engine.getPage('people/beta'))?.compiled_truth).toBe(originalBody);
 
     // Fixing the content and re-syncing must actually materialize the fixed
     // content — proving the target was never falsely banked as complete.

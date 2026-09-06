@@ -1145,7 +1145,6 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'voyage_api_key',
   'dashscope_api_key',
   'litellm_api_key',
-  'together_api_key',
   'google_api_key',
   'azure_openai_api_key',
   'azure_openai_endpoint',

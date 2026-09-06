@@ -130,6 +130,12 @@ describe.skipIf(SKIP)('keyless `gbrain dream` exits 0 (nightly-cron contract)', 
     const init = gbrain(['init', '--migrate-only'], 120_000);
     if (init.exitCode !== 0) throw new Error(`init --migrate-only failed (${init.exitCode}):\n${init.stderr.slice(-2000)}`);
 
+    // The host fork defaults proposal work OFF. Opt in only in this disposable
+    // keyless fixture so the missing-provider branch is actually exercised;
+    // a config-disabled skip would bypass the contract this suite proves.
+    const proposal = gbrain(['config', 'set', 'cycle.propose_takes.enabled', 'true'], 60_000);
+    if (proposal.exitCode !== 0) throw new Error('could not enable fixture proposal phase');
+
     // A real checkout with ONE REAL PAGE (anti-vacuity: an engine-only brain
     // skips the whole filesystem half of the cycle; the documented install
     // has a brain repo, so the sync/lint/extract phases must run keyless

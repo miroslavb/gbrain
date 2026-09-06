@@ -15,6 +15,7 @@ import {
   rerank,
   __setRerankTransportForTests,
   _resetSunsetWarningsForTest,
+  __setSunsetClockForTests,
 } from '../../src/core/ai/gateway.ts';
 
 function mockResp(json: unknown, status = 200): Response {
@@ -28,6 +29,9 @@ let stderrChunks: string[] = [];
 let origWrite: typeof process.stderr.write;
 
 beforeEach(() => {
+  // This suite exercises the warning BEFORE shutdown. The separate sunset
+  // date-matrix suite covers post-deadline fail-fast behavior.
+  __setSunsetClockForTests(() => new Date('2026-09-03T12:00:00Z'));
   _resetSunsetWarningsForTest();
   stderrChunks = [];
   origWrite = process.stderr.write.bind(process.stderr);
@@ -45,6 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __setSunsetClockForTests(null);
   process.stderr.write = origWrite;
   __setRerankTransportForTests(null);
   _resetSunsetWarningsForTest();

@@ -661,7 +661,10 @@ describe('local extract-atoms config knobs', () => {
     const captured: string[] = [];
     const capturingChat = async (o: ChatOpts): Promise<ChatResult> => {
       captured.push(String(o.messages[0]?.content ?? ''));
-      const text = '[{"title":"knob-atom","atom_type":"insight","body":"b"}]';
+      // The fixture tests discovery/payload budgets, not atom creation. An
+      // empty successful extraction is valid; body="b" is correctly rejected
+      // by the standalone-claim safety gate and never counts as processed.
+      const text = '[]';
       return {
         text,
         blocks: [{ type: 'text', text }],

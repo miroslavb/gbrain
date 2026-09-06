@@ -23,7 +23,8 @@ function mockEngine(overrides: Partial<Record<string, any>> = {}): BrainEngine {
   const track = (method: string) => (...args: any[]) => {
     calls.push({ method, args });
     if (overrides[method]) return overrides[method](...args);
-    return Promise.resolve(null);
+    // executeRaw's row contract also covers codePageType's transaction lookup.
+    return Promise.resolve(method === 'executeRaw' ? [] : null);
   };
 
   const engine = new Proxy({} as any, {
@@ -101,6 +102,9 @@ describe('importFile', () => {
     const calls = (engine as any)._calls;
     const putCall = calls.find((c: any) => c.method === 'putPage');
     const chunkCall = calls.find((c: any) => c.method === 'upsertChunks');
+    expect(calls.find((c: any) => c.method === 'executeRaw' && c.args[0].includes('FOR UPDATE'))?.args[1])
+      .toEqual([result.slug, 'default']);
+    expect(putCall.args[1].page_kind).toBe('code');
     expect(putCall.args[1].compiled_truth).toContain("'\\0'");
     expect(putCall.args[1].compiled_truth).not.toContain('\0');
     expect(chunkCall.args[1].every((chunk: { chunk_text: string }) => !chunk.chunk_text.includes('\0'))).toBe(true);

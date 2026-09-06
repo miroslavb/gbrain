@@ -42,10 +42,22 @@ import {
   embeddingMismatchMessage,
 } from '../../src/core/embedding-dim-check.ts';
 
+// Migration lifecycle assertions require a real empty/rewound engine. A latest-schema
+// snapshot intentionally skips initSchema and would invalidate those premises.
+async function connectWithoutSnapshot(engine: PGLiteEngine, config: Parameters<PGLiteEngine['connect']>[0]) {
+  const previous = process.env.GBRAIN_PGLITE_SNAPSHOT;
+  delete process.env.GBRAIN_PGLITE_SNAPSHOT;
+  try { await engine.connect(config); }
+  finally {
+    if (previous === undefined) delete process.env.GBRAIN_PGLITE_SNAPSHOT;
+    else process.env.GBRAIN_PGLITE_SNAPSHOT = previous;
+  }
+}
+
 describe('v0.28.5 cluster A — PGLite upgrade wedge regression', () => {
   test('pre-v0.20 brain (missing v0.20+v0.26.3+v0.27 columns) re-runs initSchema cleanly', async () => {
     const engine = new PGLiteEngine();
-    await engine.connect({});
+    await connectWithoutSnapshot(engine, {});
     try {
       // Build a fresh LATEST brain.
       await engine.initSchema();
@@ -130,7 +142,7 @@ describe('v0.28.5 cluster A — PGLite upgrade wedge regression', () => {
   test('hasPendingMigrations correctly reports state across the upgrade lifecycle', async () => {
     const { hasPendingMigrations } = await import('../../src/core/migrate.ts');
     const engine = new PGLiteEngine();
-    await engine.connect({});
+    await connectWithoutSnapshot(engine, {});
     try {
       // Fresh brain → no version row yet → defensive true.
       expect(await hasPendingMigrations(engine)).toBe(true);
@@ -165,7 +177,7 @@ describe('v0.28.5 cluster B — embedding dim corruption regression', () => {
     });
 
     const engine = new PGLiteEngine();
-    await engine.connect({});
+    await connectWithoutSnapshot(engine, {});
     try {
       await engine.initSchema();
       const dim = await readContentChunksEmbeddingDim(engine);
@@ -190,7 +202,7 @@ describe('v0.28.5 cluster B — embedding dim corruption regression', () => {
     });
 
     const engine = new PGLiteEngine();
-    await engine.connect({});
+    await connectWithoutSnapshot(engine, {});
     try {
       // initSchema must NOT crash even though the HNSW index would otherwise
       // refuse a 2048-d vector column.
@@ -219,7 +231,7 @@ describe('v0.28.5 cluster B — embedding dim corruption regression', () => {
 describe('v0.28.5 A4 — existing-brain dim mismatch loud failure', () => {
   test('readContentChunksEmbeddingDim correctly identifies a brain at 1536 + mismatch message inlines all four steps', async () => {
     const engine = new PGLiteEngine();
-    await engine.connect({});
+    await connectWithoutSnapshot(engine, {});
     try {
       // v0.36.0.0: default flipped to 1280; explicitly configure the gateway
       // to 1536 so the test still exercises the "existing brain at 1536d"
