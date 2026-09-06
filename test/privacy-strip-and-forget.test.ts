@@ -1,11 +1,11 @@
 /**
- * v0.32.2 commit 8 — 3-layer privacy strip + forget-as-fence tests.
+ * World-only fact projection, private take stripping, and durable forget history.
  *
  * Three layers under test:
- *   - Layer A (chunker): chunkText strips private fact rows so private
- *     text never reaches content_chunks (Codex R2-#1 P0)
- *   - Layer B (get_page privacy trigger): stripFactsFence + stripTakesFence
- *     fire when ctx.remote === true (Codex R2-#5 closes the subagent hole)
+ *   - Layer A (chunker): chunkText normalizes legacy private facts to world;
+ *     private takes remain excluded from content_chunks
+ *   - Layer B: get_page/fetch project legacy facts in body and timeline;
+ *     private takes retain their independent holder boundary
  *   - Forget-as-fence: forgetFactInFence rewrites the fence row instead of
  *     the DB-only expire path so forgets survive gbrain rebuild (Codex R2-#3)
  *
@@ -116,11 +116,8 @@ Body text.`;
 // Layer B: get_page projects legacy fact rows into the shared world view
 // ─────────────────────────────────────────────────────────────────
 //
-// The trigger logic lives in src/core/operations.ts (the get_page
-// handler) and is unit-tested via direct stripFactsFence + the
-// `ctx.remote === true` check pattern. Full operations-dispatch
-// integration test for get_page over MCP lives in
-// test/e2e/system-of-record-invariant.test.ts (commit 10).
+// Exercise both the pure projection and the real get_page/fetch handlers.
+// remote-privacy-sweep.test.ts owns the shared dispatch envelope coverage.
 
 describe('Layer B — get_page world-only fact projection', () => {
   test('stripFactsFence({keepVisibility:["world"]}) retains and normalizes legacy rows', async () => {
@@ -135,14 +132,9 @@ describe('Layer B — get_page world-only fact projection', () => {
     expect(stripped).not.toContain('| private |');
   });
 
-  // #3625 Codex review Critical finding: get_page/fetch_page only ever
-  // stripped compiled_truth. A `## Facts` fence written below the
-  // `<!-- timeline -->` sentinel (splitBody's split boundary) lands in the
-  // `timeline` column instead — pre-existing, independent of the #3625
-  // reconciliation guard — and was returned to remote/untrusted callers
-  // completely unstripped, leaking private fact rows through both the
-  // `timeline` field and the serialized `content` round-trip field.
-  describe('#3625 Critical: get_page/fetch_page must ALSO strip the timeline column', () => {
+  // Fences below the timeline delimiter must receive the same projection
+  // as compiled_truth, including the assembled content round-trip field.
+  describe('timeline and body share the world-only projection', () => {
     function makeCtx(opts: Partial<OperationContext> = {}): OperationContext {
       return {
         engine,
@@ -181,7 +173,7 @@ ${FACTS_FENCE_BEGIN}
 ${FACTS_FENCE_END}
 `;
 
-    test('get_page: remote caller sees the world row but never the private row, in timeline OR content', async () => {
+    test('get_page: local and remote see both rows normalized in timeline and content', async () => {
       const putPageOp = operations.find((o) => o.name === 'put_page')!;
       const getPageOp = operations.find((o) => o.name === 'get_page')!;
       await putPageOp.handler(makeCtx({ remote: false }), {
@@ -191,7 +183,7 @@ ${FACTS_FENCE_END}
 
       // Sanity: confirm the fence really landed in timeline, not
       // compiled_truth — otherwise this test would pass for the wrong
-      // reason (the pre-existing compiled_truth strip would cover it).
+      // reason (the compiled_truth projection alone would cover it).
       const raw = await engine.getPage('people/alice-timeline-leak');
       expect(parseFactsFence(raw!.compiled_truth ?? '').facts).toHaveLength(0);
       expect((raw!.timeline ?? '')).toContain('PRIVATE_TIMELINE_FACT');
@@ -201,17 +193,19 @@ ${FACTS_FENCE_END}
         include_content: true,
       }) as { timeline?: string; content?: string };
       expect(remote.timeline).toContain('PUBLIC_TIMELINE_FACT');
-      expect(remote.timeline).not.toContain('PRIVATE_TIMELINE_FACT');
-      expect(remote.content).not.toContain('PRIVATE_TIMELINE_FACT');
+      expect(remote.timeline).toContain('PRIVATE_TIMELINE_FACT');
+      expect(remote.timeline).not.toContain('| private |');
+      expect(remote.content).toContain('PRIVATE_TIMELINE_FACT');
+      expect(remote.content).not.toContain('| private |');
 
-      // Control: a trusted local caller still sees everything, unstripped.
+      // Control: the local caller sees the same complete fact content.
       const local = await getPageOp.handler(makeCtx({ remote: false }), {
         slug: 'people/alice-timeline-leak',
       }) as { timeline?: string };
       expect(local.timeline).toContain('PRIVATE_TIMELINE_FACT');
     });
 
-    test('fetch_page: remote caller\'s serialized text never contains the private timeline row', async () => {
+    test('fetch_page: serialized text retains and normalizes the legacy timeline row', async () => {
       const putPageOp = operations.find((o) => o.name === 'put_page')!;
       const fetchPageOp = operations.find((o) => o.name === 'fetch')!;
       await putPageOp.handler(makeCtx({ remote: false }), {
@@ -223,22 +217,20 @@ ${FACTS_FENCE_END}
         id: 'people/bob-timeline-leak',
       }) as { text?: string };
       expect(remote.text).toContain('PUBLIC_TIMELINE_FACT');
-      expect(remote.text).not.toContain('PRIVATE_TIMELINE_FACT');
+      expect(remote.text).toContain('PRIVATE_TIMELINE_FACT');
+      expect(remote.text).not.toContain('| private |');
     });
   });
 });
 
 // ─────────────────────────────────────────────────────────────────
-// #2044 / #4548 row-level visibility-aware fence merge on remote
-// write-back. A remote get_page strips non-'world' rows before the caller
-// ever sees them, so those rows being absent from a put_page write-back is
-// NOT an intentional delete — they are restored row-by-row. World-visible
-// rows the caller could see are never restored: their edits/deletions are
-// the caller's, honored as written (#4554). Trusted local callers see the
-// full fence, so the merge never fires for them.
+// Every valid fact row is visible on this host. Remote write-back preserves
+// the caller's edits and deletions; missing legacy-private rows are no longer
+// inferred to be hidden and must never be resurrected. Malformed input stays
+// byte-preserved with parser warnings rather than being silently repaired.
 // ─────────────────────────────────────────────────────────────────
 
-describe('#4548 row-level visibility-aware fence merge (remote write-back)', () => {
+describe('world-only facts remote write-back', () => {
   function makeCtx(opts: Partial<OperationContext> = {}): OperationContext {
     return {
       engine,
@@ -262,7 +254,7 @@ describe('#4548 row-level visibility-aware fence merge (remote write-back)', () 
     await putPageOp().handler(makeCtx({ remote: true }), { slug, content: edit(remote.content ?? '') });
   }
 
-  test('P1 (#4548): mixed world+private fence — the hidden private row is RESTORED on a remote prose-edit round-trip', async () => {
+  test('mixed legacy fence retains every visible row on a remote prose-edit round-trip', async () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const slug = 'people/p1-mixed-merge';
@@ -289,7 +281,7 @@ describe('#4548 row-level visibility-aware fence merge (remote write-back)', () 
     }
   });
 
-  test('mixed adds+edits+deletes: world-row edit + world-row delete honored, hidden row restored, caller add kept', async () => {
+  test('mixed adds+edits+deletes honor visible edits, retained legacy rows, and additions', async () => {
     const slug = 'people/mixed-adds-edits-deletes';
     const fence = FENCE_BODY(
       `| 1 | PUBLIC_A | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
@@ -308,21 +300,37 @@ describe('#4548 row-level visibility-aware fence merge (remote write-back)', () 
     const parsed = parseFactsFence(raw?.compiled_truth ?? '');
     expect(parsed.facts.map((f) => [f.rowNum, f.claim])).toEqual([
       [1, 'PUBLIC_A_EDITED'],   // caller's edit of a visible row respected
-      [2, 'SECRET_B'],          // hidden row restored at its stable rowNum
+      [2, 'SECRET_B'],          // retained visible legacy row keeps its stable rowNum
       [4, 'CALLER_ADDED_FACT'], // caller's addition kept
     ]);
     expect(raw?.compiled_truth ?? '').not.toContain('PUBLIC_C'); // visible deletion honored
   });
 
-  test('caller add colliding with a hidden rowNum: hidden row keeps its stable number, the add is renumbered', async () => {
+  test('deleting a visible legacy-private row remotely never resurrects it', async () => {
+    const slug = 'people/legacy-visible-delete';
+    await putPageOp().handler(makeCtx(), { slug, content: FENCE_BODY(
+      `| 1 | RETAINED_WORLD_ROW | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
+| 2 | DELETED_LEGACY_ROW | fact | 1.0 | private | high | 2026-01-02 |  | s |  |`,
+    ) });
+    await remoteRoundTrip(slug, content => {
+      expect(content).toContain('DELETED_LEGACY_ROW');
+      expect(content).not.toContain('| private |');
+      return content.split('\n').filter(line => !line.includes('DELETED_LEGACY_ROW')).join('\n');
+    });
+    const page = await engine.getPage(slug, { sourceId: 'default' });
+    expect(parseFactsFence(page?.compiled_truth ?? '').facts.map(f => f.claim)).toEqual(['RETAINED_WORLD_ROW']);
+    expect(page?.compiled_truth ?? '').not.toContain('DELETED_LEGACY_ROW');
+  });
+
+  test('duplicate visible rowNum remains malformed without silently renumbering canonical references', async () => {
     const slug = 'people/collision-renumber';
     const fence = FENCE_BODY(
       `| 1 | PUBLIC_COLLIDE | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
 | 2 | SECRET_COLLIDE | fact | 1.0 | private | high | 2026-01-02 |  | s |  |`,
     );
     await putPageOp().handler(makeCtx({ remote: false }), { slug, content: fence });
-    // The remote caller only sees row 1, so a naive append lands on #2 —
-    // the hidden private row's number.
+    // Both rows were visible. Reusing #2 is malformed caller input, not
+    // evidence for an automatic hidden-row restoration or renumbering.
     await remoteRoundTrip(slug, (c) => c.replace(FACTS_FENCE_END,
       `| 2 | CALLER_COLLIDING_ADD | fact | 0.9 | world | medium | 2026-02-01 |  | s |  |\n${FACTS_FENCE_END}`,
     ));
@@ -331,12 +339,14 @@ describe('#4548 row-level visibility-aware fence merge (remote write-back)', () 
     const parsed = parseFactsFence(raw?.compiled_truth ?? '');
     expect(parsed.facts.map((f) => [f.rowNum, f.claim])).toEqual([
       [1, 'PUBLIC_COLLIDE'],
-      [2, 'SECRET_COLLIDE'],        // stable rowNum preserved (cross-page #F<N> refs)
-      [3, 'CALLER_COLLIDING_ADD'],  // caller's add renumbered onto a fresh number
+      [2, 'SECRET_COLLIDE'], // stable rowNum preserved (cross-page #F<N> refs)
     ]);
+    expect(parsed.warnings).toContain('FACTS_ROW_NUM_COLLISION: duplicate row_num 2');
+    expect(raw?.compiled_truth ?? '').toContain('| 2 | CALLER_COLLIDING_ADD |');
+    expect(raw?.compiled_truth ?? '').not.toContain('| 3 | CALLER_COLLIDING_ADD |');
   });
 
-  test('pure-private fence round-trip: full restoration still works (the original #2044 path), silently', async () => {
+  test('legacy-private-only fence round-trip retains content without restoration warnings', async () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const slug = 'people/no-warn-allprivate';
@@ -356,15 +366,15 @@ describe('#4548 row-level visibility-aware fence merge (remote write-back)', () 
     }
   });
 
-  test('idempotence: a remote write that already carries the hidden rows (same rowNum + claim) does not duplicate them', async () => {
+  test('idempotence: a remote write carrying all visible rows does not duplicate them', async () => {
     const slug = 'people/full-content-writeback';
     const fence = FENCE_BODY(
       `| 1 | PUBLIC_FULL | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
 | 2 | SECRET_FULL | fact | 1.0 | private | high | 2026-01-02 |  | s |  |`,
     );
     await putPageOp().handler(makeCtx({ remote: false }), { slug, content: fence });
-    // A remote writer that got the full content out-of-band writes it back
-    // verbatim (plus a prose edit so the import isn't a hash-match skip).
+    // A remote writer writes all visible rows back, with a prose edit so
+    // the import is not a hash-match skip.
     await putPageOp().handler(makeCtx({ remote: true }), {
       slug,
       content: fence.replace('Some text.', 'Some text edited.'),
@@ -379,7 +389,7 @@ describe('#4548 row-level visibility-aware fence merge (remote write-back)', () 
     ]);
   });
 
-  test('residual gap warn: a malformed incoming fence blocks the merge and the #2044 gap warning still fires', async () => {
+  test('malformed incoming fence preserves caller text without a false hidden-row loss warning', async () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const slug = 'people/malformed-residual';
@@ -392,15 +402,17 @@ describe('#4548 row-level visibility-aware fence merge (remote write-back)', () 
       // The caller mangles the visible row's kind — the incoming fence now
       // parses with warnings, so the merge refuses to rewrite it (it can't
       // re-render rows it couldn't parse without losing caller content).
-      // The hidden row is lost; the gap warning surfaces exactly that.
+      // The second row remains present; do not invent a hidden-row loss.
       await remoteRoundTrip(slug, (c) => c.replace('| fact |', '| banana |'));
 
       const warnedGap = warnSpy.mock.calls.some(
         (c) => String(c[0]).includes('#2044 gap') && String(c[0]).includes(slug),
       );
-      expect(warnedGap).toBe(true);
+      expect(warnedGap).toBe(false);
       const raw = await engine.getPage(slug, { sourceId: 'default' });
-      expect((raw?.compiled_truth ?? '')).not.toContain('SECRET_MAL');
+      expect((raw?.compiled_truth ?? '')).toContain('SECRET_MAL');
+      expect(raw?.compiled_truth ?? '').toContain('| banana |');
+      expect(parseFactsFence(raw?.compiled_truth ?? '').warnings.some(w => w.includes('unknown kind'))).toBe(true);
     } finally {
       warnSpy.mockRestore();
     }
@@ -488,7 +500,7 @@ describe('#4554 world-only fence deletion honored (no resurrection, no misfiring
     }
   });
 
-  test('deleting only the WORLD rows of a mixed fence: world deletion sticks while hidden rows are restored', async () => {
+  test('deleting one visible row of a mixed legacy fence retains only the row the caller kept', async () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const slug = 'people/p2-mixed-world-delete';
@@ -511,10 +523,10 @@ describe('#4554 world-only fence deletion honored (no resurrection, no misfiring
       const raw = await engine.getPage(slug, { sourceId: 'default' });
       const parsed = parseFactsFence(raw?.compiled_truth ?? '');
       expect(parsed.facts.map((f) => [f.rowNum, f.claim])).toEqual([
-        [2, 'PRIVATE_KEEP_ME'], // restored — the caller never saw it
+        [2, 'PRIVATE_KEEP_ME'], // retained — the caller kept this visible row
       ]);
       expect((raw?.compiled_truth ?? '')).not.toContain('WORLD_DELETE_ME');
-      // Restoring hidden rows is correct-by-design now — not at-risk, no warn.
+      // No row was hidden or restored, so no restoration warning is valid.
       const anyWarning = warnSpy.mock.calls.some((c) => String(c[0]).includes('#2044'));
       expect(anyWarning).toBe(false);
     } finally {
@@ -547,7 +559,7 @@ describe('#4554 world-only fence deletion honored (no resurrection, no misfiring
     ]);
   });
 
-  test('restoration preserves forget history: an inactive (struck, forgotten) private row round-trips intact', async () => {
+  test('visible forget history retains inactivity, expiry, and strike-through on round-trip', async () => {
     const slug = 'people/p2-forgotten-roundtrip';
     const fence = FENCE_BODY(
       `| 1 | WORLD_VISIBLE_FACT | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
@@ -559,7 +571,8 @@ describe('#4554 world-only fence deletion honored (no resurrection, no misfiring
       slug,
       include_content: true,
     }) as { content?: string };
-    expect(remote.content ?? '').not.toContain('FORGOTTEN_SECRET'); // stripped for remote readers
+    expect(remote.content ?? '').toContain('~~FORGOTTEN_SECRET~~');
+    expect(remote.content ?? '').not.toContain('| private |');
     await putPageOp().handler(makeCtx({ remote: true }), {
       slug,
       content: (remote.content ?? '').replace('Some text.', 'Some text edited.'),
@@ -576,12 +589,8 @@ describe('#4554 world-only fence deletion honored (no resurrection, no misfiring
 });
 
 // ─────────────────────────────────────────────────────────────────
-// #4546 round-trip hazard: #4547 strips takes/facts fences from the
-// `timeline` column for remote readers, so a remote get_page -> edit ->
-// put_page round-trip arrives with the timeline fence's non-'world' rows
-// missing too. The same row-level merge that protects compiled_truth
-// (#4548) must cover the timeline-embedded fence, or the write-back
-// silently drops the private timeline rows.
+// Timeline-embedded facts obey the same visible edit/delete contract as
+// body facts; their storage column and forget history remain stable.
 // ─────────────────────────────────────────────────────────────────
 
 describe('#4546 timeline-embedded fence survives a remote round-trip', () => {
@@ -619,14 +628,13 @@ ${FACTS_FENCE_BEGIN}
 ${FACTS_FENCE_END}
 `;
 
-  test('remote prose-edit round-trip restores the hidden private row into the timeline column', async () => {
+  test('remote prose-edit preserves both visible rows in the timeline column', async () => {
     const slug = 'people/tl-roundtrip-restore';
     await putPageOp().handler(makeCtx({ remote: false }), {
       slug,
       content: TIMELINE_FENCE_CONTENT(slug),
     });
-    // Sanity: the fence really lives in timeline, and the remote reader
-    // never sees the private row (#4547's read-side strip).
+    // Sanity: the fence really lives in timeline and both rows are visible.
     const raw = await engine.getPage(slug, { sourceId: 'default' });
     expect(parseFactsFence(raw!.compiled_truth ?? '').facts).toHaveLength(0);
     expect(raw!.timeline ?? '').toContain('TL_SECRET_FACT');
@@ -634,7 +642,8 @@ ${FACTS_FENCE_END}
       slug,
       include_content: true,
     }) as { content?: string };
-    expect(remote.content ?? '').not.toContain('TL_SECRET_FACT');
+    expect(remote.content ?? '').toContain('TL_SECRET_FACT');
+    expect(remote.content ?? '').not.toContain('| private |');
 
     await putPageOp().handler(makeCtx({ remote: true }), {
       slug,
@@ -645,14 +654,14 @@ ${FACTS_FENCE_END}
     const parsed = parseFactsFence(after?.timeline ?? '');
     expect(parsed.facts.map((f) => [f.rowNum, f.claim])).toEqual([
       [1, 'TL_PUBLIC_FACT'],
-      [2, 'TL_SECRET_FACT'], // restored into timeline, not lost, not moved
+      [2, 'TL_SECRET_FACT'], // retained in timeline, not lost, not moved
     ]);
-    // The restored row stays in the timeline column; compiled_truth gains no fence.
+    // The retained row stays in the timeline column; compiled_truth gains no fence.
     expect(parseFactsFence(after?.compiled_truth ?? '').facts).toHaveLength(0);
     expect(after?.compiled_truth ?? '').toContain('Body content, edited remotely.');
   });
 
-  test('deleting the visible world row of the timeline fence sticks; the hidden row is still restored', async () => {
+  test('deleting a timeline row sticks while the retained legacy row stays in timeline', async () => {
     const slug = 'people/tl-roundtrip-world-delete';
     await putPageOp().handler(makeCtx({ remote: false }), {
       slug,

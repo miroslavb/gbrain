@@ -12,7 +12,7 @@
  * from '../operations.ts' here (cycle).
  */
 
-import type { Operation } from './contract.ts';
+import type { Operation, OperationContext } from './contract.ts';
 import { OperationError, verbError } from './contract.ts';
 import { sourceScopeOpts, stampEvidenceSafe } from './context.ts';
 import { markKeywordHits } from '../search/evidence.ts';
@@ -27,6 +27,7 @@ import { ENTITY_HINTS_CAP } from '../facts/extract.ts';
 import { MEMORY_VERBS_VERSION } from '../verbs.ts';
 import type { SearchResult } from '../types.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
+import { selectSingleReadSource } from '../single-source-read.ts';
 
 // ============================================================
 // v0.31 — Hot memory ops: extract_facts / recall / forget_fact
@@ -465,6 +466,19 @@ function parseEntityList(v: unknown): string[] {
   return [];
 }
 
+/** Ambient bundles and cursors operate on one source, inside the read grant. */
+function resolveAmbientSource(ctx: OperationContext): string {
+  const sourceId = selectSingleReadSource(ctx);
+  if (sourceId !== null) return sourceId;
+  // Do not pick an arbitrary source or silently read a foreign bound source.
+  // Validate before assembling content or reading/writing the session cursor.
+  throw verbError(
+    'permission_denied',
+    'Ambient memory requires one bound source inside the caller\'s grant.',
+    'Bind the runtime to one granted source before calling context_pack or delta.',
+  );
+}
+
 const context_pack: Operation = {
   name: 'context_pack',
   description:
@@ -482,7 +496,7 @@ const context_pack: Operation = {
   annotations: { title: 'context_pack (boundary bundle)', readOnlyHint: true },
   handler: async (ctx, p) => {
     const { assembleContextPack, renderPack, isAfter, PACK_DEFAULT_MAX_ENTITIES } = await import('../context/turn-context.ts');
-    const sourceId = ctx.sourceId ?? 'default';
+    const sourceId = resolveAmbientSource(ctx);
     const rawSince = typeof p.since === 'string' && p.since.trim() ? p.since : undefined;
     if (rawSince !== undefined && !Number.isFinite(Date.parse(rawSince))) {
       throw verbError(
@@ -592,7 +606,7 @@ const delta: Operation = {
   handler: async (ctx, p) => {
     const { assembleDeltaContext, renderDelta, PACK_DEFAULT_MAX_ENTITIES } = await import('../context/turn-context.ts');
     const { getSessionContextState, upsertSessionContextState } = await import('../context/session-state.ts');
-    const sourceId = ctx.sourceId ?? 'default';
+    const sourceId = resolveAmbientSource(ctx);
     const rawSince = typeof p.since === 'string' && p.since.trim() ? p.since : null;
     if (rawSince !== null && !Number.isFinite(Date.parse(rawSince))) {
       throw verbError(

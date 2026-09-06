@@ -112,7 +112,6 @@ const MATRIX: Row[] = [
   { name: 'ontology_conflicts', mode: 'skip', reason: 'conflict rows need the ontology merge pipeline cross-observation shape; D7 ontology-merge parity suite owns conflicts' },
   { name: 'get_skill', mode: 'skip', reason: 'skills catalog + brain-resident packs; skill-catalog confinement suites own it' },
   { name: 'list_brain_skillpack', mode: 'skip', reason: 'brain-resident skillpack surface; skillpack suites own it' },
-  { name: 'advisor', mode: 'skip', reason: 'aggregate advisory over full stack; advisor suites own it' },
   { name: 'open_loops', mode: 'skip', reason: 'loop rows need the Gmail detector pipeline; test/ops-loops.test.ts owns its remote posture (no-scope denial, grant confinement, redacted evidence)' },
   { name: 'list_skills', mode: 'skip', reason: 'bundled skills catalog from the install tree; skills suites own it (throws outside an installed skills dir)' },
 
@@ -120,7 +119,6 @@ const MATRIX: Row[] = [
   { name: 'search_modes', mode: 'brainwide', args: {}, rationale: 'reports search config knobs, no page data' },
   { name: 'get_brain_identity', mode: 'brainwide', args: {}, rationale: 'brain-level identity document by design' },
   { name: 'whoami', mode: 'brainwide', args: {}, rationale: 'caller identity/transport echo, no page data' },
-  { name: 'sources_list', mode: 'brainwide', args: {}, rationale: 'listing sources is its purpose; exposes ids/names only' },
   { name: 'request_tools', mode: 'brainwide', args: { tools: ['get_page'] }, rationale: 'tool registry surface, no page data' },
   { name: 'list_link_sources', mode: 'brainwide', args: {}, rationale: 'distinct link-origin kinds; enumerates kinds not content' },
   { name: 'get_active_schema_pack', mode: 'brainwide', args: {}, rationale: 'brain-level schema config' },
@@ -133,6 +131,7 @@ const MATRIX: Row[] = [
   { name: 'takes_calibration', mode: 'brainwide', args: {}, rationale: 'holder-keyed calibration buckets; aggregate numbers' },
 
   // Isolated — the core of the matrix.
+  { name: 'sources_list', mode: 'isolated', args: {} },
   { name: 'get_page', mode: 'isolated', args: { slug: 'notes/beta-note' },
     controlSees: r => r !== null && JSON.stringify(r).includes('BETAMARKER'),
     expectScoped: r => { expect(r === null || leakToken(r) === null).toBe(true); } },
@@ -307,6 +306,11 @@ afterAll(async () => {
 
 // ─── Ratchet: the table covers the registry exactly ───────────────────────
 describe('matrix coverage ratchet', () => {
+  test('advisor requires admin scope and stays in the dispatch sweep', () => {
+    // Its diagnostics are not part of the read grant; publish-gate denial
+    // remains dynamically covered by remote-privacy-sweep.test.ts.
+    expect(operations.find(o => o.name === 'advisor')?.scope).toBe('admin');
+  });
   test('every non-localOnly read op has exactly one disposition row', () => {
     // Shared enumeration seam (test/helpers/ops-registry.ts): one definition
     // of "the remotely-servable read surface" across every sweeping suite.

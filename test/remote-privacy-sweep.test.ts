@@ -1,35 +1,14 @@
 /**
- * Remote privacy sweep — DYNAMIC, corpus-seeded leak detection across the
- * ENTIRE dispatch surface (#4546/#4549 class closure at the dispatch layer).
- *
- * Why this exists: the world-only privacy boundary is enforced per-arm /
- * per-column at N call sites, so it leaked twice arm-by-arm — #4546 (a
- * takes/private-facts fence living in the `timeline` column was returned
- * unstripped to remote readers) and #4549 (delta's changed-page arm exposed
- * private page titles/slugs). This suite closes the CLASS at the shared
- * layer: seed a corpus carrying high-entropy PRIVATE sentinels, enumerate
- * every non-localOnly op from the registry, dispatch each one remote-shaped
- * through `dispatchToolCall` (the exact layer both MCP transports share),
- * and assert no private sentinel appears anywhere in the serialized
- * response envelope — structured fields, rendered text, error messages,
- * and the `_meta.brain_hot_memory` channel alike.
- *
- * Scope claim, stated honestly: this closes the DISPATCH surface for
- * callers that carry the transport floor (`sourceId` + world-only
- * takesHoldersAllowList — every shipped transport sets both). It does NOT
- * cover the IPC context-pack surface (src/mcp/context-pack-handler.ts,
- * which bypasses dispatchToolCall) nor write-triggered restoration echoes
- * (put_page INTO fence-bearing pages — see the write-side sweep TODO).
- *
- * Static sibling: test/operations-trust-boundary.test.ts (contract
- * assertions + curated handler probes) and
- * scripts/check-operations-filter-bypass.sh. This file is the dynamic
- * sibling — same doctrine, corpus-seeded.
- *
- * MAINTENANCE CONTRACT (fail-closed): adding a new operation to the
- * registry makes this suite FAIL until the op is classified in
- * EXPECTED_OUTCOME below (and, if it can return corpus data, given a
- * PARAM_FACTORY entry). The failure message prints exactly what to add.
+ * Registry-wide dispatch sweep for the single-principal world-only host.
+ * Legacy private fact/page labels remain visible INSIDE the caller's source
+ * grant. Denied-source sentinels and private-take holders remain forbidden.
+ * Every non-localOnly operation is classified and dispatched through the same
+ * shared layer as both MCP transports; serialized envelopes and hot-memory
+ * metadata are checked, with positive corpus controls for data-returning ops.
+ * Scalar and federated grants are exercised separately. This is not proof of
+ * the independent caller-aware document broker ACL or IPC context-pack path.
+ * The document search exclusion has its own bounded anchor below.
+ * New operations must be explicitly classified; no op-wide exemptions.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -49,11 +28,9 @@ import {
 import { __setUsageLogPathForTests } from '../src/core/verbs/usage-log.ts';
 
 // ── Sentinels ────────────────────────────────────────────────────────────
-// PRIVATE sentinels: high-entropy, seeded ONLY into private artifacts
-// (titles / bodies / fact / take / fence-row CONTENT — never slugs: slugs
-// are legitimately echoed in "Page not found: <slug>" errors, so a slug
-// sentinel would false-positive on correct behavior).
-const PRIV = {
+// Legacy labels are positive convergence controls. Forbidden source content
+// uses separate sentinels; caller-supplied slug echoes are never leak oracles.
+const LEGACY = {
   pageTitle: 'PRIVSWEEP_TITLE_kx9q3z',
   pageBody: 'PRIVSWEEP_PBODY_mw7r2v',
   fact: 'PRIVSWEEP_FACT_tj5n8d',
@@ -62,7 +39,18 @@ const PRIV = {
   src2Fact: 'PRIVSWEEP_S2FACT_ne2k7p',
   src2Title: 'PRIVSWEEP_S2TITLE_ru8d4w',
 } as const;
-const PRIVATE_SENTINELS = Object.values(PRIV);
+const DENIED = {
+  pageTitle: 'DENIEDSWEEP_TITLE_kx91qw',
+  pageBody: 'DENIEDSWEEP_BODY_mw92er',
+  fact: 'DENIEDSWEEP_FACT_ne93ty',
+  fenceRow: 'DENIEDSWEEP_FENCE_kx94ui',
+  take: 'DENIEDSWEEP_TAKE_ne95op',
+} as const;
+const FORBIDDEN_SENTINELS = [...Object.values(DENIED), LEGACY.take];
+const DENIED_SOURCE = 'sweep-denied';
+const DENIED_PAGE_SLUG = 'people/denied-sweep-example';
+const DOCUMENT_SLUG = 'docs/inbox/sweep-document';
+const DOCUMENT_MARKER = 'DOCSWEEP_CONTENT_9bb2v6';
 
 // WORLD markers: positive controls proving an op actually read the corpus
 // (a sweep against an empty brain proves nothing).
@@ -84,7 +72,7 @@ const CASE_TIMEOUT_MS = 20_000;
 const SINCE_EPOCH = '2020-01-01T00:00:00.000Z';
 const WORLD_FENCE_SLUG = 'people/world-fence-example';
 const WORLD_PAGE_SLUG = 'people/world-page-example';
-const PRIV_PAGE_SLUG = 'people/priv-page-example';
+const LEGACY_PAGE_SLUG = 'people/priv-page-example';
 
 // Known, reviewed op-wide exemptions. An entry here exempts the WHOLE op
 // from the sentinel assertion (the substring check cannot do field-level).
@@ -368,11 +356,8 @@ beforeAll(async () => {
   __setUsageLogPathForTests(join(home, 'usage.jsonl'));
   // Hermeticity is ENFORCED, not assumed: null BOTH gateway transports
   // (synthesize calls chat; embed paths call embed — a keyed dev machine
-  // must not fire real API calls). The GBRAIN_REMOTE_PRIVATE_PAGES escape
-  // hatch disables private-page exclusion outright — rather than mutating
-  // process.env (banned in parallel test files by check-test-isolation R1),
-  // fail LOUD: a machine running with privacy globally disabled SHOULD get
-  // a red privacy sweep.
+  // must not fire real API calls). Host world-only state comes from the
+  // ordinary schema migrations; no private visibility opt-out is needed.
   // A previously-loaded file in the same bun process can leave the
   // MODULE-GLOBAL gateway configured (e.g. a deterministic embedder with
   // foreign dims) — reset config AND null transports so seeding can't trip
@@ -380,12 +365,6 @@ beforeAll(async () => {
   resetGateway();
   __setChatTransportForTests(null);
   __setEmbedTransportForTests(null);
-  if (process.env.GBRAIN_REMOTE_PRIVATE_PAGES === '1') {
-    throw new Error(
-      'remote-privacy-sweep: GBRAIN_REMOTE_PRIVATE_PAGES=1 is set — the private-page ' +
-        'exclusion is globally disabled, so this suite cannot prove anything. Unset it and re-run.',
-    );
-  }
 
   engine = new PGLiteEngine();
   await engine.connect({});
@@ -407,11 +386,8 @@ beforeAll(async () => {
 
   // ── Seed the corpus (source: default) ──────────────────────────────
   const put = operationsByName['put_page'];
-  // 1. World page whose PRIVATE fence rows live BELOW the timeline
-  //    sentinel — the exact #4546 topology (a fence in the `timeline`
-  //    column of a world-visible page; a fence on a private page would
-  //    never reach a remote reader at all, making red-green check (a)
-  //    unimplementable).
+  // 1. Mixed legacy fence rows below the timeline sentinel exercise
+  //    projection in both the timeline column and serialized content.
   await put.handler(localCtx(), {
     slug: WORLD_FENCE_SLUG,
     content: `---
@@ -433,7 +409,7 @@ ${WORLD.pageBody}
 | # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |
 |---|-------|------|------------|------------|------------|------------|-------------|--------|---------|
 | 1 | ${WORLD.fenceRow} | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
-| 2 | ${PRIV.fenceRow} | fact | 1.0 | private | high | 2026-01-01 |  | s |  |
+| 2 | ${LEGACY.fenceRow} | fact | 1.0 | private | high | 2026-01-01 |  | s |  |
 <!--- gbrain:facts:end -->
 `,
   });
@@ -450,22 +426,21 @@ type: person
 ${WORLD.pageBody}
 `,
   });
-  // 3. Private page — title AND body carry sentinels (the TITLE sentinel
-  //    is what catches the #4549 metadata-leak shape in delta/list arms).
+  // 3. Legacy-private page — title/body prove convergence in delta/list.
   await put.handler(localCtx(), {
-    slug: PRIV_PAGE_SLUG,
+    slug: LEGACY_PAGE_SLUG,
     content: `---
-title: ${PRIV.pageTitle}
+title: ${LEGACY.pageTitle}
 type: person
 visibility: private
 ---
 
-# ${PRIV.pageTitle}
+# ${LEGACY.pageTitle}
 
-${PRIV.pageBody}
+${LEGACY.pageBody}
 `,
   });
-  // 4. Facts hot memory: one world, one private (also feeds the
+  // 4. Facts hot memory: world + legacy private (also feeds the
   //    _meta.brain_hot_memory channel the metaHook injects).
   const remember = operationsByName['remember'];
   await remember.handler(localCtx(), {
@@ -474,11 +449,11 @@ ${PRIV.pageBody}
     entity: WORLD_PAGE_SLUG,
   });
   await remember.handler(localCtx(), {
-    fact: PRIV.fact,
+    fact: LEGACY.fact,
     provenance: 'sweep-seed',
     entity: WORLD_PAGE_SLUG,
-    visibility: 'private',
   });
+  await engine.executeRaw(`UPDATE facts SET visibility = 'private' WHERE fact = $1`, [LEGACY.fact]);
   // 5. Takes: world-holder (visible through the transport floor) and
   //    brain-holder (must be filtered by takesHoldersAllowList).
   const takesAdd = operationsByName['takes_add'];
@@ -490,7 +465,7 @@ ${PRIV.pageBody}
   });
   await takesAdd.handler(localCtx(), {
     slug: WORLD_PAGE_SLUG,
-    claim: PRIV.take,
+    claim: LEGACY.take,
     kind: 'take',
     holder: 'brain',
   });
@@ -503,24 +478,24 @@ ${PRIV.pageBody}
     src2Dir,
   ]);
   await put.handler(localCtx(SRC2), {
-    slug: PRIV_PAGE_SLUG,
+    slug: LEGACY_PAGE_SLUG,
     content: `---
-title: ${PRIV.src2Title}
+title: ${LEGACY.src2Title}
 type: person
 visibility: private
 ---
 
-# ${PRIV.src2Title}
+# ${LEGACY.src2Title}
 
 private source-2 body
 `,
   });
   await remember.handler(localCtx(SRC2), {
-    fact: PRIV.src2Fact,
+    fact: LEGACY.src2Fact,
     provenance: 'sweep-seed',
     entity: WORLD_PAGE_SLUG,
-    visibility: 'private',
   });
+  await engine.executeRaw(`UPDATE facts SET visibility = 'private' WHERE source_id = $1 AND fact = $2`, [SRC2, LEGACY.src2Fact]);
   // World-visible src2 page: the federated arm's positive control — without
   // it, every src2 sentinel could pass vacuously if allowedSources fan-out
   // silently never reached source 2 (the "sweep against an empty brain
@@ -537,6 +512,29 @@ type: person
 world source-2 body
 `,
   });
+  // A third source is denied to BOTH caller shapes. Seed every material
+  // response channel, including same-slug facts and timeline fence content.
+  await engine.executeRaw(`INSERT INTO sources (id, name) VALUES ($1, $1)`, [DENIED_SOURCE]);
+  for (const slug of [DENIED_PAGE_SLUG, WORLD_PAGE_SLUG]) {
+    await engine.putPage(slug, {
+      title: DENIED.pageTitle, type: 'person', frontmatter: { visibility: 'world' },
+      compiled_truth: `${DENIED.pageBody} WORLDSWEEP`,
+      timeline: `## Facts
+<!--- gbrain:facts:begin -->
+| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |
+|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|
+| 1 | ${DENIED.fenceRow} | fact | 1.0 | world | high | 2026-01-01 |  | s |  |
+<!--- gbrain:facts:end -->`,
+    }, { sourceId: DENIED_SOURCE });
+    await engine.upsertChunks(slug, [{ chunk_index: 0, chunk_text: `${DENIED.pageBody} WORLDSWEEP`, chunk_source: 'compiled_truth' }], { sourceId: DENIED_SOURCE });
+  }
+  await engine.insertFact({ entity_slug: WORLD_PAGE_SLUG, fact: DENIED.fact, source: 'test:sweep', visibility: 'world', embedding: null }, { source_id: DENIED_SOURCE });
+  const deniedPage = await engine.getPage(DENIED_PAGE_SLUG, { sourceId: DENIED_SOURCE });
+  await engine.addTakesBatch([{ page_id: deniedPage!.id, row_num: 1, claim: DENIED.take, kind: 'take', holder: 'world', weight: 0.8 }]);
+  // Uploaded document chunks are not part of ordinary search, even when
+  // stored world-visible in an otherwise granted source.
+  await engine.putPage(DOCUMENT_SLUG, { title: 'WORLDSWEEP document', type: 'note', frontmatter: {}, compiled_truth: `WORLDSWEEP ${DOCUMENT_MARKER}` }, { sourceId: 'default' });
+  await engine.upsertChunks(DOCUMENT_SLUG, [{ chunk_index: 0, chunk_text: `WORLDSWEEP ${DOCUMENT_MARKER}`, chunk_source: 'compiled_truth' }], { sourceId: 'default' });
 });
 
 afterAll(async () => {
@@ -553,12 +551,12 @@ afterAll(async () => {
 });
 
 // ── The core per-case assertion ──────────────────────────────────────────
-function assertNoPrivateSentinel(op: string, serialized: string) {
+function assertNoForbiddenSentinel(op: string, serialized: string) {
   if (KNOWN_EXPOSED[op]) return; // op-wide, reviewed exemption
-  for (const s of PRIVATE_SENTINELS) {
+  for (const s of FORBIDDEN_SENTINELS) {
     if (serialized.includes(s)) {
       throw new Error(
-        `PRIVACY LEAK: op "${op}" returned private sentinel "${s}" to a remote caller.\n` +
+        `PRIVACY LEAK: op "${op}" returned denied-source/private-take sentinel "${s}" to a remote caller.\n` +
           `Envelope excerpt: ${serialized.slice(Math.max(0, serialized.indexOf(s) - 200), serialized.indexOf(s) + 200)}`,
       );
     }
@@ -569,7 +567,7 @@ async function runCase(opName: string, shape: Shape) {
   const params = PARAM_FACTORY[opName] ?? {};
   const res = await sweepCall(opName, params, shape);
   const serialized = JSON.stringify(res);
-  assertNoPrivateSentinel(opName, serialized);
+  assertNoForbiddenSentinel(opName, serialized);
   const expected = EXPECTED_BY_SHAPE[opName]?.[shape] ?? EXPECTED_OUTCOME[opName];
   const isError = res.isError === true;
   if (expected === 'data') {
@@ -612,7 +610,7 @@ async function assertCorpusIntact(label: string) {
   if (!serialized.includes(WORLD.fenceRow)) {
     throw new Error(`Corpus integrity lost at "${label}" — world fence row missing. A mutating op touched the seeded corpus.`);
   }
-  assertNoPrivateSentinel('get_page', serialized);
+  assertNoForbiddenSentinel('get_page', serialized);
 }
 
 // ── Enumeration guards (vacuous-pass protection) ─────────────────────────
@@ -649,7 +647,7 @@ describe('remote privacy sweep — enumeration + classification contract', () =>
 });
 
 // ── Phase R: non-mutating ops, pristine corpus, both ctx shapes ──────────
-describe('phase R — non-mutating ops leak no private sentinel', () => {
+describe('phase R — non-mutating ops leak no forbidden sentinel', () => {
   for (const op of phaseR) {
     for (const shape of ['scalar', 'federated'] as const) {
       it(`${op.name} [${shape}]`, async () => {
@@ -664,7 +662,7 @@ describe('phase R — non-mutating ops leak no private sentinel', () => {
 });
 
 // ── Phase W: mutating ops (fresh-slug targets), destructive last ─────────
-describe('phase W — mutating ops leak no private sentinel in response envelopes', () => {
+describe('phase W — mutating ops leak no forbidden sentinel in response envelopes', () => {
   it('corpus intact at start of phase W', async () => {
     await assertCorpusIntact('start of phase W');
   });
@@ -688,26 +686,27 @@ describe('localOnly ops are denied fail-closed over non-stdio transports', () =>
       // The dispatcher backstop (dispatch.ts localOnly gate) answers with
       // the same envelope as a nonexistent op so the catalog doesn't leak.
       expect(serialized).toContain('unknown_tool');
-      assertNoPrivateSentinel(op.name, serialized);
+      assertNoForbiddenSentinel(op.name, serialized);
     }, CASE_TIMEOUT_MS);
   }
 });
 
 // ── Discrimination anchors: the two known leak shapes stay caught ────────
-describe('known-leak discrimination anchors (#4546 / #4549)', () => {
-  it('#4546 shape: remote get_page serves the world fence row but never the private row (timeline column)', async () => {
+describe('world-only convergence and independent access boundaries', () => {
+  it('remote get_page normalizes both legacy and world facts in timeline', async () => {
     const res = await sweepCall('get_page', { slug: WORLD_FENCE_SLUG, include_content: true }, 'scalar');
     const serialized = JSON.stringify(res);
     expect(res.isError ?? false).toBe(false);
     expect(serialized).toContain(WORLD.fenceRow);
-    expect(serialized).not.toContain(PRIV.fenceRow);
+    expect(serialized).toContain(LEGACY.fenceRow);
+    expect(serialized).not.toContain('| private |');
   });
 
-  it('#4549 shape: remote delta never carries the private page title', async () => {
+  it('remote delta includes a legacy private page title inside its source grant', async () => {
     const res = await sweepCall('delta', { since: SINCE_EPOCH }, 'scalar');
     const serialized = JSON.stringify(res);
     expect(res.isError ?? false).toBe(false);
-    expect(serialized).not.toContain(PRIV.pageTitle);
+    expect(serialized).toContain(LEGACY.pageTitle);
   });
 
   it('federated arm actually spans source 2; scalar arm stays source-scoped (cross-source controls)', async () => {
@@ -723,11 +722,46 @@ describe('known-leak discrimination anchors (#4546 / #4549)', () => {
     expect(JSON.stringify(scalar)).not.toContain(WORLD.src2Page);
   });
 
+  it('same-slug facts honor grants while legacy labels remain readable', async () => {
+    for (const shape of ['scalar', 'federated'] as const) {
+      const res = await sweepCall('recall', { entity: WORLD_PAGE_SLUG }, shape);
+      expect(res.isError ?? false).toBe(false);
+      const text = JSON.stringify(res);
+      expect(text).toContain(LEGACY.fact);
+      expect(text.includes(LEGACY.src2Fact)).toBe(shape === 'federated');
+      assertNoForbiddenSentinel('recall', text);
+    }
+    const control = await operationsByName['recall'].handler(localCtx(DENIED_SOURCE), { entity: WORLD_PAGE_SLUG });
+    expect(JSON.stringify(control)).toContain(DENIED.fact);
+  });
+
+  it('denied-source seed is observable to its explicit trusted source', async () => {
+    const page = await operationsByName['get_page'].handler(localCtx(DENIED_SOURCE), { slug: DENIED_PAGE_SLUG, include_content: true });
+    for (const marker of [DENIED.pageTitle, DENIED.pageBody, DENIED.fenceRow]) expect(JSON.stringify(page)).toContain(marker);
+    const takes = await operationsByName['takes_list'].handler(localCtx(DENIED_SOURCE), { page_slug: DENIED_PAGE_SLUG });
+    expect(JSON.stringify(takes)).toContain(DENIED.take);
+  });
+
+  it('ordinary search/query/recall exclude uploaded document chunks', async () => {
+    expect((await engine.getPage(DOCUMENT_SLUG, { sourceId: 'default' }))?.compiled_truth).toContain(DOCUMENT_MARKER);
+    for (const op of ['search', 'query', 'recall']) {
+      for (const shape of ['scalar', 'federated'] as const) {
+        const res = await sweepCall(op, { query: 'WORLDSWEEP', limit: 20 }, shape);
+        const text = JSON.stringify(res);
+        expect(res.isError ?? false).toBe(false);
+        expect(WORLD_MARKERS.some(marker => text.includes(marker))).toBe(true);
+        expect(text).not.toContain(DOCUMENT_MARKER);
+        expect(text).not.toContain(DOCUMENT_SLUG);
+        assertNoForbiddenSentinel(op, text);
+      }
+    }
+  }, CASE_TIMEOUT_MS);
+
   // Slug-class leaks are invisible to the sentinel assertion by design
   // (sentinels never live in slugs — legit "Page not found: <slug>" echoes
   // would false-positive). Ops that return slug LISTS derived from data
   // (not echoes of a requested slug) get targeted anchors instead.
-  it('slug-list arms never name the private page slug (find_anomalies / find_orphans / list_pages / delta / salience)', async () => {
+  it('slug-list arms never name a denied source page slug (find_anomalies / find_orphans / list_pages / delta / salience)', async () => {
     for (const [op, params] of [
       ['find_anomalies', {}],
       ['find_orphans', {}],
@@ -745,8 +779,8 @@ describe('known-leak discrimination anchors (#4546 / #4549)', () => {
         if (!serialized.includes(WORLD_PAGE_SLUG) && !serialized.includes(WORLD_FENCE_SLUG)) {
           throw new Error(`slug-list anchor vacuous: op "${op}" [${shape}] named no world slug — corpus/threshold drift emptied the list.`);
         }
-        if (serialized.includes(PRIV_PAGE_SLUG)) {
-          throw new Error(`PRIVACY LEAK (slug-class): op "${op}" [${shape}] named the private page slug.`);
+        if (serialized.includes(DENIED_PAGE_SLUG)) {
+          throw new Error(`PRIVACY LEAK (slug-class): op "${op}" [${shape}] named the denied-source page slug.`);
         }
       }
     }

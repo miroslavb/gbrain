@@ -17,6 +17,7 @@
 import type { OperationContext } from './../operations.ts';
 import type { FactRow } from './../engine.ts';
 import { effectiveConfidence } from './decay.ts';
+import { selectSingleReadSource } from '../single-source-read.ts';
 
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_TOP_K = 10;
@@ -71,7 +72,10 @@ export async function getBrainHotMemoryMeta(
   // recall response.
   if (name === 'recall' || name === 'extract_facts' || name === 'forget_fact') return undefined;
 
-  const sourceId = ctx.sourceId ?? 'default';
+  const sourceId = selectSingleReadSource(ctx);
+  // Optional metadata must never read a foreign source or reuse its cache.
+  // An ambiguous grant cannot supply this single-source response channel.
+  if (sourceId === null) return undefined;
   // CX2-11: session identity is the TYPED OperationContext.sessionId field,
   // set from MCP `_meta.session_id` at the dispatch boundary. The old ad-hoc
   // `source_session` read is kept as a fallback for legacy embedders, but no

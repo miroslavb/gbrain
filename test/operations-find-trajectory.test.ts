@@ -148,21 +148,18 @@ describe('find_trajectory MCP op — world-only visibility', () => {
     expect(remote.points.map((point: { value: number }) => point.value)).toEqual([50000, 99999]);
   });
 
-  test('FAIL-CLOSED cast bypass: a context missing `remote` is world-only (F7b)', async () => {
+  test('missing remote retains the shared view while its source grant stays binding', async () => {
     await insertTyped({ entity_slug: 'optraj-vis-bypass', metric: 'mrr', value: 50000, visibility: 'private', valid_from: new Date('2026-01-15') });
     await insertTyped({ entity_slug: 'optraj-vis-bypass', metric: 'mrr', value: 99999, visibility: 'world',   valid_from: new Date('2026-04-12') });
 
     const op = operationsByName['find_trajectory'];
-    // Simulate the type bypass this fix closes: a widened context (Partial<>
-    // cast) whose `remote` was never threaded. If the ops-layer coercion ever
-    // regresses to `ctx.remote === true`, this context becomes an explicit
-    // remote: false and reads the private row — the exact leak class F7b
-    // closed for whoami. It must degrade to world-only instead.
-    const ctx = mkCtx();
+    await insertTyped({ source_id: 'optraj-denied', entity_slug: 'optraj-vis-bypass', metric: 'mrr', value: 777777, visibility: 'world', valid_from: new Date('2026-05-01') });
+    // Missing trust metadata must not discard the independent source grant.
+    // Legacy private is a storage label, not a second principal on this host.
+    const ctx = mkCtx({ sourceId: 'optraj-denied', auth: { allowedSources: ['default'] } as any });
     delete (ctx as any).remote;
     const result = await op.handler(ctx, { entity_slug: 'optraj-vis-bypass' }) as any;
-    expect(result.points.length).toBe(1);
-    expect(result.points[0].value).toBe(99999);
+    expect(result.points.map((point: { value: number }) => point.value)).toEqual([50000, 99999]);
   });
 });
 

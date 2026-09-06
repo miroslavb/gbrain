@@ -26,9 +26,10 @@ import {
   resolveClientId,
   LOCAL_CLIENT_SENTINEL,
 } from '../src/core/context/session-state.ts';
-import { __resetHotMemoryCacheForTests } from '../src/core/facts/meta-hook.ts';
+import { getBrainHotMemoryMeta, __resetHotMemoryCacheForTests } from '../src/core/facts/meta-hook.ts';
 import type { OperationContext } from '../src/core/operations.ts';
 import type { GBrainConfig } from '../src/core/config.ts';
+import { dispatchToolCall } from '../src/mcp/dispatch.ts';
 
 let engine: PGLiteEngine;
 const noopLogger = { info: () => {}, warn: () => {}, error: () => {} };
@@ -640,7 +641,7 @@ describe('visibility: world-only with include_private compatibility no-op', () =
     expect(r.text as string).toContain('secret burn rate');
   });
 
-  test('delta page arm widens private pages only for trusted local include_private', async () => {
+  test('delta page arm shares legacy private pages for local and remote, independent of include_private', async () => {
     const since = new Date(Date.now() - 5 * 60_000).toISOString();
     await engine.putPage('notes/delta-world-page', {
       title: 'Delta World Page',
@@ -656,6 +657,11 @@ describe('visibility: world-only with include_private compatibility no-op', () =
       compiled_truth: 'private page body',
       timeline: '',
     });
+    await engine.executeRaw(`INSERT INTO sources (id, name) VALUES ('delta-denied', 'delta-denied')`);
+    await engine.putPage('notes/delta-denied-page', {
+      title: 'DELTA_DENIED_SOURCE_CONTENT', type: 'note', frontmatter: {},
+      compiled_truth: 'DELTA_DENIED_SOURCE_CONTENT', timeline: '',
+    }, { sourceId: 'delta-denied' });
 
     const worldOnly = await call(del, ctxFor({ remote: false }), { since });
     const widened = await call(del, ctxFor({ remote: false }), {
@@ -667,23 +673,125 @@ describe('visibility: world-only with include_private compatibility no-op', () =
       include_private: true,
     });
 
-    for (const result of [worldOnly, widened, remote]) {
+    const remoteDefault = await call(del, ctxFor({ remote: true, clientId: 'c2' }), { since });
+    const federated = await call(del, {
+      ...ctxFor({ remote: true, clientId: 'c3' }),
+      sourceId: 'delta-denied',
+      auth: { clientId: 'c3', scopes: ['read'], allowedSources: ['default'] } as never,
+    }, { since });
+    for (const result of [worldOnly, widened, remote, remoteDefault, federated]) {
       expect(result.pages.map((p: { slug: string }) => p.slug)).toContain(
         'notes/delta-world-page',
       );
+      expect(result.pages.map((p: { slug: string }) => p.slug)).toContain('notes/delta-private-page');
+      expect(result.text as string).toContain('Delta Private Page');
+      expect(JSON.stringify(result)).not.toContain('DELTA_DENIED_SOURCE_CONTENT');
+      expect(result.pages.map((p: { slug: string }) => p.slug)).not.toContain('notes/delta-denied-page');
     }
-    expect(worldOnly.pages.map((p: { slug: string }) => p.slug)).not.toContain(
-      'notes/delta-private-page',
-    );
-    expect(worldOnly.text as string).not.toContain('Delta Private Page');
-    expect(widened.pages.map((p: { slug: string }) => p.slug)).toContain(
-      'notes/delta-private-page',
-    );
-    expect(widened.text as string).toContain('Delta Private Page');
-    expect(remote.pages.map((p: { slug: string }) => p.slug)).not.toContain(
-      'notes/delta-private-page',
-    );
-    expect(remote.text as string).not.toContain('Delta Private Page');
+    const deniedControl = await call(del, { ...ctxFor({ remote: false }), sourceId: 'delta-denied' }, { since });
+    expect(deniedControl.pages.map((p: { slug: string }) => p.slug)).toContain('notes/delta-denied-page');
+  });
+});
+
+describe('ambient verbs respect grants before reads and cursor writes', () => {
+  beforeAll(async () => {
+    for (const [sourceId, marker] of [['ambient-allowed', 'ALLOWED_AMBIENT_DATA'], ['ambient-foreign', 'FOREIGN_AMBIENT_DATA']] as const) {
+      await engine.executeRaw(`INSERT INTO sources (id, name) VALUES ($1, $1)`, [sourceId]);
+      await engine.putPage('people/ambient-example', {
+        title: marker, type: 'person', frontmatter: {}, compiled_truth: marker, timeline: '',
+      }, { sourceId });
+      await engine.insertFact({ entity_slug: 'people/ambient-example', fact: marker, source: 'test:ambient', visibility: 'world', embedding: null }, { source_id: sourceId });
+    }
+  });
+
+  test('single grant overrides a foreign scalar for pack content and delta cursor state', async () => {
+    const ctx: OperationContext = {
+      ...ctxFor({ remote: true, clientId: 'ambient-reader' }), sourceId: 'ambient-foreign',
+      auth: { clientId: 'ambient-reader', scopes: ['read'], allowedSources: ['ambient-allowed'] } as never,
+    };
+    for (const op of [contextPack, del]) {
+      const res = await call(op, ctx, { entities: 'people/ambient-example', since: '2020-01-01T00:00:00Z', session_id: 'grant-cursor' });
+      expect(JSON.stringify(res)).toContain('ALLOWED_AMBIENT_DATA');
+      expect(JSON.stringify(res)).not.toContain('FOREIGN_AMBIENT_DATA');
+    }
+    expect(await getSessionContextState(engine, 'ambient-allowed', 'ambient-reader', 'grant-cursor')).not.toBeNull();
+    expect(await getSessionContextState(engine, 'ambient-foreign', 'ambient-reader', 'grant-cursor')).toBeNull();
+  });
+
+  test('implicit delta cursor resumes the granted row and leaves the foreign row unchanged', async () => {
+    await upsertSessionContextState(engine, 'ambient-allowed', 'ambient-reader', 'existing-cursor', {
+      lastWakeAt: '2020-01-01T00:00:00Z', cursorSlug: 'allowed-key',
+    });
+    await upsertSessionContextState(engine, 'ambient-foreign', 'ambient-reader', 'existing-cursor', {
+      lastWakeAt: '2099-01-01T00:00:00Z', cursorSlug: 'foreign-key',
+    });
+    const foreignBefore = await getSessionContextState(engine, 'ambient-foreign', 'ambient-reader', 'existing-cursor');
+    const res = await call(del, {
+      ...ctxFor({ remote: true, clientId: 'ambient-reader' }), sourceId: 'ambient-foreign',
+      auth: { clientId: 'ambient-reader', scopes: ['read'], allowedSources: ['ambient-allowed'] } as never,
+    }, { session_id: 'existing-cursor' });
+    expect(JSON.stringify(res)).toContain('ALLOWED_AMBIENT_DATA');
+    expect(JSON.stringify(res)).not.toContain('FOREIGN_AMBIENT_DATA');
+    expect(await getSessionContextState(engine, 'ambient-foreign', 'ambient-reader', 'existing-cursor')).toEqual(foreignBefore);
+    expect((await getSessionContextState(engine, 'ambient-allowed', 'ambient-reader', 'existing-cursor'))?.surfaced_slugs).toEqual(['people/ambient-example']);
+  });
+
+  test('multi-grant remains single-source and uses a granted bound source', async () => {
+    const ctx: OperationContext = {
+      ...ctxFor({ remote: true, clientId: 'ambient-reader' }), sourceId: 'ambient-allowed',
+      auth: { clientId: 'ambient-reader', scopes: ['read'], allowedSources: ['default', 'ambient-allowed'] } as never,
+    };
+    for (const op of [contextPack, del]) {
+      const res = await call(op, ctx, { entities: 'people/ambient-example', since: '2020-01-01T00:00:00Z' });
+      expect(JSON.stringify(res)).toContain('ALLOWED_AMBIENT_DATA');
+      expect(JSON.stringify(res)).not.toContain('FOREIGN_AMBIENT_DATA');
+    }
+  });
+
+  test('shared HTTP dispatch applies the same grant before either ambient verb', async () => {
+    const warmed = await getBrainHotMemoryMeta('get_page', { ...ctxFor({ remote: false }), sourceId: 'ambient-foreign' });
+    expect(JSON.stringify(warmed)).toContain('FOREIGN_AMBIENT_DATA');
+    for (const op of ['context_pack', 'delta']) {
+      const res = await dispatchToolCall(engine, op, { entities: 'people/ambient-example', since: '2020-01-01T00:00:00Z' }, {
+        remote: true, transport: 'http', sourceId: 'ambient-foreign',
+        auth: { token: 'test-token', clientId: 'ambient-reader', scopes: ['read'], allowedSources: ['ambient-allowed'] },
+        metaHook: getBrainHotMemoryMeta,
+      });
+      expect(res.isError ?? false).toBe(false);
+      expect(JSON.stringify(res._meta)).toContain('ALLOWED_AMBIENT_DATA');
+      expect(JSON.stringify(res)).toContain('ALLOWED_AMBIENT_DATA');
+      expect(JSON.stringify(res)).not.toContain('FOREIGN_AMBIENT_DATA');
+    }
+  });
+
+  test('ambiguous grant with a foreign bound source refuses before creating cursor state', async () => {
+    const ctx: OperationContext = {
+      ...ctxFor({ remote: true, clientId: 'ambient-reader' }), sourceId: 'ambient-foreign',
+      auth: { clientId: 'ambient-reader', scopes: ['read'], allowedSources: ['default', 'ambient-allowed'] } as never,
+    };
+    for (const op of [contextPack, del]) {
+      await expect(call(op, ctx, { entities: 'people/ambient-example', session_id: 'denied-cursor' })).rejects.toMatchObject({ code: 'permission_denied' });
+    }
+    expect(await getSessionContextState(engine, 'ambient-foreign', 'ambient-reader', 'denied-cursor')).toBeNull();
+  });
+
+  test('HTTP refusal is a versioned verb envelope; optional metadata omits an ambiguous source', async () => {
+    const auth = { token: 'test-token', clientId: 'ambient-reader', scopes: ['read'], allowedSources: ['default', 'ambient-allowed'] };
+    const foreignCtx = { ...ctxFor({ remote: false }), sourceId: 'ambient-foreign' };
+    expect(JSON.stringify(await getBrainHotMemoryMeta('get_page', foreignCtx))).toContain('FOREIGN_AMBIENT_DATA');
+    expect(await getBrainHotMemoryMeta('get_page', { ...foreignCtx, remote: true, auth })).toBeUndefined();
+    for (const op of ['context_pack', 'delta']) {
+      const res = await dispatchToolCall(engine, op, { entities: 'people/ambient-example', session_id: 'http-denied-cursor' }, {
+        remote: true, transport: 'http', sourceId: 'ambient-foreign', auth, metaHook: getBrainHotMemoryMeta,
+      });
+      expect(res.isError).toBe(true);
+      const envelope = JSON.parse((res.content[0] as { text: string }).text);
+      expect(envelope.error).toBe('permission_denied');
+      expect(envelope.protocol_version).toBe(1);
+      expect(envelope.suggestion.length).toBeGreaterThan(0);
+      expect(res._meta).toBeUndefined();
+    }
+    expect(await getSessionContextState(engine, 'ambient-foreign', 'ambient-reader', 'http-denied-cursor')).toBeNull();
   });
 });
 
