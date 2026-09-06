@@ -2,7 +2,9 @@
 import {describe,test,expect} from 'bun:test';
 import postgres from 'postgres';
 import {findCandidateDuplicates,type PgFactsDeps} from '../../src/core/postgres-engine/facts.ts';
-const url=process.env.GBRAIN_TEST_CANDIDATE_URL;
+// The normal E2E runner validates/isolates DATABASE_URL. A dedicated URL also
+// supports running this rollback-only regression directly.
+const url=process.env.GBRAIN_TEST_CANDIDATE_URL ?? process.env.DATABASE_URL;
 const d=url?describe:describe.skip;
 
 async function fixture(run:(sql:any,deps:PgFactsDeps)=>Promise<void>){
@@ -30,6 +32,9 @@ async function fixture(run:(sql:any,deps:PgFactsDeps)=>Promise<void>){
     (5,'default','projects/foreign','wrong entity','[1,0,0]',NULL),
     (6,'default','projects/test','expired','[1,0,0]',now()),
     (7,'default','projects/test','no vector',NULL,NULL)`;
+   await sql`INSERT INTO facts(id,source_id,entity_slug,fact,embedding,created_at)
+     SELECT 3000+g,'default','projects/test','distant eligible','[0,1,0]'::vector,'2000-01-01'::timestamptz
+     FROM generate_series(1,300) g`;
    await sql`CREATE INDEX fact_scope ON facts(source_id,entity_slug)`;
    await sql`CREATE INDEX fact_ann ON facts USING hnsw(embedding vector_cosine_ops) WITH(m=8,ef_construction=16)`;
    await sql`ANALYZE facts`;
@@ -46,9 +51,13 @@ async function fixture(run:(sql:any,deps:PgFactsDeps)=>Promise<void>){
 
 d('source/entity fact candidate scope on Postgres',()=>{
  test('rank scoped candidates even when foreign vectors are globally closer',async()=>{
-  await fixture(async(_sql,deps)=>{
+  await fixture(async(sql,deps)=>{
+   const legacy="SELECT * FROM facts WHERE source_id='default' AND entity_slug='projects/test' AND expired_at IS NULL AND embedding IS NOT NULL ORDER BY embedding <=> '[1,0,0]'::vector LIMIT 5";
+   const plan=await sql.unsafe('EXPLAIN '+legacy);
+   expect(JSON.stringify(plan)).toContain('fact_ann');
+   expect(await sql.unsafe(legacy)).toHaveLength(0);
    const rows=await findCandidateDuplicates(deps,'default','projects/test','query',{embedding:new Float32Array([1,0,0]),k:5});
-   expect(rows.map(x=>x.id)).toEqual([1,2,3]);
+   expect(rows.map(x=>x.id)).toEqual([1,2,3,3001,3002]);
    expect(rows.every(x=>x.source_id==='default'&&x.entity_slug==='projects/test'&&!x.expired_at&&x.embedding)).toBe(true);
   });
  });

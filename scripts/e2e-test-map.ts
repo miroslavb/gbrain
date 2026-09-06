@@ -150,6 +150,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   ],
   // Engine method modules peeled from the façades carry the same blast
   // radius as the façades themselves.
+  "src/core/*-engine/facts.ts": ["test/e2e/fact-candidate-scope-postgres.test.ts"],
   "src/core/postgres-engine/**": [
     "test/e2e/postgres-bootstrap.test.ts",
     "test/e2e/postgres-jsonb.test.ts",

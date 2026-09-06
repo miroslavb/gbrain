@@ -507,16 +507,20 @@ export async function findCandidateDuplicates(
   ): Promise<FactRow[]> {
     const k = Math.min(Math.max(opts?.k ?? 5, 1), 20);
     if (opts?.embedding) {
-      // Embedding-cosine ordered candidates within the entity bucket.
+      // Materialize the source/entity bucket before cosine ranking, matching
+      // Postgres. Filtering a global halfvec HNSW scan can drop close facts.
       const vec = toPgVectorLiteral(opts.embedding);
       const result = await deps.db.query<FactRowSqlShape>(
-        `SELECT * FROM facts
-         WHERE source_id = $1
-           AND entity_slug = $2
-           AND expired_at IS NULL
-           AND embedding IS NOT NULL
-         ORDER BY embedding <=> $3::vector
-         LIMIT $4`,
+        `WITH scoped AS MATERIALIZED (
+           SELECT id, embedding FROM facts
+           WHERE source_id = $1 AND entity_slug = $2
+             AND expired_at IS NULL AND embedding IS NOT NULL
+         ), nearest AS (
+           SELECT id, embedding <=> $3::vector AS distance FROM scoped
+           ORDER BY distance, id LIMIT $4
+         )
+         SELECT f.* FROM nearest n JOIN facts f ON f.id = n.id
+         ORDER BY n.distance, n.id`,
         [source_id, entitySlug, vec, k],
       );
       return result.rows.map(rowToFact);
