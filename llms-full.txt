@@ -17,6 +17,16 @@ This is your install + operating protocol. Claude Code reads `./CLAUDE.md` autom
 Everyone else (Codex, Cursor, OpenClaw, Aider, Continue, or an LLM fetching via URL):
 start here.
 
+## Maintenance-only closure candidate (2026-09-06)
+
+This branch starts at production 260986 and contains only source-grant isolation,
+saved-source sync strategy precedence/validation, and financial seed-edge
+inference. It excludes the rejected 8962f retrieval/autocut/title changes. Verify
+the targeted source-grant, sync and graph suites plus typecheck under isolated
+GBRAIN_HOME before the parent considers deployment; a retrieval gate FAIL cannot
+be relabeled as acceptance. Runtime source grants bound ambient memory/metadata
+reads before any recall; permissive default fallback must not cross a grant.
+
 > **Becoming someone's persistent personal agent** (identity + memory + private repo)?
 > Follow [`BOOTSTRAP_FOR_AGENTS.md`](./BOOTSTRAP_FOR_AGENTS.md) — the `gbrain bootstrap`
 > flow — instead of the plain install below, then come back here for the operating
@@ -76,6 +86,17 @@ confinement when `remote = true` and default to strict behavior when unset. If y
 writing or reviewing an operation, consult `src/core/operations.ts` for the contract.
 
 ## Common tasks
+
+- **Sync strategy inheritance:** every sync entry resolves an explicit strategy
+  first, then the selected source's saved `config.strategy`, then `markdown`.
+  Omission must never narrow an `auto`/`code` source and soft-delete modified
+  code. Invalid selected strategies fail before imports, cleanup or bookmarks;
+  explicit narrowing remains supported and source-scoped. The `--all` CLI and
+  worker wrapper use the same validated precedence.
+  Use the canonical source-config parser before selecting a saved strategy:
+  historical scalar/null configs without settings remain eligible for sync's
+  heal-on-write, and recoverable nested strings/array fragments retain settings.
+  A recovered invalid `strategy` still fails before sync mutations.
 
 - **Fact identity/provenance (host priority6):** qualified canonical IDs outrank
   aliases; curated aliases outrank legacy root stubs. Multiple live alias holders
@@ -149,6 +170,14 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   and must not make an installed unit look absent. The canonical host script is
   `scripts/host/autopilot-watchdog.sh`; deploy it to
   `/root/.gbrain/autopilot-watchdog.sh` and keep the exact 10-minute cron row.
+- **Investment inference:** bundled schema packs require a financial phrase
+  such as `seed funding` or `seed capital`; bare `seeded` also describes data,
+  aliases and other initialization. Preserve genuine investment cues, including
+  when technical words appear nearby. Pack regexes run before legacy inference,
+  so precision regressions must test the bundled manifests and page extraction.
+  Updating a pack does not remove historical graph edges; repair those only
+  within the separately reviewed scope.
+
 - **Duplicate-content signal:** doctor counts every same-source content-hash
   group, but dependency trees and exact declared distribution/fixture/locale
   replicas are non-actionable details. Any other distinct-slug group remains
@@ -451,6 +480,17 @@ publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork
 
 ## Fact page projection contract
 
+Fact candidate lookup on PostgreSQL and PGlite must rank inside the active source/entity
+bucket. Materialize only its IDs/vectors before exact cosine ordering, then
+hydrate the selected rows. A global HNSW scan followed by scope filtering can
+omit even a known close candidate. Preserve k and the no-vector recency fallback;
+do not turn this into a brain-wide exact scan or semantic deduplication rule.
+The pg_temp regression covers closer foreign-source/entity vectors, expiry/NULL
+exclusions and the existing cap/fallback without writing persistent fixtures.
+PGlite uses halfvec/HNSW; its vector query cast does not prevent ANN filtering.
+Keep the embedded halfvec regression and run the PostgreSQL test through the
+ordinary validated E2E DATABASE_URL or its dedicated test URL.
+
 Timeline writes must derive the projected timeline from the final canonical file,
 including trailing facts/takes sections. Independently appending to the previous
 DB timeline can place the same event after a fence while the file places it before.
@@ -472,6 +512,10 @@ and upgrades; code-edge counts alone do not certify symbol lookup or graph tools
 Definition/reference results include `source_id` for source/path attribution.
 Regression: `test/reindex-code.test.ts`, `test/reindex-code-recovery.test.ts`,
 `test/code-def-refs.test.ts`, `test/e2e/reindex-code-kind-postgres.test.ts`.
+
+Maintenance test fixtures keep the existing v1.2.1/atom-phase manifest contract
+explicit and supply the worker wrapper’s required concurrency option. These
+fixture corrections change no runtime phase, policy, queue or model setting.
 
 ---
 
