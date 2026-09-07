@@ -4,6 +4,11 @@ This is your install + operating protocol. Claude Code reads `./CLAUDE.md` autom
 Everyone else (Codex, Cursor, OpenClaw, Aider, Continue, or an LLM fetching via URL):
 start here.
 
+## Reindex prefix scope
+
+Treat canonical prefixes literally, including percent and underscore; SQL LIKE
+wildcards must never expand a reviewed reindex boundary.
+
 ## Bounded code lookup
 
 Large declaration splits preserve the original contiguous declaration/header.

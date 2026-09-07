@@ -15,6 +15,7 @@ import { _resetCliExitVerdictForTests, currentExitCode } from '../src/core/cli-f
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { checkLiteralReindexPrefix } from './helpers/reindex-prefix-fixture.ts';
 
 let engine: PGLiteEngine;
 
@@ -79,6 +80,10 @@ async function captureOutput<T>(fn: () => Promise<T>): Promise<{ result: T; stdo
 }
 
 describe('gbrain reindex --markdown (v0.32.7)', () => {
+  test('literal underscore prefix confines dry-run and bounded writes to its source subtree', async () => {
+    await checkLiteralReindexPrefix(engine);
+  });
+
   test('dry-run reports pending count and does not write', async () => {
     await seedLegacyPage('note-a', 'body a');
     await seedLegacyPage('note-b', 'body b');

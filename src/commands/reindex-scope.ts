@@ -55,7 +55,9 @@ export function buildReindexScopeSql(scope: ReindexScope, noEmbed: boolean): Rei
   if (scope.sourceId) clauses.push(`source_id = ${bind(scope.sourceId)}`);
   if (scope.prefix) {
     const p = bind(scope.prefix);
-    clauses.push(`(slug = ${p} OR slug LIKE ${p} || '/%')`);
+    // A canonical slug can contain underscores; LIKE must treat them literally.
+    const descendants = bind(`${scope.prefix.replace(/[!%_]/g, '!$&')}/%`);
+    clauses.push(`(slug = ${p} OR slug LIKE ${descendants} ESCAPE '!')`);
   }
   if (scope.retrievedSince) {
     clauses.push(`last_retrieved_at >= ${bind(`${scope.retrievedSince}T00:00:00.000Z`)}::timestamptz`);

@@ -1,12 +1,13 @@
 import { findCodeDef } from '../../src/commands/code-def.ts';
 import { findCodeRefs } from '../../src/commands/code-refs.ts';
-import { beforeAll, afterAll, describe, expect, test } from 'bun:test';
+import { beforeAll, afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { hasDatabase, setupDB, teardownDB } from './helpers.ts';
 import type { PostgresEngine } from '../../src/core/postgres-engine.ts';
 import { importCodeFile } from '../../src/core/import-file.ts';
 import { runReindexCode } from '../../src/commands/reindex-code.ts';
 import { checkCodeChunkMetadata } from '../../src/commands/doctor/checks/extraction-sync.ts';
 import { configureGateway, resetGateway } from '../../src/core/ai/gateway.ts';
+import { checkLiteralReindexPrefix } from '../helpers/reindex-prefix-fixture.ts';
 
 describe.skipIf(!hasDatabase())('retyped code metadata on Postgres', () => {
   let engine: PostgresEngine;
@@ -15,6 +16,9 @@ describe.skipIf(!hasDatabase())('retyped code metadata on Postgres', () => {
     configureGateway({ embedding_model: 'openai:text-embedding-3-large', embedding_dimensions: 1536, env: {} });
   }, 120_000);
   afterAll(async () => { resetGateway(); await teardownDB(); }, 30_000);
+  afterEach(async () => {
+    await engine.executeRaw("DELETE FROM pages WHERE source_id IN ('scope-test','scope-foreign')");
+  });
   test('doctor detects and reindex repairs note-typed code without resurrecting deleted pages', async () => {
     await importCodeFile(engine, 'src/active.ts', 'export function active() { return 1; }', { noEmbed: true });
     await importCodeFile(engine, 'src/retired.ts', 'export function retired() { return 2; }', { noEmbed: true });
@@ -39,5 +43,8 @@ describe.skipIf(!hasDatabase())('retyped code metadata on Postgres', () => {
       expect(await lookup(engine, 'active', { sourceId: 'unindexed', limit: 1 })).toEqual([]);
       expect(await lookup(engine, 'retired', { sourceId: 'default', limit: 1 })).toEqual([]);
     }
+  }, 60_000);
+  test('markdown reindex treats underscore prefix literally for count and bounded writes', async () => {
+    await checkLiteralReindexPrefix(engine);
   }, 60_000);
 });
