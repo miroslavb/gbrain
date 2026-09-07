@@ -4,6 +4,13 @@ This is your install + operating protocol. Claude Code reads `./CLAUDE.md` autom
 Everyone else (Codex, Cursor, OpenClaw, Aider, Continue, or an LLM fetching via URL):
 start here.
 
+## Bounded code lookup
+
+Large declaration splits preserve the original contiguous declaration/header.
+The exact code_refs file predicate precedes LIMIT and composes with the upstream
+source resolver; --file must be skipped by positional argument parsing.
+Chunker version migration needs a reviewed finite admission, never a global rewalk.
+
 ## Source-fork upgrade contract
 
 Merge explicit upstream tags in an isolated worktree. Preserve source grants,

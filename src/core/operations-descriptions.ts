@@ -168,7 +168,7 @@ export const CODE_DEF_DESCRIPTION =
   "Filter by --lang to scope a polyglot brain (e.g., lang='typescript').";
 
 export const CODE_REFS_DESCRIPTION =
-  "Find every reference to a symbol across the codebase (every file, every line). " +
+  "Find indexed chunks containing a symbol across the codebase. " +
   "Differs from code_callers in two ways: (1) catches references in comments, " +
   "strings, imports, type annotations — not just call sites; (2) returns line " +
   "spans, not symbol-qualified edges. Use this when planning a rename or " +
@@ -176,7 +176,7 @@ export const CODE_REFS_DESCRIPTION =
   "Returns: `{symbol, count, status, ready, refs: [{source_id, slug, file, language, " +
   "symbol_name, symbol_type, start_line, end_line, snippet}]}` — `status`/`ready` " +
   "are the code-graph readiness signal (a brain whose chunks predate symbol " +
-  "extraction reports `no_symbols`, not an empty match). Pass source_id to filter before top-k. " +
+  "extraction reports `no_symbols`, not an empty match). Pass source_id and an exact file path to filter before top-k. " +
   "This is bounded substring retrieval, not exhaustive semantic references.";
 
 // ──────────────────────────────────────────────────────────────────────────────

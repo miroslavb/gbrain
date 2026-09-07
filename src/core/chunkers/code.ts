@@ -118,14 +118,10 @@ import G_ZIG from '../../assets/wasm/grammars/tree-sitter-zig.wasm' with { type:
 // + small-sibling merging. Every v0.18.0 brain with code pages re-chunks on
 // next sync because the chunk sizes + symbol boundaries shift.
 //
-// v4 (v0.20.0 Cathedral II Layer 12): chunk-grain FTS vector + qualified
-// symbol name + parent_symbol_path + doc_comment columns. Chunk_text headers
-// will gain the qualified name and scope chain once Layer 5/6 lands. The
-// bump + sources.chunker_version gate (in src/commands/sync.ts) forces a
-// full walk on upgraded brains even when git HEAD hasn't moved, so existing
-// chunks get the new columns populated. Without this, the v28 backfill
-// gives every existing chunk a search_vector but subsequent Layer 5 AST
-// work would silently no-op.
+// v4 (v0.20.0 Cathedral II Layer 12): chunk-grain FTS, qualified names,
+// parent_symbol_path and doc_comment. The sources.chunker_version gate in
+// commands/sync.ts forces a full walk even at unchanged HEAD, so old chunks
+// receive the columns; the v28 search_vector backfill alone cannot do this.
 //
 // v5 (#3821): Python `decorated_definition` handling. A decorated top-level
 // function or class (and a decorated method inside a class) parses as a
@@ -140,7 +136,9 @@ import G_ZIG from '../../assets/wasm/grammars/tree-sitter-zig.wasm' with { type:
 // top-level defs indexed to ZERO symbols). Chunk boundaries change for every
 // previously-merged file, so the bump forces a re-chunk that recovers the
 // erased symbols.
-export const CHUNKER_VERSION = 6;
+// v7: large-node splitting retains declaration/decorator text and its source
+// range before the first body child. Existing affected chunks require recovery.
+export const CHUNKER_VERSION = 7;
 
 // Lazy-loaded tree-sitter module (v0.22.x API: Parser is default export)
 let Parser: typeof import('web-tree-sitter') | null = null;
@@ -1376,8 +1374,10 @@ function splitLargeNode(node: any, source: string, chunkTarget: number): SplitRa
   if (children.length < 2) return [];
 
   const ranges: SplitRange[] = [];
-  let curStart = children[0].startIndex;
-  let curStartLine = children[0].startPosition.row + 1;
+  // Preserve the declaration (including multiline parameters/decorators) in
+  // the first contiguous range. Starting at the first body child erased it.
+  let curStart = node.startIndex;
+  let curStartLine = node.startPosition.row + 1;
   let curEnd = children[0].endIndex;
   let curEndLine = children[0].endPosition.row + 1;
   let curTokens = estimateTokens(source.slice(curStart, curEnd));

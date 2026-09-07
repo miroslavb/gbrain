@@ -28,7 +28,7 @@ import { codeChunksExist } from '../core/code-graph-readiness.ts';
  * looked up the symbol "srcb". Pre-existing for --lang/--limit; adding --source
  * to code-def/code-refs multiplied the ways to hit it.
  */
-const VALUE_FLAGS = new Set(['--source', '--limit', '--lang']);
+const VALUE_FLAGS = new Set(['--source', '--limit', '--lang', '--file']);
 
 /** Positional args, skipping both value-taking flags and their values.
  * The inline `name=value` flag spelling is one token starting with a double

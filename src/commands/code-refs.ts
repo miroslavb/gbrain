@@ -38,7 +38,7 @@ export interface CodeRefResult {
 export async function findCodeRefs(
   engine: BrainEngine,
   symbol: string,
-  opts: { limit?: number; language?: string; sourceId?: string; allSources?: boolean } = {},
+  opts: { limit?: number; language?: string; sourceId?: string; allSources?: boolean; file?: string } = {},
 ): Promise<CodeRefResult[]> {
   const limit = opts.limit ?? 50;
   const params: unknown[] = [`%${symbol}%`];
@@ -48,6 +48,11 @@ export async function findCodeRefs(
     whereLang = `AND cc.language = $${params.length}`;
   }
   const whereSource = pushSourcePredicate(params, opts);
+  let whereFile = "";
+  if (opts.file !== undefined) {
+    params.push(opts.file);
+    whereFile = `AND p.frontmatter->>'file' = $${params.length}`;
+  }
   params.push(limit);
   const rows = await engine.executeRaw<{
     source_id: string; slug: string; file: string | null; language: string | null;
@@ -64,6 +69,7 @@ export async function findCodeRefs(
        AND cc.chunk_text ILIKE $1
        ${whereLang}
        ${whereSource}
+       ${whereFile}
      ORDER BY p.slug, cc.start_line NULLS LAST
      LIMIT $${params.length}`,
     params,
@@ -95,7 +101,7 @@ export async function runCodeRefs(engine: BrainEngine, args: string[]): Promise<
       class: 'UsageError',
       code: 'code_refs_requires_symbol',
       message: 'code-refs requires a symbol name',
-      hint: 'gbrain code-refs <symbol> [--source S | --all-sources] [--lang <language>] [--json]',
+      hint: 'gbrain code-refs <symbol> [--source S | --all-sources] [--lang <language>] [--file <exact-path>] [--json]',
     });
     if (shouldEmitJson(args)) {
       console.log(JSON.stringify({ error: err.envelope }));
@@ -106,6 +112,7 @@ export async function runCodeRefs(engine: BrainEngine, args: string[]): Promise<
   }
   const limit = parseInt(parseFlag(args, '--limit') || '50', 10);
   const language = parseFlag(args, '--lang');
+  const file = parseFlag(args, '--file');
   // Outside the try, matching code-callers / code-callees: the helper signals
   // usage failures with process.exit(2), and a surrounding catch would
   // reclassify them as a generic exit-1 failure.
@@ -116,7 +123,7 @@ export async function runCodeRefs(engine: BrainEngine, args: string[]): Promise<
     command: 'code-refs',
   });
   try {
-    const results = await findCodeRefs(engine, sym, { limit, language, sourceId, allSources });
+    const results = await findCodeRefs(engine, sym, { limit, language, sourceId, allSources, file });
     // Readiness is 'symbol' grain, scoped to the same source as the lookup.
     // remote: false — direct CLI invocation is the trusted local caller.
     const readiness = await resolveCodeReadiness(engine, {

@@ -144,6 +144,7 @@ const code_refs: Operation = {
     limit: { type: 'number', description: 'Max references returned. Default 50.' },
     source_id: { type: 'string', description: 'Explicit source filter applied before the result limit; checked against caller grants. Omit for legacy brain-wide lookup.' },
     lang: { type: 'string', description: "Filter by content_chunks.language." },
+    file: { type: 'string', description: 'Exact indexed file path (frontmatter.file), applied before the result limit together with source_id. No glob or regex matching.' },
   },
   scope: 'read',
   handler: async (ctx, p) => {
@@ -154,6 +155,7 @@ const code_refs: Operation = {
       limit: (p.limit as number) ?? 50,
       language: (p.lang as string) || undefined,
       sourceId,
+      file: typeof p.file === 'string' ? p.file : undefined,
     });
     // code_refs is brain-wide unless source_id is explicit; readiness is 'symbol' grain.
     const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');

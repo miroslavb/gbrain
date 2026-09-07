@@ -19,8 +19,71 @@ import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { importCodeFile } from '../../src/core/import-file.ts';
 import { findCodeDef } from '../../src/commands/code-def.ts';
 import { findCodeRefs } from '../../src/commands/code-refs.ts';
+import type { BrainEngine } from '../../src/core/engine.ts';
+import { operationsByName, type OperationContext } from '../../src/core/operations.ts';
+import { hasDatabase, setupDB, teardownDB } from './helpers.ts';
 
 let engine: PGLiteEngine;
+
+// Shared real-engine regression: a common symbol must be filterable before
+// LIMIT, and splitting a large function must retain its actual declaration.
+async function assertBoundedCodeLookup(db: BrainEngine): Promise<void> {
+  const sourceId = 'code-path-fixture', foreign = 'code-path-foreign';
+  for (const id of [sourceId, foreign]) {
+    await db.executeRaw("INSERT INTO sources(id,name,config) VALUES ($1,$1,'{}'::jsonb) ON CONFLICT(id) DO NOTHING", [id]);
+  }
+  const fixture = (marker: string) => `def shared_fixture_read(value):\n    return "${marker}" + str(value)\n`;
+  for (let i = 0; i < 21; i++) {
+    await importCodeFile(db, `aa/noise_${i}.py`, fixture('noise'), { noEmbed: true, sourceId });
+  }
+  const file = 'zz/target.py';
+  await importCodeFile(db, file, fixture('expected-local'), { noEmbed: true, sourceId });
+  await importCodeFile(db, file, fixture('foreign-source'), { noEmbed: true, sourceId: foreign });
+  const query = { sourceId, limit: 1, language: 'python' };
+  expect((await findCodeRefs(db, 'shared_fixture_read', query))[0]!.file).not.toBe(file);
+  const exact = await findCodeRefs(db, 'shared_fixture_read', { ...query, file });
+  expect(exact).toHaveLength(1);
+  expect(exact[0]!.file).toBe(file);
+  expect(exact[0]!.source_id).toBe(sourceId);
+  expect(exact[0]!.snippet).toContain('expected-local');
+  const foreignControl = await findCodeRefs(db, 'shared_fixture_read', { ...query, sourceId: foreign, file });
+  expect(foreignControl[0]!.snippet).toContain('foreign-source');
+  for (const absent of ['', 'zz/%', 'zz/*.py', "zz/target.py' OR 1=1 --"]) {
+    expect(await findCodeRefs(db, 'shared_fixture_read', { ...query, file: absent })).toEqual([]);
+  }
+  expect(await findCodeRefs(db, 'shared_fixture_read', { ...query, file, language: 'typescript' })).toEqual([]);
+  const ctx = { engine: db, config: { engine: 'pglite' }, logger: { info() {}, warn() {}, error() {}, debug() {} },
+    dryRun: false, remote: true, transport: 'stdio', sourceId,
+    auth: { token: 'synthetic-fixture-token', clientId: 'synthetic-fixture', scopes: ['read'], allowedSources: [sourceId] } } as OperationContext;
+  const result = await operationsByName.code_refs!.handler(ctx, { symbol: 'shared_fixture_read', source_id: sourceId, file, limit: 1 });
+  expect((result as { refs: unknown[] }).refs).toEqual(exact);
+  await expect(operationsByName.code_refs!.handler(ctx, { symbol: 'shared_fixture_read', source_id: foreign, file, limit: 1 })).rejects.toMatchObject({ code: 'permission_denied' });
+
+  const declaration = 'def long_fixture_context(\n    supplied_value,\n    *,\n    option=None,\n):\n';
+  const longSource = '# Synthetic source fixture\n\n' + declaration + Array.from({ length: 160 }, (_, i) =>
+    `    fixture_part_${i} = transform_fixture(supplied_value, option, ${i})`).join('\n') + '\n    return fixture_part_159\n';
+  await importCodeFile(db, 'zz/long_context.py', longSource, { noEmbed: true, sourceId });
+  const defs = await findCodeDef(db, 'long_fixture_context', { sourceId, limit: 1 });
+  expect(defs).toHaveLength(1);
+  expect(defs[0]!.start_line).toBe(3);
+  expect(defs[0]!.snippet).toContain(declaration);
+  expect(defs[0]!.source_id).toBe(sourceId);
+}
+
+describe('bounded code lookup on PGLite', () => {
+  test('preserves declarations and filters exact files before top-k with foreign controls', async () => {
+    await assertBoundedCodeLookup(engine);
+  });
+});
+
+(hasDatabase() ? describe : describe.skip)('bounded code lookup on PostgreSQL', () => {
+  let pg: BrainEngine;
+  beforeAll(async () => { pg = await setupDB(); });
+  afterAll(async () => { await teardownDB(); });
+  test('preserves declarations and filters exact files before top-k with foreign controls', async () => {
+    await assertBoundedCodeLookup(pg);
+  });
+});
 
 // ────────────────────────────────────────────────────────────
 // Fictional corpus — 5 languages × ~10 files each.
