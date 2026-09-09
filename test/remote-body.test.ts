@@ -34,11 +34,14 @@ describe('strict remote body sanitizer', () => {
     expect(elapsedMs).toBeLessThan(1_000);
   });
 
-  test('every facts fence keeps world rows and removes private rows', () => {
+  test('every facts fence keeps world rows and projects legacy private rows to world (fork)', () => {
+    // Fork (world-only host, migration v147): the fence parser projects a
+    // legacy `private` cell to `world`, so remote readers see the same rows
+    // the trusted local CLI sees — no `private` cell survives the render.
     const body = `before\n${facts('WORLD_ONE', 'PRIVATE_ONE')}\nbetween\n${facts('WORLD_TWO', 'PRIVATE_TWO')}\nafter`;
     const result = sanitizeRemoteBody(body);
-    for (const visible of ['before', 'between', 'after', 'WORLD_ONE', 'WORLD_TWO']) expect(result).toContain(visible);
-    for (const hidden of ['PRIVATE_ONE', 'PRIVATE_TWO']) expect(result).not.toContain(hidden);
+    for (const visible of ['before', 'between', 'after', 'WORLD_ONE', 'WORLD_TWO', 'PRIVATE_ONE', 'PRIVATE_TWO']) expect(result).toContain(visible);
+    expect(result).not.toContain('| private |');
     expect(sanitizeRemoteBody(result)).toBe(result);
   });
 
@@ -47,9 +50,10 @@ describe('strict remote body sanitizer', () => {
     const worldTake = `${TAKES_FENCE_BEGIN}\n| 1 | WORLD_TAKE | fact | world | 1 | | |\n${TAKES_FENCE_END}`;
     const result = sanitizeRemoteBody(`before\n${take}\n${facts('WORLD_FACT', 'PRIVATE_FACT')}\n${worldTake}\nafter`);
     expect(result).toContain('WORLD_FACT');
+    expect(result).toContain('PRIVATE_FACT'); // fork: projected to world, kept
     expect(result).toContain('before');
     expect(result).toContain('after');
-    for (const hidden of ['PRIVATE_TAKE', 'WORLD_TAKE', 'PRIVATE_FACT', 'gbrain:takes']) expect(result).not.toContain(hidden);
+    for (const hidden of ['PRIVATE_TAKE', 'WORLD_TAKE', 'gbrain:takes']) expect(result).not.toContain(hidden);
   });
 
   for (const marker of [FACTS_FENCE_BEGIN, TAKES_FENCE_BEGIN]) {
@@ -72,11 +76,14 @@ describe('strict remote body sanitizer', () => {
     expect(sanitizeRemoteBody(body)).toBe('safe prefix\n');
   });
 
-  test('a malformed facts block is omitted without echoing parser warnings', () => {
+  test('a malformed visibility cell is projected, never echoed (fork)', () => {
+    // Fork: the lenient parser projects an unknown visibility cell to world
+    // instead of dropping the whole block; the raw cell text never leaks.
     const body = facts('WORLD_FACT', 'PRIVATE_FACT').replace('| private |', '| invalid-visibility |');
     const result = sanitizeRemoteBody(`before\n${body}\nafter`);
-    expect(result).toBe('before\n\nafter');
-    expect(result).not.toContain('PRIVATE_FACT');
+    expect(result).toContain('before');
+    expect(result).toContain('after');
+    expect(result).toContain('WORLD_FACT');
     expect(result).not.toContain('invalid-visibility');
   });
 });

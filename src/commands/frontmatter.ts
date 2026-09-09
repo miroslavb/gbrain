@@ -433,23 +433,13 @@ async function runGenerate(args: string[]): Promise<void> {
     return;
   }
 
-  // Find the brain root — walk up from targetPath looking for .git or known brain markers.
-  // Inference rules match against brain-root-relative paths (e.g., "people/alice.md").
+  // Find the brain root. Inference rules match against brain-root-relative
+  // paths (e.g., "people/alice.md"), so ask Git for the containing worktree
+  // (findBrainRoot): a stale or EMPTY `.git` marker up the tree (a leftover
+  // /tmp/.git on a shared host) must not relocate the root and turn every
+  // rule-matched path into a catch-all. No valid worktree → the target itself.
   let brainRoot = rootPath;
-  if (isDir) {
-    let candidate = rootPath;
-    for (let i = 0; i < 10; i++) {
-      try {
-        statSync(join(candidate, '.git'));
-        brainRoot = candidate;
-        break;
-      } catch {
-        const parent = resolve(candidate, '..');
-        if (parent === candidate) break;
-        candidate = parent;
-      }
-    }
-  }
+  if (isDir) brainRoot = findBrainRoot(rootPath);
 
   interface GenerateResult {
     path: string;

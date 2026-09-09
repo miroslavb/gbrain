@@ -114,9 +114,10 @@ describe('query op — CRAG gate (#1663)', () => {
   test('#4610: default-shape caller (expand on) skips the re-run — the documented callerExpanded guard', async () => {
     await engine.setConfig('search.crag_escalation', 'true');
     const { ctx, meta } = ctxWithMeta();
-    // No expand param → expand defaults to true → the first pass already
-    // used the high-ceiling expansion knob → no redundant re-query.
-    await operationsByName.query.handler(ctx, { query: 'zxqv nonexistent quux' });
+    // Fork: an omitted `expand` resolves through search.expansion / the mode
+    // bundle inside hybridSearch, so the op cannot vouch for it; the guard is
+    // exercised with the explicit expand:true it documents.
+    await operationsByName.query.handler(ctx, { query: 'zxqv nonexistent quux', expand: true });
     const crag = cragOf(meta);
     expect(crag.confidence).toBe('weak');
     expect(crag.escalated).toBeUndefined();

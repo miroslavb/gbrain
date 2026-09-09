@@ -202,15 +202,15 @@ describe('strategy precedence', () => {
     expect(await slugsFor('prec-explicit')).toEqual(['docs/x']);
   }, 120_000);
 
-  test('bogus persisted config.strategy is ignored, not honored', async () => {
+  test('bogus persisted config.strategy is rejected loudly, never honored (fork)', async () => {
     await ensureSetup();
     const { performSync } = await import('../src/commands/sync.ts');
     const r = mkMixedRepo();
     await addSource('prec-bogus', 'bogus-strategy', r);
-    // No strategy option: the out-of-set persisted value is skipped, classifySync
-    // falls back to 'markdown', and the sync completes with the code file left out.
-    const res = await performSync(engine!, { repoPath: r, ...OPTS, sourceId: 'prec-bogus' });
-    expect(res.status).toBe('first_sync');
-    expect(await slugsFor('prec-bogus')).toEqual(['docs/x']);
+    // Fork: an out-of-set persisted strategy is an operator error and fails
+    // the sync before any cleanup (upstream silently falls back to markdown).
+    await expect(performSync(engine!, { repoPath: r, ...OPTS, sourceId: 'prec-bogus' }))
+      .rejects.toThrow(/Invalid sync strategy/);
+    expect(await slugsFor('prec-bogus')).toEqual([]);
   }, 120_000);
 });

@@ -71,7 +71,10 @@ describe('remote history uses strict body sanitization', () => {
         if (remote === false) {
           expect(result[0].compiled_truth).toBe(body);
         } else {
-          expect(result[0].compiled_truth).not.toContain('PRIVATE_HISTORY');
+          // Fork (world-only host): legacy private fact rows are projected to
+          // world for every reader; the takes fence still never reaches remote.
+          expect(result[0].compiled_truth).toContain('PRIVATE_HISTORY');
+          expect(result[0].compiled_truth).not.toContain('| private |');
           expect(result[0].compiled_truth).not.toContain('PRIVATE_TAKE_HISTORY');
         }
         expect(version.compiled_truth).toBe(body);

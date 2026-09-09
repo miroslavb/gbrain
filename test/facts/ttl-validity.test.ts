@@ -112,7 +112,8 @@ describe('WP5 read-time TTL validity — active reads', () => {
   });
 
   test('findCandidateDuplicates (embedding branch) excludes lapsed rows', async () => {
-    const emb = new Float32Array(1536);
+    const dims = Number(await engine.getConfig('embedding_dimensions')) || 1536;
+    const emb = new Float32Array(dims);
     emb[7] = 1.0;
     const embEntity = 'people/ttl-embed-example';
     const lapsedEmb = await engine.insertFact(

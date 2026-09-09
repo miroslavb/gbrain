@@ -229,7 +229,10 @@ describe('visibility boundary round-trip (test bullet 9, end-to-end)', () => {
       fact: 'prefers dark mode in every editor',
       entity: 'people/alice-example', provenance: 'test', visibility: 'world',
     }, { remote: false });
-    expect(JSON.parse(w1.content[0].text as string).status).toBe('inserted');
+    // Fork (world-only host): `visibility: private` is not writable — the verb
+    // schema rejects it; only the world fact lands.
+    expect(w1.isError).toBe(true);
+    expect(JSON.parse(w1.content[0].text as string).error).toBe('invalid_params');
     expect(JSON.parse(w2.content[0].text as string).status).toBe('inserted');
 
     // Remote recall (MCP default): world-only. sourceId threaded explicitly
@@ -239,9 +242,11 @@ describe('visibility boundary round-trip (test bullet 9, end-to-end)', () => {
     expect(remoteFacts.some((f) => f.includes('dark mode'))).toBe(true);
     expect(remoteFacts.some((f) => f.includes('private planning note'))).toBe(false);
 
-    // Trusted-local recall sees both.
+    // Trusted-local recall: the rejected private request never landed either
+    // (fork world-only host); the world fact is there.
     const local = await dispatchToolCall(engine, 'recall', { entity: 'people/alice-example' }, { remote: false });
     const localFacts = (JSON.parse(local.content[0].text as string) as { facts: Array<{ fact: string }> }).facts.map((f) => f.fact);
-    expect(localFacts.some((f) => f.includes('private planning note'))).toBe(true);
+    expect(localFacts.some((f) => f.includes('dark mode'))).toBe(true);
+    expect(localFacts.some((f) => f.includes('private planning note'))).toBe(false);
   });
 });

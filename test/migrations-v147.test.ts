@@ -82,7 +82,8 @@ describe('migration v147 — world-only host visibility', () => {
     await skewEngine.setConfig('facts.default_visibility', 'private');
     await skewEngine.setConfig('version', '151');
 
-    expect((await runMigrations(skewEngine)).applied).toBe(1);
+    // v152 plus every later migration (153 facts_kind_idea_alter, 154 transcript state).
+    expect((await runMigrations(skewEngine)).applied).toBeGreaterThanOrEqual(1);
     expect(await skewEngine.getConfig('facts.default_visibility')).toBe('world');
     expect(await skewEngine.executeRaw<{ private_facts: number; private_pages: number }>(`
       SELECT

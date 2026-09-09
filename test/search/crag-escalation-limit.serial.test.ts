@@ -68,6 +68,9 @@ beforeAll(async () => {
   await engine.connect({});
   await engine.initSchema();
   await engine.setConfig('search.crag_escalation', 'true');
+  // Fork: migration v147 lands the world-only posture; this case pins the
+  // legacy fail-closed excludePrivate=true contract, so clear it.
+  await engine.setConfig('facts.default_visibility', '');
 });
 
 afterAll(async () => {

@@ -96,10 +96,12 @@ describe('language/symbol_kind-filtered requests skip the semantic cache', () =>
       limit: 10,
       onMeta: (m) => { missMeta = m; },
     });
-    expect(missMeta?.cache?.status).toBe('miss');
+    // v0.48.3: semantic result caching is disabled outright ('disabled', nothing
+    // stored); the language/symbol_kind bypass below stays pinned for when it returns.
+    expect(['miss', 'disabled']).toContain(String(missMeta?.cache?.status));
     expect(unfiltered.map((r) => r.slug).sort()).toEqual(['alice-foo', 'bob-bar']);
     await awaitPendingSearchCacheWrites();
-    expect((await engine.executeRaw('SELECT id FROM query_cache')).length).toBe(1);
+    expect((await engine.executeRaw('SELECT id FROM query_cache')).length).toBe(missMeta?.cache?.status === 'disabled' ? 0 : 1);
 
     // 2. Same query WITH a language filter: identical embedding + knobs would
     //    have HIT the stored unfiltered row pre-fix. Must bypass instead.
@@ -125,7 +127,7 @@ describe('language/symbol_kind-filtered requests skip the semantic cache', () =>
 
     // 4. Neither filtered run stored anything.
     await awaitPendingSearchCacheWrites();
-    expect((await engine.executeRaw('SELECT id FROM query_cache')).length).toBe(1);
+    expect((await engine.executeRaw('SELECT id FROM query_cache')).length).toBe(missMeta?.cache?.status === 'disabled' ? 0 : 1);
   });
 
   test('a code-filtered-first run leaves the cache empty, so a later unfiltered read gets full recall', async () => {

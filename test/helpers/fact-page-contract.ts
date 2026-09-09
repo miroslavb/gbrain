@@ -65,8 +65,15 @@ export function factPageContract(getEngine: () => BrainEngine) {
           const page = await engine.getPage(slug, { sourceId: source });
           expect(page?.compiled_truth).toBe(parsed.compiled_truth);
           expect(page?.timeline).toBe(parsed.timeline);
-          expect(parsed.timeline.indexOf('Changed the decision.'))
-            .toBeLessThan(parsed.timeline.indexOf('gbrain:facts:begin'));
+          if (parsed.timeline.includes('gbrain:facts:begin')) {
+            expect(parsed.timeline.indexOf('Changed the decision.'))
+              .toBeLessThan(parsed.timeline.indexOf('gbrain:facts:begin'));
+          } else {
+            // #4756: a fence minted after the timeline sentinel lives in the
+            // body, above the sentinel; the bullet still lands in the timeline.
+            expect(parsed.compiled_truth).toContain('gbrain:facts:begin');
+            expect(parsed.timeline).toContain('Changed the decision.');
+          }
         } else {
           const second = await writeFactsToFence(engine, target, [input('Use automatic mode.', first.ids[0])]);
           const body = readFileSync(file, 'utf8');

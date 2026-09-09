@@ -72,7 +72,7 @@ export async function findCodeDef(
      WHERE cc.symbol_name = $1
        ${whereLang}
        ${whereSource}
-       AND p.page_kind = 'code'
+       AND p.page_kind = 'code' AND p.deleted_at IS NULL
        AND cc.symbol_type IN ('${DEF_TYPES.join("','")}', 'export statement')
      ORDER BY
        CASE cc.symbol_type
@@ -126,7 +126,7 @@ export async function probeFilteredSymbolTypes(
      WHERE cc.symbol_name = $1
        ${whereLang}
        ${whereSource}
-       AND p.page_kind = 'code'
+       AND p.page_kind = 'code' AND p.deleted_at IS NULL
      ORDER BY cc.symbol_type
      LIMIT 20`,
     params,

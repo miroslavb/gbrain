@@ -12,6 +12,7 @@
 import type { Operation } from './contract.ts';
 import { OperationError } from './contract.ts';
 import { sourceScopeOpts, readPolicyOpts } from './context.ts';
+import { resolveExcludePrivatePages } from '../search/private-visibility.ts';
 import {
   FIND_EXPERTS_DESCRIPTION,
   FIND_CONTRADICTIONS_DESCRIPTION,
@@ -299,7 +300,10 @@ const find_trajectory: Operation = {
     const points = await ctx.engine.findTrajectory({
       entitySlug: p.entity_slug,
       ...scope,
-      remote: ctx.remote !== false, // fail-closed: anything not strictly false is untrusted (CLAUDE.md invariant)
+      // Fork (world-only host): the engine-level visibility filter follows the
+      // private-page resolver — under facts.default_visibility=world every
+      // caller shares the host view; legacy brains keep the fail-closed gate.
+      remote: ctx.remote !== false && await resolveExcludePrivatePages(ctx.engine, ctx.remote),
       metric,
       kind,
       since,

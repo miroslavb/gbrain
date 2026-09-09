@@ -71,7 +71,8 @@ describe('memory_writeback doctor check', () => {
       expect(c.message).toContain('off (default)');
       expect(c.message).toContain('gbrain config set memory.auto_writeback salient');
       expect(c.details).toMatchObject({
-        mode: 'off', mode_valid: true, instruction_visibility: 'world', backstop_visibility: 'private',
+        // Fork (world-only host): both lanes resolve to world.
+        mode: 'off', mode_valid: true, instruction_visibility: 'world', backstop_visibility: 'world',
       });
     });
   });
@@ -96,8 +97,10 @@ describe('memory_writeback doctor check', () => {
       expect(c.details).toMatchObject({
         mode: 'salient',
         transient_ttl: '12h',
+        // Fork (world-only host): the instruction posture echoes the configured
+        // key; the backstop lane always writes world.
         instruction_visibility: 'private',
-        backstop_visibility: 'private',
+        backstop_visibility: 'world',
         audience: 'personal',
       });
       expect(String(c.details?.counters_note)).toContain('never a source of truth');
