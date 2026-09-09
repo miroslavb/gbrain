@@ -92,8 +92,10 @@ describe('code_blast symbol-edge seed fallback', () => {
       result: string; status?: string; ready?: boolean;
     };
     expect(r.result).toBe('not_found');
-    // Fixture chunks have edges_backfilled_at NULL → edge grain 'indexing'.
-    expect(r.status).toBe('indexing');
+    // Fixture chunks carry no symbol columns → upstream's readiness vocabulary
+    // (v0.48) names that state 'no_symbols' (has_code, not ready), which is the
+    // honest answer for "graph/symbols not built" that this test pins.
+    expect(r.status).toBe('no_symbols');
     expect(r.ready).toBe(false);
 
     const cached = await engine.executeRaw<{ n: number }>(

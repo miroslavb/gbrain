@@ -2,8 +2,12 @@
  * gbrain code-def <symbol>
  *
  * v0.19.0 Layer 7 — look up the definition site(s) of a named symbol
- * (function, class, type, interface, enum) across every code page the
- * brain has indexed.
+ * (function, class, type, interface, enum) among the brain's code pages.
+ *
+ * Source-scoped by default (see resolveCliCodeScope), matching code-callers /
+ * code-callees: on a multi-source brain the same symbol name in two repos is
+ * two different symbols, and a foreign hit's repo-relative `file` is
+ * indistinguishable from a local one. `--all-sources` spans every source.
  *
  * Output:
  *   - TTY or --pretty: human-readable list of matches, one per line.
@@ -16,6 +20,7 @@
 import type { BrainEngine } from '../core/engine.ts';
 import { errorFor, serializeError } from '../core/errors.ts';
 import { resolveCodeReadiness, readinessHint } from '../core/code-graph-readiness.ts';
+import { resolveCliCodeScope, positionalArgs, parseFlag, pushSourcePredicate } from './code-scope.ts';
 
 export interface CodeDefResult {
   source_id: string;
@@ -40,20 +45,18 @@ export { DEF_TYPES };
 export async function findCodeDef(
   engine: BrainEngine,
   symbol: string,
-  opts: { limit?: number; language?: string; sourceId?: string } = {},
+  opts: { limit?: number; language?: string; sourceId?: string; allSources?: boolean } = {},
 ): Promise<CodeDefResult[]> {
   const limit = opts.limit ?? 20;
+  // Placeholders are numbered as params are appended: a fixed $2 broke the
+  // moment a second optional predicate joined --lang.
   const params: unknown[] = [symbol];
   let whereLang = '';
   if (opts.language) {
     params.push(opts.language);
-    whereLang = 'AND cc.language = $2';
+    whereLang = `AND cc.language = $${params.length}`;
   }
-  let whereSource = '';
-  if (opts.sourceId) {
-    params.push(opts.sourceId);
-    whereSource = `AND p.source_id = $${params.length}`;
-  }
+  const whereSource = pushSourcePredicate(params, opts);
   params.push(limit);
   // Deterministic ordering: exact type matches first (functions before
   // export_statement wrappers), then page slug, then line number.
@@ -69,7 +72,7 @@ export async function findCodeDef(
      WHERE cc.symbol_name = $1
        ${whereLang}
        ${whereSource}
-       AND p.page_kind = 'code' AND p.deleted_at IS NULL
+       AND p.page_kind = 'code'
        AND cc.symbol_type IN ('${DEF_TYPES.join("','")}', 'export statement')
      ORDER BY
        CASE cc.symbol_type
@@ -105,7 +108,7 @@ export async function findCodeDef(
 export async function probeFilteredSymbolTypes(
   engine: BrainEngine,
   symbol: string,
-  opts: { language?: string } = {},
+  opts: { language?: string; sourceId?: string; allSources?: boolean } = {},
 ): Promise<string[]> {
   const params: unknown[] = [symbol];
   let whereLang = '';
@@ -113,13 +116,17 @@ export async function probeFilteredSymbolTypes(
     params.push(opts.language);
     whereLang = `AND cc.language = $${params.length}`;
   }
+  // Scoped with the main lookup: an unscoped probe would claim "the symbol IS
+  // indexed, just filtered" on the strength of a different repo's chunks.
+  const whereSource = pushSourcePredicate(params, opts);
   const rows = await engine.executeRaw<{ symbol_type: string | null }>(
     `SELECT DISTINCT cc.symbol_type
      FROM content_chunks cc
      JOIN pages p ON p.id = cc.page_id
      WHERE cc.symbol_name = $1
        ${whereLang}
-       AND p.page_kind = 'code' AND p.deleted_at IS NULL
+       ${whereSource}
+       AND p.page_kind = 'code'
      ORDER BY cc.symbol_type
      LIMIT 20`,
     params,
@@ -130,11 +137,6 @@ export async function probeFilteredSymbolTypes(
     .filter((t): t is string => t != null && !allow.has(t));
 }
 
-function parseFlag(args: string[], name: string): string | undefined {
-  const i = args.indexOf(name);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 function shouldEmitJson(args: string[]): boolean {
   if (args.includes('--json')) return true;
   if (args.includes('--no-json')) return false;
@@ -143,16 +145,14 @@ function shouldEmitJson(args: string[]): boolean {
 }
 
 export async function runCodeDef(engine: BrainEngine, args: string[]): Promise<void> {
-  const symbol = args.find((a) => !a.startsWith('--') && args.indexOf(a) > 0);
-  // args[0] is the symbol when invoked as `gbrain code-def <symbol>`
-  const positional = args.filter((a) => !a.startsWith('--'));
+  const positional = positionalArgs(args);
   const sym = positional[0];
   if (!sym) {
     const err = errorFor({
       class: 'UsageError',
       code: 'code_def_requires_symbol',
       message: 'code-def requires a symbol name',
-      hint: 'gbrain code-def <symbol> [--lang <language>] [--json]',
+      hint: 'gbrain code-def <symbol> [--source S | --all-sources] [--lang <language>] [--json]',
     });
     if (shouldEmitJson(args)) {
       console.log(JSON.stringify({ error: err.envelope }));
@@ -163,17 +163,30 @@ export async function runCodeDef(engine: BrainEngine, args: string[]): Promise<v
   }
   const limit = parseInt(parseFlag(args, '--limit') || '20', 10);
   const language = parseFlag(args, '--lang');
+  // Outside the try, matching code-callers / code-callees: the helper signals
+  // usage failures with process.exit(2), and a surrounding catch would
+  // reclassify them as a generic exit-1 failure.
+  const { allSources, sourceId, scope, envelopeSourceId } = await resolveCliCodeScope(engine, {
+    sourceId: parseFlag(args, '--source'),
+    allSources: args.includes('--all-sources'),
+    jsonMode: shouldEmitJson(args),
+    command: 'code-def',
+  });
   try {
-    const results = await findCodeDef(engine, sym, { limit, language });
-    // code-def is brain-wide (not source-scoped); readiness is 'symbol' grain.
-    const readiness = await resolveCodeReadiness(engine, { kind: 'symbol', count: results.length });
+    const results = await findCodeDef(engine, sym, { limit, language, sourceId, allSources });
+    // Readiness is 'symbol' grain, scoped to the same source as the lookup.
+    // remote: false — direct CLI invocation is the trusted local caller, so the
+    // out_of_scope brain-wide rerun stays available.
+    const readiness = await resolveCodeReadiness(engine, {
+      kind: 'symbol', count: results.length, sourceId, allSources, remote: false,
+    });
     // #3789: a count:0 that was filtered by the DEF_TYPES allowlist must not
     // read as a bare ready:true / "symbol does not exist". Probe the distinct
     // symbol types the name DOES have and surface the filtered ones.
     let filteredTypes: string[] = [];
     if (results.length === 0) {
       try {
-        filteredTypes = await probeFilteredSymbolTypes(engine, sym, { language });
+        filteredTypes = await probeFilteredSymbolTypes(engine, sym, { language, sourceId, allSources });
       } catch {
         // Supplementary signal — never fail the command on the probe.
       }
@@ -186,9 +199,12 @@ export async function runCodeDef(engine: BrainEngine, args: string[]): Promise<v
     if (shouldEmitJson(args)) {
       console.log(JSON.stringify({
         symbol: sym,
+        source_id: envelopeSourceId,
+        scope,
         count: results.length,
         status: readiness.status,
         ready: readiness.ready,
+        ...(readiness.scoped_source_id ? { scoped_source_id: readiness.scoped_source_id } : {}),
         ...(filteredTypes.length > 0
           ? { filtered_symbol_types: filteredTypes, hint: filteredHint }
           : {}),
@@ -196,7 +212,9 @@ export async function runCodeDef(engine: BrainEngine, args: string[]): Promise<v
       }, null, 2));
     } else {
       if (results.length === 0) {
-        console.log(`No definitions found for "${sym}"`);
+        console.log(!allSources && sourceId
+          ? `No definitions found for "${sym}" in source '${sourceId}'. Try --all-sources to search every source.`
+          : `No definitions found for "${sym}"`);
         if (filteredHint) console.log(filteredHint);
         const hint = readinessHint(readiness);
         if (hint) console.log(hint);

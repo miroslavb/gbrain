@@ -28,10 +28,14 @@ function mockResp(json: unknown, status = 200): Response {
 let stderrChunks: string[] = [];
 let origWrite: typeof process.stderr.write;
 
+// Pin a pre-sunset clock: this suite exercises zerank THROUGH the transport, and
+// past ZEROENTROPY_SUNSET_DATE (2026-09-04) the real clock would make gateway.rerank
+// short-circuit before the transport — a deterministic wall-clock time bomb
+// (mirrors test/ai/rerank.test.ts).
+const BEFORE_SUNSET = new Date('2026-09-01T00:00:00Z');
+
 beforeEach(() => {
-  // This suite exercises the warning BEFORE shutdown. The separate sunset
-  // date-matrix suite covers post-deadline fail-fast behavior.
-  __setSunsetClockForTests(() => new Date('2026-09-03T12:00:00Z'));
+  __setSunsetClockForTests(() => BEFORE_SUNSET);
   _resetSunsetWarningsForTest();
   stderrChunks = [];
   origWrite = process.stderr.write.bind(process.stderr);

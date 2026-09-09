@@ -9,9 +9,12 @@
  * empty corpus.
  *
  * Vocabulary:
- *   - `source`        — the brain has at least one non-default source with
- *                       >=1 page (a corpus exists).
- *   - `source:<id>`   — a source with that id exists.
+ *   - `source`        — the brain has at least one source with >=1 page (a
+ *                       corpus exists). #4278: the default source is a valid
+ *                       corpus — single-source brains hold everything there.
+ *   - `source:<id>`   — a source with that id exists (EXISTENCE, not
+ *                       population — a registered-but-not-yet-synced source
+ *                       is met).
  *   - `dir:<path>`    — a brain page-directory (e.g. `conversations/`) has
  *                       >=1 page.
  *   - `type:<type>`   — at least one live page has that exact page type.
@@ -60,7 +63,17 @@ export interface PreconditionContext {
   /** Live pages with an exact page type. */
   countPagesByType(type: string): Promise<number>;
   /** Non-default source ids that hold at least one page. */
+  /**
+   * Registered source ids (existence, populated or not — including
+   * `default`). Consumed by `source:<id>`, whose contract is existence.
+   */
   listSourceIds(): Promise<string[]>;
+  /**
+   * #4278: source ids holding at least one live page, INCLUDING `default`.
+   * Consumed by bare `source`, whose contract is "a corpus exists". Split
+   * from listSourceIds so tightening one predicate can't regress the other.
+   */
+  listPopulatedSourceIds(): Promise<string[]>;
   /** Optional: pages for a specific source id. */
   countPagesForSource?(id: string): Promise<number>;
   /** Resolve a config key; undefined/empty means unset. */
@@ -159,14 +172,14 @@ async function checkType(req: Precondition, ctx: PreconditionContext): Promise<P
 }
 
 async function checkAnySource(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
-  const ids = await ctx.listSourceIds();
+  const ids = await ctx.listPopulatedSourceIds();
   const met = ids.length > 0;
   return {
     req,
     met,
     detail: met
       ? `found ${ids.length} source(s) with content: ${ids.join(', ')}`
-      : `no non-default source holds any pages`,
+      : `no source holds any pages`,
     hint: met
       ? `corpus present (${ids.length} source(s))`
       : `ingest a corpus first (gbrain sync / gbrain import), then re-run`,

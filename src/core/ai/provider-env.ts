@@ -44,6 +44,7 @@ export function mergedProviderEnv(
   if (cfg?.together_api_key) fromConfig.TOGETHER_API_KEY = cfg.together_api_key;
   if (cfg?.voyage_api_key) fromConfig.VOYAGE_API_KEY = cfg.voyage_api_key;
   if (cfg?.dashscope_api_key) fromConfig.DASHSCOPE_API_KEY = cfg.dashscope_api_key;
+  if (cfg?.deepseek_api_key) fromConfig.DEEPSEEK_API_KEY = cfg.deepseek_api_key;
   // Same seam for LiteLLM + Together, closed alongside litellm's chat
   // touchpoint (v0.42.61.0 made litellm a full chat provider, so the
   // config-plane gap started biting daemon/launchd/MCP contexts the same

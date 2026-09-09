@@ -1300,8 +1300,14 @@ async function processPage(
     process.stderr.write(
       `[extract-conversation-facts] ${page.slug} changed during extraction; preserving the previous epoch for replay\n`,
     );
-    newestEnd = null;
+    // #4869: no terminal, no checkpoint — this claim did not reach a durable
+    // outcome, so it counts as failed (CLI exit 1 / cycle 'warn'), not processed.
+    state.result.pages_failed++;
+    return { newEndIso: null };
   } else if (!state.dryRun && !fullyProcessed) {
+    // Fork: a bounded `--segment-limit` stop is a deliberate partial drain, not
+    // a failure — the previous epoch is preserved and the next bounded run
+    // resumes it (operator-bounded sweeps must keep exit 0).
     process.stderr.write(
       `[extract-conversation-facts] ${page.slug} stopped at segment-limit; preserving the previous epoch for replay\n`,
     );

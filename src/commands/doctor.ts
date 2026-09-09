@@ -1,11 +1,12 @@
 import type { BrainEngine } from '../core/engine.ts';
 import { EMBED_SKIP_FILTER_FRAGMENT } from '../core/embed-skip.ts';
+import { quarantineFilterFragment } from '../core/quarantine.ts';
 import { setCliExitVerdict } from '../core/cli-force-exit.ts';
 import * as db from '../core/db.ts';
 import { LATEST_VERSION, getIdleBlockers } from '../core/migrate.ts';
 import { checkResolvable } from '../core/check-resolvable.ts';
 import { autoFixDryViolations, type AutoFixReport } from '../core/dry-fix.ts';
-import { autoDetectSkillsDirReadOnly } from '../core/repo-root.ts';
+import { parseFlags as parseSkillsDirFlags, resolveSkillsDir } from './check-resolvable.ts';
 import { loadCompletedMigrations } from '../core/preferences.ts';
 import { compareVersions } from './migrations/index.ts';
 import { createProgress, startHeartbeat } from '../core/progress.ts';
@@ -29,8 +30,14 @@ import { canonicalEntitySqlPredicate } from '../core/graph-health-scope.ts';
 // original name so existing importers (tests, scripts/live-brain-first-check.ts,
 // the run_doctor op's dynamic import of doctorReportRemote) keep working
 // unchanged.
-import { multiSourceDriftAdvice } from './doctor/schema-pack-checks.ts';
+import { multiSourceDriftAdvice, multiSourceDriftGitRootSkipNote } from './doctor/schema-pack-checks.ts';
 import { bootstrapDoctorChecks } from './doctor/bootstrap-checks.ts';
+import { buildMemorableRelayCheck } from './doctor/checks/integrations-memorable.ts';
+export { buildMemorableRelayCheck } from './doctor/checks/integrations-memorable.ts';
+import { buildHomeDirInWorktreeCheck } from './doctor/checks/home-worktree.ts';
+export { buildHomeDirInWorktreeCheck, isValidGitMarker } from './doctor/checks/home-worktree.ts';
+import { buildMemoryWritebackCheck } from './doctor/checks/memory-writeback.ts';
+export { buildMemoryWritebackCheck } from './doctor/checks/memory-writeback.ts';
 import {
   skillConformanceCheck,
   skillsManifestIntegrityCheck,
@@ -40,6 +47,7 @@ import {
 } from './doctor/skill-checks.ts';
 export {
   multiSourceDriftAdvice,
+  multiSourceDriftGitRootSkipNote,
   bootstrapDoctorChecks,
   skillConformanceCheck,
   skillsManifestIntegrityCheck,
@@ -126,6 +134,7 @@ export {
   checkUndeclaredDbOnlyPages,
   checkDbOnlyCollectorCollision,
   computeExtractAtomsBacklogCheck,
+  computeAtomProvenanceDriftCheck,
   computeExtractHealthCheck,
   checkSyncFreshness,
 } from './doctor/checks/extraction-sync.ts';
@@ -211,6 +220,7 @@ import {
   checkUndeclaredDbOnlyPages,
   checkDbOnlyCollectorCollision,
   computeExtractAtomsBacklogCheck,
+  computeAtomProvenanceDriftCheck,
   computeExtractHealthCheck,
   checkSyncFreshness,
 } from './doctor/checks/extraction-sync.ts';
@@ -702,13 +712,17 @@ export async function buildChecks(
   //
   // We also skip `--fix` execution under scope=brain because --fix
   // exclusively targets DRY violations inside SKILL.md files. Use the same
-  // auto-detect as `check-resolvable` so doctor sees a workspace/skills dir
-  // reachable via $OPENCLAW_WORKSPACE or ~/.openclaw/workspace, not just a
-  // `skills/` walked up from cwd. Read-only variant adds the install-path
-  // fallback so a hosted-CLI install run from `~` (e.g., `bun install -g
-  // github:garrytan/gbrain && cd ~ && gbrain doctor`) can still find the
-  // bundled skills/ dir without warning.
-  const detected = scope === 'all' ? autoDetectSkillsDirReadOnly() : { dir: null, source: 'none' as const };
+  // resolution as `check-resolvable` (#4673: flag-first — doctor accepted
+  // `--skills-dir` and silently ignored it, so every skill check graded the
+  // auto-detected workspace and `--fix` could write SKILL.md edits into a
+  // workspace the operator explicitly steered away from). Sharing
+  // check-resolvable's exported resolveSkillsDir keeps the three skills-dir
+  // commands (doctor, check-resolvable, routing-eval) on one precedence:
+  // --skills-dir → $GBRAIN_SKILLS_DIR / $OPENCLAW_WORKSPACE / walk-up →
+  // install-path read-only fallback. `source: 'explicit'` correctly bypasses
+  // the install_path --fix refusal below — an explicit flag is exactly the
+  // operator signal that gate wants.
+  const detected = scope === 'all' ? resolveSkillsDir(parseSkillsDirFlags(args)) : { dir: null, source: 'none' as const };
   const skillsDir = detected.dir;
   if (scope === 'all' && skillsDir) {
 
@@ -736,7 +750,7 @@ export async function buildChecks(
       }
     }
 
-    const report = checkResolvable(skillsDir);
+    const report = checkResolvable(skillsDir, { skillsDirSource: detected.source === 'explicit' ? null : detected.source });
     if (report.errors.length === 0 && report.warnings.length === 0) {
       checks.push({
         name: 'resolver_health',
@@ -834,7 +848,20 @@ export async function buildChecks(
   // brains keep a clean doctor.
   checks.push(...(await bootstrapDoctorChecks(engine)));
 
-  // 2e. Chat-connector health (D3.2): re-auth-needed / stalled-sync / drift.
+  // 2e. Memorable relay health — engine-free, file-plane only, so it runs
+  // unconditionally (survives --fast and every --scope). Gate off = one quiet
+  // ok row; the states it exists to catch are enabled-without-disclosure and
+  // enabled-but-never-actually-relaying.
+  checks.push(await buildMemorableRelayCheck());
+
+  // 2e-bis. Ambient-writeback health (WP6): resolved mode/TTL/visibility +
+  // brain audience, installed instruction blocks (receipt vs live probe vs
+  // drift), validity-lapsed count, and the 7d local counters. Off = one
+  // quiet ok row (opt-in convention).
+  progress.heartbeat('memory_writeback');
+  checks.push(await buildMemoryWritebackCheck(engine));
+
+  // 2f. Chat-connector health (D3.2): re-auth-needed / stalled-sync / drift.
   // Credential-gated + auto_sync-gated — emits a plain "ok" (no nag) on brains
   // with no connectors or a manual-only user.
   if (engine) {
@@ -1456,6 +1483,13 @@ export async function buildChecks(
     } catch {
       // Best-effort; backlog query failure shouldn't stop doctor.
     }
+    // The mirror of the backlog check: atoms whose source_hash no longer
+    // resolves to any live page (#4566). Same best-effort posture.
+    try {
+      checks.push(await computeAtomProvenanceDriftCheck(engine));
+    } catch {
+      // Best-effort; provenance query failure shouldn't stop doctor.
+    }
   }
 
   // 3d.3 v0.41.13.0 — conversation_format_coverage. Peeled to
@@ -1537,32 +1571,16 @@ export async function buildChecks(
     // Best-effort; audit-log read failure shouldn't stop doctor.
   }
 
-  // 3e. Ask Git for semantic worktree truth; orphaned/malformed raw .git must not trigger a
-  // home relocation. realpath + path.relative prevent prefix/symlink errors.
+  // 3e. home_dir_in_worktree (v0.35.8.0; peeled to doctor/checks/home-worktree.ts).
+  // Walks up from `gbrainPath()` toward $HOME looking for a VALIDATED `.git`
+  // marker (#4683: an empty/invalid `.git` git itself rejects no longer warns).
+  // Honors GBRAIN_HOME via gbrainPath().
   try {
-    const gbrainHome = gbrainPath();
-    const { containingGitWorktree } = await import('../core/home-worktree.ts');
-    const worktreeRoot = containingGitWorktree(gbrainHome);
-    if (worktreeRoot) {
-      const homeEnvHint = process.env.GBRAIN_HOME
-        ? `# Or move \`~/.gbrain\` outside the worktree by setting GBRAIN_HOME elsewhere.`
-        : `# Fix: \`export GBRAIN_HOME=/some/path/outside/the/worktree\` (gbrain appends \`.gbrain\`).`;
-      checks.push({
-        name: 'home_dir_in_worktree',
-        status: 'warn',
-        message:
-          `~/.gbrain lives inside git worktree at ${worktreeRoot}. ` +
-          `Config + brain DB could be committed by accident. ` +
-          `A retroactive ~/.gbrain/.gitignore blocks casual \`git add\`, but does NOT cover ` +
-          `already-tracked files, screenshots, backups, or \`git add -f\`. ${homeEnvHint}`,
-      });
-    } else {
-      checks.push({
-        name: 'home_dir_in_worktree',
-        status: 'ok',
-        message: 'gbrain home is outside any enclosing git worktree.',
-      });
-    }
+    checks.push(buildHomeDirInWorktreeCheck(
+      gbrainPath(),
+      process.env.HOME || '',
+      Boolean(process.env.GBRAIN_HOME),
+    ));
   } catch {
     // Best-effort filesystem-hygiene check; never block doctor.
   }
@@ -1641,6 +1659,20 @@ export async function buildChecks(
     // unparseable config.json lands here and skips, same fail-open posture).
   }
 
+  // 3a-bis. default_source_local_path (#4739, narrowed). A null
+  // default.local_path is the DESIGNED fallback topology (pages nest under
+  // sync.repo_path), so this only warns when that fallback demonstrably
+  // fails: file-backed default pages with no resolvable root, or a
+  // sync.repo_path the #2018 leak guard silently skips. Logic lives in
+  // doctor/checks/default-source-path.ts (module-dir rule).
+  if (engine !== null) try {
+    const { defaultSourceLocalPathCheck } = await import('./doctor/checks/default-source-path.ts');
+    const dspCheck = await defaultSourceLocalPathCheck(engine!);
+    if (dspCheck) checks.push(dspCheck);
+  } catch {
+    // Best-effort. A broken sources table should not stop doctor.
+  }
+
   // 3b-multi-source. Multi-source drift (v0.31.8 — D8 + D17 + OV12 + OV13).
   // Pre-v0.30.3 putPage misrouted multi-source writes to (default, slug).
   // For each non-default source with local_path set, walk the FS and surface
@@ -1669,16 +1701,32 @@ export async function buildChecks(
         });
       } else if (result.count > 0) {
         const sampleStr = result.sample.map(s => `${s.slug} (intended=${s.intended_source})`).join(', ');
+        const skipNote = result.git_root_skipped.length > 0
+          ? multiSourceDriftGitRootSkipNote(result.git_root_skipped)
+          : '';
         checks.push({
           name: 'multi_source_drift',
           status: 'warn',
-          message: multiSourceDriftAdvice(result.count, sampleStr),
+          message: multiSourceDriftAdvice(result.count, sampleStr) + skipNote,
         });
       } else {
+        // #4712: if EVERY candidate source was skipped as git-root-pinned,
+        // no walk actually ran — 'ok' would misreport "verified clean" when
+        // nothing was checked at all. 'warn' only in that all-skipped case;
+        // a partial skip alongside real, clean coverage stays 'ok'.
+        const allSkipped =
+          result.git_root_skipped.length > 0 &&
+          result.git_root_skipped.length >= nonDefaultWithPath.length;
         checks.push({
           name: 'multi_source_drift',
-          status: 'ok',
-          message: 'No cross-source slug drift detected.',
+          status: allSkipped ? 'warn' : 'ok',
+          message: allSkipped
+            ? `Multi-source drift check performed no verification` +
+              multiSourceDriftGitRootSkipNote(result.git_root_skipped)
+            : result.git_root_skipped.length > 0
+              ? `No cross-source slug drift detected among checked sources.` +
+                multiSourceDriftGitRootSkipNote(result.git_root_skipped)
+              : 'No cross-source slug drift detected.',
         });
       }
     }
@@ -2480,13 +2528,15 @@ export async function buildChecks(
     // The local doctor, engines and onboard must score the exact same entity
     // cards. Type-only denominators silently admitted nested/generated rows;
     // use the canonical slug+type predicate and the same live-source inbound
-    // endpoint rule as onboard's entity_link_coverage.
+    // endpoint rule as onboard's entity_link_coverage. #4280: quarantined
+    // shells are excluded too — parity with onboard's VISIBLE_ENTITY_PREDICATE.
     const canonicalEntity = canonicalEntitySqlPredicate('p');
     const eligibleStats = (await engine.executeRaw<{ entities: number; connected: number; timeline: number }>(
       `WITH eligible AS (
         SELECT p.id FROM pages p
         WHERE p.deleted_at IS NULL
           AND ${canonicalEntity}
+          AND ${quarantineFilterFragment('p')}
       )
       SELECT
         (SELECT count(*)::int FROM eligible) AS entities,

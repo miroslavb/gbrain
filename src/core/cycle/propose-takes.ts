@@ -122,8 +122,15 @@ export const EMPTY_EXTRACTION_TOMBSTONE_TEXT = '(no gradeable claims)';
  *     (pure facts, direct quotes, restatements).
  *   - conviction inference rules anchored to specific hedging language
  *     ("I bet"/"strong conviction"=0.7-0.85, "I think"/"moderate"=0.5-0.7).
- *   - kind enum kept narrow ('prediction'|'judgment'|'bet') — the v1
- *     stub's 4-tag enum bled into noise classification.
+ *   - kind enum kept narrow — three tags; the v1 stub's 4-tag enum bled
+ *     into noise classification. #4736: the tags now use the fence
+ *     vocabulary parseExtractorOutput accepts ('take'|'bet'|'hunch'); the
+ *     tuned prompt asked for prediction|judgment|bet, which the parser
+ *     allowlist (fact|take|bet|hunch) coerced wholesale to 'take',
+ *     destroying kind provenance on every extraction. Label-only change:
+ *     what counts as gradeable is untouched, so the cat15 F1 numbers above
+ *     still describe the extraction behavior. prediction/judgment stay
+ *     mapped in the parser for cached/old-model outputs.
  *
  * The current v0.46.28.6 contract adds production containment learned from four
  * grounded canaries: exact evidence alone does not distinguish a gradeable
@@ -141,10 +148,11 @@ export const EXTRACT_TAKES_PROMPT = `Extract gradeable claims from the prose bel
 
 A "gradeable claim" is a prediction, recommendation, or interpretive judgment
 that could turn out wrong over time. Examples:
-- "X company will hit ARR milestone by Q3" (prediction)
-- "Y founder is going to struggle with execution" (judgment)
-- "Z market will compress in 18 months" (prediction)
+- "X company will hit ARR milestone by Q3" (take: a prediction)
+- "Y founder is going to struggle with execution" (take: a judgment)
+- "Z market will compress in 18 months" (take: a prediction)
 - "I bet alice wins the round" (bet)
+- "Maybe DTC is quietly coming back" (hunch)
 
 NOT gradeable (do NOT extract these):
 - Pure facts ("X was founded in 2020")
@@ -226,6 +234,12 @@ export interface ProposedTake {
   weight: number;
   domain?: string;
   evidence_span?: string;
+  /**
+   * #4737: 'provider:modelId' of the model that ACTUALLY answered the
+   * extraction call (ChatResult.model). Stamped by defaultExtractor; the
+   * fork keeps the array-level modelId provenance as well.
+   */
+  served_model?: string;
 }
 
 /** Array result with non-enumerable production provenance attached by the gateway extractor. */
@@ -589,6 +603,9 @@ export async function defaultExtractor(
     value: result.model,
     enumerable: false,
   });
+  // #4737: per-take served-model provenance (response-derived, not requested).
+  const servedModel = typeof result.model === 'string' && result.model.trim() !== '' ? result.model : undefined;
+  if (servedModel) for (const t of takes) t.served_model = servedModel;
   return takes;
 }
 
@@ -738,7 +755,9 @@ export function canonicalizeWhitespaceEquivalentSpan(
  * Parse extractor output into ProposedTake[]. Handles common LLM output
  * sins (markdown fence wrapping, leading/trailing prose, single-object
  * instead of array). Returns [] on any unrecoverable parse error rather
- * than throwing.
+ * than throwing. Kind tokens are case/whitespace-normalized, matched
+ * against the fence vocabulary (with the #4736 legacy mapping), and
+ * anything else coerces to 'take'.
  */
 export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTakesExtraction {
   if (!raw || raw.trim().length === 0) return [];

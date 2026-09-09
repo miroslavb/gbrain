@@ -16,7 +16,7 @@
  */
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
-import { configureGateway } from '../src/core/ai/gateway.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import { operations } from '../src/core/operations.ts';
 import { MEMORY_VERBS_VERSION, VERB_NAMES } from '../src/core/verbs.ts';
 import {
@@ -80,6 +80,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await engine.disconnect();
+  // Restore the preload baseline — leaving the keyless config in place
+  // configures every LATER file in this shard's process (the exact
+  // leak-to-neighbor class the beforeAll pin defends against).
+  resetGateway();
 });
 
 beforeEach(async () => {
@@ -217,6 +221,13 @@ describe('delta cursor lifecycle', () => {
     expect(r2.text as string).not.toContain('January 1, 2000');
     // An UNPARSEABLE string is rejected outright (defense in depth).
     await expect(call(del, ctxFor({ remote: false }), { since: 'definitely not a date' })).rejects.toThrow(/parseable|ISO/i);
+    // Wave review: a calendar-INVALID value in the microsecond passthrough shape
+    // is Date.parse-able (JS rolls Feb 31 to Mar 3) but would reach the
+    // ::timestamptz cast raw → engine error. It is invalid_params instead.
+    await expect(call(del, ctxFor({ remote: false }), { since: '2026-02-31T00:00:00.000000Z' })).rejects.toThrow(/calendar|ISO/i);
+    // ...while a valid microsecond cursor still passes through verbatim.
+    const r3 = await call(del, ctxFor({ remote: false }), { since: '2026-02-28T00:00:00.000100Z' });
+    expect(r3.since).toBe('2026-02-28T00:00:00.000100Z');
   });
 
   test('remote caller cursor is namespaced by auth client', async () => {

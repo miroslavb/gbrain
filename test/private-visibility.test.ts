@@ -27,6 +27,8 @@ import { FACTS_DEFAULT_VISIBILITY_KEY } from '../src/core/facts/visibility.ts';
 import { buildEntityCard } from '../src/core/verbs/entity-card.ts';
 import { operationsByName } from '../src/core/operations.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { importFromContent } from '../src/core/import-file.ts';
+import { serializeMarkdown } from '../src/core/markdown.ts';
 
 let engine: PGLiteEngine;
 
@@ -38,37 +40,18 @@ beforeAll(async () => {
   // Migration v147 sets the real host posture to world, so explicitly clear
   // it here; the dedicated world-only test opts back in and proves the bypass.
   await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, '');
-  await engine.putPage('notes/world-page', {
-    title: 'Zebra Widget World',
-    type: 'concept',
-    frontmatter: { visibility: 'world' },
-    compiled_truth: 'zebra widget public knowledge body',
-    timeline: '',
-  });
-  await engine.putPage('notes/private-page', {
-    title: 'Zebra Widget Private',
-    type: 'concept',
-    frontmatter: { visibility: 'private' },
-    compiled_truth: 'zebra widget secret private knowledge body',
-    timeline: '',
-  });
-  // No visibility key at all → defaults to world (visible everywhere).
-  await engine.putPage('notes/unmarked-page', {
-    title: 'Zebra Widget Unmarked',
-    type: 'concept',
-    frontmatter: {},
-    compiled_truth: 'zebra widget unmarked knowledge body',
-    timeline: '',
-  });
-  // putPage doesn't chunk; the keyword/chunk arms search content_chunks.
-  for (const [slug, body] of [
-    ['notes/world-page', 'zebra widget public knowledge body'],
-    ['notes/private-page', 'zebra widget secret private knowledge body'],
-    ['notes/unmarked-page', 'zebra widget unmarked knowledge body'],
+  // Real imports certify current chunks; these tests exercise page visibility,
+  // independently of the separate block on old, unrebuilt chunk indexes.
+  for (const [slug, title, body, frontmatter] of [
+    ['notes/world-page', 'Zebra Widget World', 'zebra widget public knowledge body', { visibility: 'world' }],
+    ['notes/private-page', 'Zebra Widget Private', 'zebra widget secret private knowledge body', { visibility: 'private' }],
+    // No visibility key at all → defaults to world (visible everywhere).
+    ['notes/unmarked-page', 'Zebra Widget Unmarked', 'zebra widget unmarked knowledge body', {}],
   ] as const) {
-    await engine.upsertChunks(slug, [
-      { chunk_index: 0, chunk_text: body, chunk_source: 'compiled_truth' },
-    ]);
+    const result = await importFromContent(engine, slug,
+      serializeMarkdown(frontmatter, body, '', { type: 'concept', title, tags: [] }),
+      { noEmbed: true, forceRechunk: true });
+    expect(result.status).toBe('imported');
   }
 });
 
@@ -353,16 +336,17 @@ describe('sibling read ops (#4352 remediation — no bypass around get_page)', (
     expect(local.map((l) => l.from_slug)).toContain('notes/private-page');
   });
 
-  test('traverse_graph (node shape): private nodes + edges to them are stripped remotely', async () => {
+  test('traverse_graph (remote default path shape, #4666): private nodes + edges to them are stripped remotely', async () => {
     __resetPrivateVisibilityCacheForTests();
     const op = operationsByName['traverse_graph'];
+    // Remote no-filter callers now default to direction=both GraphPath[].
     const remote = (await op.handler(mkCtx(true), { slug: 'notes/world-page' })) as Array<{
-      slug: string; links: Array<{ to_slug: string }>;
+      from_slug: string; to_slug: string;
     }>;
-    expect(remote.map((n) => n.slug)).not.toContain('notes/private-page');
-    for (const node of remote) {
-      expect(node.links.map((l) => l.to_slug)).not.toContain('notes/private-page');
-    }
+    const touched = remote.flatMap((e) => [e.from_slug, e.to_slug]);
+    expect(touched).not.toContain('notes/private-page');
+    expect(touched).toContain('notes/unmarked-page');
+    // Trusted local no-filter callers keep the legacy GraphNode[] shape.
     const local = (await op.handler(mkCtx(false), { slug: 'notes/world-page' })) as Array<{ slug: string }>;
     expect(local.map((n) => n.slug)).toContain('notes/private-page');
   });
