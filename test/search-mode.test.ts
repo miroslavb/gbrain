@@ -83,6 +83,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       autocut_jump: 0.2,
       autocut_min_top: 0.35,
       autocut_min_keep: 1,
+      relaxed_row_demotion: true,
       // v0.43 — relational recall OFF for conservative.
       relationalRetrieval: false,
       relational_retrieval_depth: 2,
@@ -126,6 +127,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       autocut_jump: 0.2,
       autocut_min_top: 0.35,
       autocut_min_keep: 1,
+      relaxed_row_demotion: true,
       // v0.43 — relational recall ON for balanced.
       relationalRetrieval: true,
       relational_retrieval_depth: 2,
@@ -167,6 +169,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       autocut_jump: 0.2,
       autocut_min_top: 0.35,
       autocut_min_keep: 1,
+      relaxed_row_demotion: true,
       // v0.43 — relational recall ON for tokenmax.
       relationalRetrieval: true,
       relational_retrieval_depth: 2,
@@ -785,6 +788,20 @@ describe('v0.42.3.0 — autocut knobs', () => {
     const ov = loadOverridesFromConfig({ 'search.autocut': 'false', 'search.autocut_jump': '0.35' });
     expect(ov.autocut).toBe(false);
     expect(ov.autocut_jump).toBe(0.35);
+  });
+
+  test('fork: loadOverridesFromConfig reads search.relaxed_row_demotion (off/on), bundles default on, knobsHash carries rrd=', () => {
+    expect(loadOverridesFromConfig({ 'search.relaxed_row_demotion': 'off' }).relaxed_row_demotion).toBe(false);
+    expect(loadOverridesFromConfig({ 'search.relaxed_row_demotion': 'true' }).relaxed_row_demotion).toBe(true);
+    expect(loadOverridesFromConfig({ 'search.relaxed_row_demotion': 'maybe' }).relaxed_row_demotion).toBeUndefined();
+    for (const mode of ['conservative', 'balanced', 'tokenmax'] as const) {
+      expect(resolveSearchMode({ mode }).relaxed_row_demotion).toBe(true);
+    }
+    expect(SEARCH_MODE_CONFIG_KEYS).toContain('search.relaxed_row_demotion');
+    const on = knobsHash(resolveSearchMode({ mode: 'balanced' }));
+    const off = knobsHash(resolveSearchMode({ mode: 'balanced', overrides: { relaxed_row_demotion: false } }));
+    expect(off).not.toBe(on);
+    expect(knobsHash(resolveSearchMode({ mode: 'balanced', overrides: { relaxed_row_demotion: true } }))).toBe(on);
   });
 
   test('SEARCH_MODE_CONFIG_KEYS includes the autocut keys', () => {

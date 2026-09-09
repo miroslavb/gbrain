@@ -316,6 +316,19 @@ export interface ModeBundle {
    */
   autocut: boolean;
   /**
+   * Fork (2026-09-09) — relaxed-row fusion demotion master switch. Upstream
+   * v0.48.0 drops OR-relaxed keyword/title rows pre-fusion whenever a TEXT
+   * vector arm returned rows (LongMemEval receipt). On this host's corpus the
+   * relaxed keyword arm carries the gold pages the vector arm misses (post-
+   * cutover artifact gate 2026-09-09: query.noexpand hit 0.70 → 0.55 on the
+   * same 60 questions; every lost question went from keyword_exact evidence to
+   * vector-only), so the host runs it OFF. `true` = upstream behaviour;
+   * `false` = relaxed rows fuse at full RRF weight, as before v0.48.0.
+   * Override: `search.relaxed_row_demotion` config (`off`/`false`/`0` → false,
+   * `on`/`true`/`1` → true) → mode bundle. knobsHash part `rrd=`.
+   */
+  relaxed_row_demotion: boolean;
+  /**
    * v0.42.3.0 — autocut sensitivity: the minimum normalized score gap (as a
    * fraction of the top score) that counts as a cliff. Default 0.20. Lower =
    * cuts more aggressively (tighter sets); higher = only cuts on dramatic
@@ -476,6 +489,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     autocut_jump: 0.2,
     autocut_min_top: 0.35,
     autocut_min_keep: 1,
+    relaxed_row_demotion: true,
     // Ranker wave (Phase E2) — keyword-arm confidence floor OFF (null) until the Cat 13 receipt.
     keyword_arm_confidence_floor: null,
     // Phase E3 — metadata boost gate `lexical` (flipped on the Cat 13 held-out receipt); `always` restores the pre-wave pipeline.
@@ -547,6 +561,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     autocut_jump: 0.2,
     autocut_min_top: 0.35,
     autocut_min_keep: 1,
+    relaxed_row_demotion: true,
     // Ranker wave (Phase E2) — keyword-arm confidence floor OFF (null) until the Cat 13 receipt.
     keyword_arm_confidence_floor: null,
     // Phase E3 — metadata boost gate `lexical` (flipped on the Cat 13 held-out receipt); `always` restores the pre-wave pipeline.
@@ -609,6 +624,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     autocut_jump: 0.2,
     autocut_min_top: 0.35,
     autocut_min_keep: 1,
+    relaxed_row_demotion: true,
     // Ranker wave (Phase E2) — keyword-arm confidence floor OFF (null) until the Cat 13 receipt.
     keyword_arm_confidence_floor: null,
     // Phase E3 — metadata boost gate `lexical` (flipped on the Cat 13 held-out receipt); `always` restores the pre-wave pipeline.
@@ -667,6 +683,8 @@ export interface SearchKeyOverrides {
   contextual_retrieval_disabled?: boolean;
   // v0.42.3.0 — autocut overrides.
   autocut?: boolean;
+  /** Fork (2026-09-09): relaxed-row fusion demotion switch. */
+  relaxed_row_demotion?: boolean;
   // v0.43 — relational recall overrides.
   relationalRetrieval?: boolean;
   relational_retrieval_depth?: number;
@@ -727,6 +745,8 @@ export interface SearchPerCallOpts {
   // (it's an AutocutInput, not a plain bool here); autocut_jump is the
   // numeric per-call knob threaded through the bundle.
   autocut?: boolean;
+  /** Fork (2026-09-09): relaxed-row fusion demotion switch. */
+  relaxed_row_demotion?: boolean;
   autocut_jump?: number;
   autocut_min_top?: number;
   autocut_min_keep?: number;
@@ -836,6 +856,7 @@ export function resolveSearchMode(input: ResolveSearchModeInput): ResolvedSearch
     autocut_jump: pick('autocut_jump'),
     autocut_min_top: pick('autocut_min_top'),
     autocut_min_keep: pick('autocut_min_keep'),
+    relaxed_row_demotion: pick('relaxed_row_demotion'),
     // v0.43 — relational recall resolved via the same pick chain.
     relationalRetrieval: pick('relationalRetrieval'),
     relational_retrieval_depth: pick('relational_retrieval_depth'),
@@ -1289,6 +1310,10 @@ export function knobsHash(
     // (autocut off) hashes differently from balanced/tokenmax (autocut on),
     // which is correct — the result sets differ.
     `ac=${knobs.autocut ? 1 : 0}`,
+    // Fork (2026-09-09): relaxed-row demotion changes result composition, so a
+    // demotion-on write must never serve a demotion-off lookup. Defensive read:
+    // a partial-knobs caller hashes as the upstream default (on).
+    `rrd=${knobs.relaxed_row_demotion === false ? 0 : 1}`,
     // `?? 0.2` mirrors the module's defensive read of other knobs (graph_signals
     // etc.) so a partial-knobs caller (tests passing a minimal literal) can't
     // crash the hash. Typed callers always carry the field.
@@ -1580,6 +1605,14 @@ export function loadOverridesFromConfig(
   if (ac !== undefined) {
     out.autocut = ac === '1' || ac.toLowerCase() === 'true';
   }
+  // Fork (2026-09-09) — relaxed-row demotion master switch (`off` keeps
+  // OR-relaxed keyword/title rows in fusion when the vector arm voted).
+  const rrd = get('search.relaxed_row_demotion');
+  if (rrd !== undefined) {
+    const v = rrd.trim().toLowerCase();
+    if (v === '0' || v === 'false' || v === 'off') out.relaxed_row_demotion = false;
+    else if (v === '1' || v === 'true' || v === 'on') out.relaxed_row_demotion = true;
+  }
   const acj = get('search.autocut_jump');
   if (acj !== undefined) {
     const n = parseFloat(acj);
@@ -1681,6 +1714,8 @@ export const SEARCH_MODE_CONFIG_KEYS: ReadonlyArray<string> = Object.freeze([
   'search.contextual_retrieval_disabled',
   // v0.42.3.0 autocut
   'search.autocut',
+  // Fork (2026-09-09) relaxed-row fusion demotion switch
+  'search.relaxed_row_demotion',
   // v0.43 relational recall
   'search.relational_retrieval',
   'search.relational_retrieval_depth',

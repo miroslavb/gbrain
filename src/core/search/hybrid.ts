@@ -2126,10 +2126,16 @@ export async function hybridSearch(
   // evidence, which still beats noise-shaped OR matches (adjudicated vs the
   // stricter original-list-only reading).
   const vectorArmNonEmpty = textVectorArmNonEmpty(vectorArms);
-  const keywordFusionList = vectorArmNonEmpty
+  // Fork (2026-09-09): `search.relaxed_row_demotion=off` keeps the relaxed
+  // rows in fusion even when the text vector arm voted (the pre-v0.48.0
+  // fusion). The degraded `keyword_relaxed_carried` stage below still keys on
+  // the vector arm being EMPTY — carrying relaxed rows by policy is normal
+  // operation, not a transitional state.
+  const demoteRelaxed = vectorArmNonEmpty && resolvedMode.relaxed_row_demotion !== false;
+  const keywordFusionList = demoteRelaxed
     ? keywordResults.filter((r) => !r.keyword_relaxed)
     : keywordResults;
-  const titleFusionList = vectorArmNonEmpty
+  const titleFusionList = demoteRelaxed
     ? titleResults.filter((r) => !r.keyword_relaxed)
     : titleResults;
   // Observability for both demotion outcomes (adversarial review, 2026-09):

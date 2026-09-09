@@ -141,6 +141,26 @@ describe('hybrid fusion demotion', () => {
     for (const r of res) expect(r.keyword_relaxed).toBeUndefined();
   });
 
+  test('fork knob: search.relaxed_row_demotion=off keeps relaxed rows in fusion with a healthy vector arm', async () => {
+    // Off: nothing is muted (meta.relaxed_dropped stays 0) and the carried
+    // rows are NOT a degraded stage — carrying them by policy is normal.
+    await engine.setConfig('search.relaxed_row_demotion', 'off');
+    try {
+      let meta: import('../src/core/types.ts').HybridSearchMeta | undefined;
+      const res = await hybridSearch(engine, 'zephyr walrus', { limit: 10, expansion: false, onMeta: (m) => { meta = m; } });
+      expect(res.length).toBeGreaterThan(0);
+      expect(meta?.relaxed_dropped ?? 0).toBe(0);
+      expect((meta?.degraded ?? []).some((d) => d.stage === 'keyword_relaxed_carried')).toBe(false);
+    } finally {
+      await engine.setConfig('search.relaxed_row_demotion', 'on');
+    }
+    // Back on: the upstream demotion applies again.
+    let meta: import('../src/core/types.ts').HybridSearchMeta | undefined;
+    const res = await hybridSearch(engine, 'zephyr walrus', { limit: 10, expansion: false, onMeta: (m) => { meta = m; } });
+    for (const r of res) expect(r.keyword_relaxed).toBeUndefined();
+    expect(meta?.relaxed_dropped ?? 0).toBeGreaterThan(0);
+  });
+
   test('vector arm down (embed failure) → relaxed rows still rescue (fallback path unchanged)', async () => {
     const res = await hybridSearch(engine, 'EMBEDFAIL zephyr walrus', { limit: 10, expansion: false });
     expect(res.length).toBeGreaterThan(0);

@@ -1334,6 +1334,8 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'search.autocut_jump',
   'search.autocut_min_keep',
   'search.autocut_min_top',
+  // Fork (2026-09-09): relaxed-row fusion demotion master switch (mode.ts reads; `on` | `off`).
+  'search.relaxed_row_demotion',
   // Ranker wave: shared RRF weight budget for expansion variant lists (mode.ts reads; `legacy` | (0, 4]).
   'search.expansion_variant_budget',
   // Ranker wave (R1): relational-arm rows re-pinned above reranked text rows (mode.ts reads; `off` | 0..10).

@@ -54,6 +54,7 @@ export const KNOB_DESCRIPTIONS: Record<keyof ModeBundle, string> = {
   contextual_retrieval_disabled: 'Soft kill switch — neutralizes CR wrapping for queries + new embeds',
   // v0.42.3.0 autocut
   autocut: 'Score-discontinuity result-sizing (cuts at the rerank-score cliff; no-op without a reranker)',
+  relaxed_row_demotion: 'Relaxed-row fusion demotion: drop OR-relaxed keyword/title rows pre-fusion when a text vector arm voted (upstream v0.48.0 default on; this host runs off — fork knob)',
   autocut_jump: 'Autocut sensitivity: min normalized score gap that counts as a cliff (0..1, 0.20 default)',
   autocut_min_keep: 'Autocut floor: never trim the returned set below this many results (integer >= 1, 1 default)',
   // v0.43 relational recall
