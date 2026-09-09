@@ -188,6 +188,17 @@ function isPureNumber(s: string): boolean {
   return /^[0-9][0-9.,]*$/.test(s);
 }
 
+/**
+ * Fork (2026-08-05, lexicon arm; re-ported onto v0.48 2026-09-09): true when a
+ * single lowercase token sits on the hard/soft stop lists. The volunteer
+ * lexicon pass must not promote these even when someone seeds one as a page
+ * alias — a stoplisted token firing at alias confidence (0.9) on every mention
+ * would be exactly the push noise the precision bias exists to prevent.
+ */
+export function isStoplistedToken(tokenLc: string): boolean {
+  return STOPWORDS.has(tokenLc) || COMMON_WORDS.has(tokenLc);
+}
+
 // Lowercase-initial word of ≥3 chars, whole-word (lookarounds instead of \b —
 // \b misbehaves with unicode property classes). The lookbehind also excludes
 // @handles (step 1 owns those) and the lowercase TAIL of a capitalized word.
