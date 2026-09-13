@@ -21,6 +21,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
   const suite = kind === 'postgres' && !process.env.DATABASE_URL ? describe.skip : describe;
   suite(`${kind}: concrete content and graph privacy`, () => {
     let engine: BrainEngine;
+    const previousPolicy = new Map<string, string | null>();
 
     beforeAll(async () => {
       if (kind === 'postgres') {
@@ -32,12 +33,19 @@ for (const kind of ['pglite', 'postgres'] as const) {
         await engine.connect({});
       }
       await engine.initSchema();
+      // Exercise strict page/chunk policy explicitly; this fork defaults to world.
+      for (const key of ['facts.default_visibility', 'search.remote_private_pages']) {
+        previousPolicy.set(key, await engine.getConfig(key));
+      }
       for (const source of SOURCES) {
         await engine.executeRaw('INSERT INTO sources (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING', [source]);
       }
     }, 120_000);
 
     beforeEach(async () => {
+      await engine.setConfig('facts.default_visibility', 'private');
+      await engine.unsetConfig('search.remote_private_pages');
+      __resetPrivateVisibilityCacheForTests();
       await engine.executeRaw('DELETE FROM facts WHERE source_id = ANY($1::text[])', [SOURCES]);
       await engine.executeRaw('DELETE FROM pages WHERE source_id = ANY($1::text[])', [SOURCES]);
       await engine.executeRaw('DELETE FROM slug_aliases WHERE source_id = ANY($1::text[])', [SOURCES]);
@@ -49,6 +57,11 @@ for (const kind of ['pglite', 'postgres'] as const) {
         await engine.executeRaw('DELETE FROM facts WHERE source_id = ANY($1::text[])', [SOURCES]);
         await engine.executeRaw('DELETE FROM sources WHERE id = ANY($1::text[])', [SOURCES]);
         await engine.unsetConfig('entity_identity.union');
+        for (const [key, value] of previousPolicy) {
+          if (value === null) await engine.unsetConfig(key);
+          else await engine.setConfig(key, value);
+        }
+        __resetPrivateVisibilityCacheForTests();
         await engine.disconnect();
       }
     }, 60_000);
@@ -155,7 +168,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
     test('get_page protects every body field when trust is unset, independently of holder grants and page opt-outs', async () => {
       const body = `${renderFactsTable([
         { rowNum: 1, claim: 'PUBLIC_BODY_FACT', kind: 'fact', confidence: 1, visibility: 'world', notability: 'high', active: true },
-        { rowNum: 2, claim: PRIVATE, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
+        { rowNum: 2, claim: 'WORLD_NORMALIZED_FACT', kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
       ])}\n${TAKES_FENCE_BEGIN}\nPRIVATE_BODY_TAKE\n${TAKES_FENCE_END}`;
       await engine.putPage('people/body-default', {
         type: 'person', title: 'Public body fixture', compiled_truth: body, timeline: body,
@@ -171,11 +184,10 @@ for (const kind of ['pglite', 'postgres'] as const) {
             const result = await operationsByName.get_page.handler(ctx, { slug: 'people/body-default', include_content: true }) as Record<string, string>;
             for (const field of ['compiled_truth', 'timeline', 'content']) {
               expect(result[field]).toContain('PUBLIC_BODY_FACT');
+              expect(result[field]).toContain('WORLD_NORMALIZED_FACT');
               if (remote === false) {
-                expect(result[field]).toContain(PRIVATE);
                 expect(result[field]).toContain('PRIVATE_BODY_TAKE');
               } else {
-                expect(result[field]).not.toContain(PRIVATE);
                 expect(result[field]).not.toContain('PRIVATE_BODY_TAKE');
               }
             }

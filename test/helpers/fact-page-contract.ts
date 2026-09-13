@@ -11,7 +11,7 @@ import { extractFactsFromFenceText } from '../../src/core/facts/extract-from-fen
 import { writeTimelineEntryThrough } from '../../src/core/timeline-write-through.ts';
 
 export function factPageContract(getEngine: () => BrainEngine) {
-  for (const scenario of ['supersession-rebuild', 'insert-rollback', 'forget-rollback', 'source-isolation', 'timeline-tail']) {
+  for (const scenario of ['supersession-rebuild', 'insert-rollback', 'forget-rollback', 'forget-expired-noop', 'source-isolation', 'timeline-tail']) {
     test(`fact projection contract: ${scenario}`, async () => {
       const engine = getEngine();
       const root = mkdtempSync(join(tmpdir(), 'fact-projection-'));
@@ -48,6 +48,22 @@ export function factPageContract(getEngine: () => BrainEngine) {
           await expect(forgetFactInFence(engine, first.ids[0], { sourceId: source })).rejects.toThrow('deleted page');
           expect(readFileSync(file, 'utf8')).toBe(before);
           expect((await engine.listFactsByEntity(source, slug)).map(f => f.id)).toEqual(first.ids);
+          expect(await engine.executeRaw('SELECT 1 FROM fact_withdrawals WHERE source_id=$1', [source])).toHaveLength(0);
+          await engine.executeRaw('UPDATE pages SET deleted_at = NULL WHERE source_id=$1 AND slug=$2', [source, slug]);
+          expect((await forgetFactInFence(engine, first.ids[0], { sourceId: source })).path).toBe('fence');
+          expect(await engine.executeRaw('SELECT 1 FROM fact_withdrawals WHERE source_id=$1', [source])).toHaveLength(1);
+          expect((await engine.listFactsByEntity(source, slug))).toHaveLength(0);
+          expect((await engine.getPage(slug, { sourceId: source }))?.compiled_truth)
+            .toBe(parseMarkdown(readFileSync(file, 'utf8'), slug + '.md').compiled_truth);
+        } else if (scenario === 'forget-expired-noop') {
+          await engine.expireFact(first.ids[0]);
+          const [duplicate] = await engine.executeRaw<{ id: number }>(
+            "INSERT INTO facts (source_id,entity_slug,fact,kind,visibility,source) VALUES ($1,$2,'Use manual mode.','belief','world','test:expired-noop') RETURNING id",
+            [source, slug]);
+          expect((await forgetFactInFence(engine, first.ids[0], { sourceId: source })).path).toBe('already_expired');
+          expect(await engine.executeRaw('SELECT 1 FROM fact_withdrawals WHERE source_id=$1', [source])).toHaveLength(0);
+          expect((await engine.listFactsByEntity(source, slug)).map(f => Number(f.id))).toEqual([Number(duplicate.id)]);
+          expect(readFileSync(file, 'utf8')).toBe(before);
         } else if (scenario === 'source-isolation') {
           await engine.putPage(slug, { type: 'project', title: 'Foreign', compiled_truth: 'Foreign body' }, { sourceId: 'default' });
           const result = await forgetFactInFence(engine, first.ids[0], { sourceId: 'default' });

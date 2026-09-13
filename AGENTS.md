@@ -4,22 +4,31 @@ This is your install + operating protocol. Claude Code reads `./CLAUDE.md` autom
 Everyone else (Codex, Cursor, OpenClaw, Aider, Continue, or an LLM fetching via URL):
 start here.
 
-## Maintenance-only closure candidate (2026-09-06)
+## Source-fork upgrade contract
 
-This branch starts at production 260986 and contains only source-grant isolation,
-saved-source sync strategy precedence/validation, and financial seed-edge
-inference. It excludes the rejected 8962f retrieval/autocut/title changes. Verify
-the targeted source-grant, sync and graph suites plus typecheck under isolated
-GBRAIN_HOME before the parent considers deployment; a retrieval gate FAIL cannot
-be relabeled as acceptance. Runtime source grants bound ambient memory/metadata
-reads before any recall; permissive default fallback must not cross a grant.
+Merge explicit upstream tags in an isolated worktree. Preserve source grants,
+world-only fact projection, scoped candidate ranking, sync-strategy validation,
+strict extraction gates and the host search policy. The host requires
+`search.relaxed_row_demotion=off`. Never self-upgrade this patched fork.
+The existing fork migration ledger owns 145–154; upstream grant, withdrawal
+and queue-authority migrations are renumbered to 155–157. Drain and stop every
+old producer, worker, reaper and server before live migration; never mix old
+and new queue implementations. Use schema-only migration without host setup.
+Verify the restored staging database, fork regressions, full test wrappers,
+retrieval comparison and code-index canaries before accepting the cutover.
+Writable-fence withdrawal, fact expiry and final page projection share one DB
+transaction; failed projection restores only the writer’s file bytes. Already
+expired facts never create new withdrawal intent, and source-locked rechecks
+refuse disappeared or concurrently expired targets. Gateway fallback preserves
+invocation-policy denials, including wrapped causes, without trying another model.
 
-> **Becoming someone's persistent personal agent** (identity + memory + private repo)?
-> Follow [`BOOTSTRAP_FOR_AGENTS.md`](./BOOTSTRAP_FOR_AGENTS.md) — the `gbrain bootstrap`
-> flow — instead of the plain install below, then come back here for the operating
-> protocol. Connecting to an EXISTING remote brain from a laptop agent?
-> `gbrain connect https://your-host/mcp --token gbrain_xxx --install` (see the MCP
-> table in [`README.md`](./README.md)).
+> **Default: add memory to the existing agent.** Preserve its identity and unrelated instructions. Start keyless; automatic capture and paid enrichment are opt-in. No bootstrap interview or private repository is required.
+>
+> **Inside Grok Bot or Muse:** follow [Grok Bot](docs/guides/grok-bot.md) or [Muse](docs/guides/muse.md), using the isolated [in-agent setup](docs/guides/in-agent-setup.md) entry point. Use the absolute recorded launcher on every call. Sources organize local memory; they do not isolate agents that share files or credentials. Do not mark generated skills or routines as activated without native-harness evidence.
+>
+> **Existing hosted brain:** follow [hosted harness access](docs/guides/hosted-harness-access.md). Provision on the host; install the private handoff inside the intended harness. A URL or ordinary OAuth token is not administration authority.
+>
+> **Creating a new personal agent, explicitly requested by the user:** follow [BOOTSTRAP_FOR_AGENTS.md](BOOTSTRAP_FOR_AGENTS.md), then return here for the operating protocol.
 
 ## Install (5 min)
 
@@ -45,7 +54,11 @@ reads before any recall; permissive default fallback must not cross a grant.
    exact ask-the-user protocol. Same banner fires on `gbrain post-upgrade`
    for existing users (search modes were added in v0.32.3).
 4. Read [`./INSTALL_FOR_AGENTS.md`](./INSTALL_FOR_AGENTS.md) for the full step-by-step
-   flow (API keys, identity, cron, verification).
+   flow (keyless memory, optional API capabilities, maintenance, verification).
+
+## Memory operating protocol
+
+Recall relevant saved context before answering. Save explicit requests to remember with provenance; confirm corrections against the stored record. Automatic capture requires opt-in. Withdrawal (`forget`) removes a fact from active memory; history, source material, and private backups may remain. Never promise physical erasure. Verify changes with actual GBrain calls and distinguish a local test from a new-conversation test in the harness.
 
 ## Read this order
 
@@ -514,3 +527,9 @@ work only inside keyless disposable tests, preserve world-only/source isolation,
 and disable the latest-schema snapshot only for migration-lifecycle assertions.
 Run full unit, slow, verify and isolated PostgreSQL E2E against this exact frozen
 candidate. Results from a separate retrieval experiment cannot certify production.
+
+Privacy E2E fixtures must declare strict page policy explicitly and restore the
+prior configuration. Fact-fence legacy private cells normalize to world in this
+fork; keep their public canary distinct from protected takes/malformed markers.
+Open page/chunk policy still requires source grants, and engine safe-chunk seal
+checks remain independently enforced in both modes.

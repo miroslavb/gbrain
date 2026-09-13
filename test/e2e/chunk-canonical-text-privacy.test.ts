@@ -23,6 +23,7 @@ const NUL = String.fromCharCode(0);
 const LONE_HI = String.fromCharCode(0xd83c);
 const PRIVATE = 'PRIVATE_CANONICAL_BODY_CANARY';
 const WORLD = 'WORLD_CANONICAL_BODY_CONTROL';
+const NORMALIZED = 'WORLD_NORMALIZED_FACT';
 const obscure = (marker: string) => marker.replace('gbrain:', `gbrain:${NUL}`);
 
 for (const kind of ['pglite', 'postgres'] as const) {
@@ -128,7 +129,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
       const slug = 'notes/canonical-protected';
       const facts = renderFactsTable([
         { rowNum: 1, claim: WORLD, kind: 'fact', confidence: 1, visibility: 'world', notability: 'high', active: true },
-        { rowNum: 2, claim: PRIVATE, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
+        { rowNum: 2, claim: NORMALIZED, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
       ]).replace(FACTS_FENCE_BEGIN, obscure(FACTS_FENCE_BEGIN));
       const takes = `${obscure(TAKES_FENCE_BEGIN)}\n\`\`\`typescript\nexport const hidden = '${PRIVATE}';\n\`\`\`\n${TAKES_FENCE_END}`;
       const body = `Public canonical prefix ${LONE_HI}.\n${takes}\n${facts}\nPublic canonical suffix.`;
@@ -136,6 +137,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
       // Direct chunker/compile callers also use this boundary on raw text.
       const sanitized = sanitizeRemoteBody(body);
       expect(sanitized).toContain(WORLD);
+      expect(sanitized).toContain(NORMALIZED);
       expect(sanitized).toContain('Public canonical prefix �.');
       expect(sanitized).not.toContain(PRIVATE);
       expect(sanitized).not.toContain(NUL);
@@ -149,6 +151,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
       expect(chunks.length).toBeGreaterThan(0);
       const text = chunks.map(chunk => chunk.chunk_text).join('\n');
       expect(text).toContain(WORLD);
+      expect(text).toContain(NORMALIZED);
       expect(text).toContain('Public canonical prefix �.');
       expect(text).toContain('Public timeline suffix.');
       expect(text).not.toContain(PRIVATE);
@@ -160,6 +163,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
       expect(sanitizeRemoteBody(page.timeline)).not.toContain(PRIVATE);
       expect(await engine.searchKeyword(PRIVATE, { sourceId: SOURCE, requireSafeChunks: true })).toEqual([]);
       expect((await engine.searchKeyword(WORLD, { sourceId: SOURCE, requireSafeChunks: true })).length).toBeGreaterThan(0);
+      expect((await engine.searchKeyword(NORMALIZED, { sourceId: SOURCE, requireSafeChunks: true })).length).toBeGreaterThan(0);
     });
 
     test('successful OCR normalizes protected markers before image sealing', async () => {

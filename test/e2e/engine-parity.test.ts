@@ -228,6 +228,8 @@ describeBoth('Engine parity — Postgres vs PGLite', () => {
         },
         { source_id: 'default' },
       );
+      // Seed a legacy private row explicitly: new writes normalize to world here.
+      await eng.executeRaw("UPDATE facts SET visibility='private' WHERE source_id='default' AND entity_slug=$1 AND fact='PRIVATE-PARITY-SENTINEL fact'", [slug]);
       await eng.addTimelineEntry(
         slug,
         { date: new Date().toISOString().slice(0, 10), source: 'parity-seed', summary: 'Recent parity event' },

@@ -1,8 +1,10 @@
 /** Fail-safe model fallback walker for gateway chat calls. */
+import { isAIInvocationPolicyError } from './invocation-guard.ts';
 
 function fallbackEligible(err: unknown): boolean {
   let current: unknown = err;
   for (let depth = 0; depth < 6 && current; depth++) {
+    if (isAIInvocationPolicyError(current)) return false;
     const rec = current as {
       name?: unknown;
       message?: unknown;

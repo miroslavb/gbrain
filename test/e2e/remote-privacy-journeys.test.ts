@@ -25,7 +25,7 @@ import { LEGACY_EMBEDDING_CONFIG } from '../helpers/legacy-embedding-config.ts';
 
 const PUBLIC = 'privacyjourneypublic';
 const PRIVATE = 'PRIVATE_PAGE_JOURNEY_CANARY';
-const PRIVATE_FACT = 'PRIVATE_FACT_JOURNEY_CANARY';
+const NORMALIZED_FACT = 'WORLD_NORMALIZED_FACT_JOURNEY_CANARY';
 const PRIVATE_TAKE = 'PRIVATE_TAKE_JOURNEY_CANARY';
 const PRIVATE_REPORT = 'PRIVATE_QUERY_REPORT_JOURNEY_CANARY';
 const SHARED = 'notes/shared-privacy';
@@ -54,10 +54,10 @@ async function unusedPort(): Promise<number> {
 
 const historyBody = `Ordinary public history prose.\n${renderFactsTable([
   { rowNum: 1, claim: PUBLIC, kind: 'fact', confidence: 1, visibility: 'world', notability: 'high', active: true },
-  { rowNum: 2, claim: PRIVATE_FACT, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
+  { rowNum: 2, claim: NORMALIZED_FACT, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
 ])}\n${TAKES_FENCE_BEGIN}\n${PRIVATE_TAKE}\n${TAKES_FENCE_END}\n${renderFactsTable([
   { rowNum: 3, claim: `${PUBLIC} repeated`, kind: 'fact', confidence: 1, visibility: 'world', notability: 'high', active: true },
-  { rowNum: 4, claim: `${PRIVATE_FACT} repeated`, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
+  { rowNum: 4, claim: `${NORMALIZED_FACT} repeated`, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
 ])}`;
 
 async function seed(home: string): Promise<void> {
@@ -68,6 +68,8 @@ async function seed(home: string): Promise<void> {
   try {
     await engine.executeRaw("INSERT INTO sources (id, name, config) VALUES ('private-source', 'private-source', '{\"federated\":true}'::jsonb)");
     await engine.setConfig('search.cache.enabled', 'true');
+    // Explicit strict page policy for this disposable brain; fact cells still normalize to world.
+    await engine.setConfig('facts.default_visibility', 'private');
     for (const [slug, source, hidden] of [
       [SHARED, 'default', false],
       [SHARED, 'private-source', true],
@@ -85,7 +87,7 @@ async function seed(home: string): Promise<void> {
       // fences before the MCP transport starts reading this persistent brain.
       const chunks = JSON.stringify(await engine.getChunks(slug, { sourceId: source }));
       expect(chunks).toContain(hidden ? PRIVATE : PUBLIC);
-      expect(chunks).not.toContain(PRIVATE_FACT);
+      if (!hidden) expect(chunks).toContain(NORMALIZED_FACT);
       expect(chunks).not.toContain(PRIVATE_TAKE);
       await engine.executeRaw("INSERT INTO raw_data (page_id, source, data) VALUES ($1, 'fixture', $2::text::jsonb)", [id, JSON.stringify({ body: hidden ? PRIVATE : PUBLIC })]);
       await engine.executeRaw("INSERT INTO timeline_entries (page_id, date, summary) VALUES ($1, '2026-08-01', $2)", [id, hidden ? PRIVATE : PUBLIC]);
@@ -103,7 +105,7 @@ async function seed(home: string): Promise<void> {
     // Positive controls: persisted private evidence and trusted local reports
     // exist, so empty remote responses cannot pass on an empty fixture.
     expect(JSON.stringify(await engine.getChunks(SHARED, { sourceId: 'private-source' }))).toContain(PRIVATE);
-    expect(JSON.stringify(await engine.getVersions(SHARED))).toContain(PRIVATE_FACT);
+    expect(JSON.stringify(await engine.getVersions(SHARED))).toContain(NORMALIZED_FACT);
     const local: OperationContext = {
       engine,
       config: { engine: 'pglite' },
@@ -224,7 +226,8 @@ for (const kind of ['stdio', 'http'] as const) {
       for (const name of ['get_page', 'get_chunks', 'get_raw_data', 'get_timeline', 'get_versions']) {
         const { result, body } = await call(name, { slug: SHARED });
         expect(JSON.stringify(body)).toContain(PUBLIC);
-        for (const hidden of [PRIVATE, PRIVATE_FACT, PRIVATE_TAKE]) expect(JSON.stringify(result)).not.toContain(hidden);
+        if (['get_page', 'get_chunks', 'get_versions'].includes(name)) expect(JSON.stringify(body)).toContain(NORMALIZED_FACT);
+        for (const hidden of [PRIVATE, PRIVATE_TAKE]) expect(JSON.stringify(result)).not.toContain(hidden);
         if (name === 'get_versions') {
           expect(body).toHaveLength(1);
           expect(body[0].compiled_truth).toContain(`${PUBLIC} repeated`);
@@ -256,7 +259,7 @@ for (const kind of ['stdio', 'http'] as const) {
       expect(JSON.stringify(privateChunks)).toContain(PRIVATE);
       const { result, body } = await call('get_versions', { slug: SHARED });
       expect(JSON.stringify(body)).toContain(PUBLIC);
-      expect(JSON.stringify(result)).not.toContain(PRIVATE_FACT);
+      expect(JSON.stringify(result)).toContain(NORMALIZED_FACT);
       expect(JSON.stringify(result)).not.toContain(PRIVATE_TAKE);
       expect((await call('find_contradictions')).body).toEqual({ contradictions: [], note: REPORT_NOTE });
     }, 60_000);

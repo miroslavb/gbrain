@@ -8,7 +8,11 @@ describe('single-source read selection preserves compatibility within grants', (
       for (const sourceId of ['default', 'example-source', '__all__', undefined]) {
         for (const allowedSources of [undefined, []]) {
           const ctx = { remote, sourceId, auth: { allowedSources } } as OperationContext;
-          expect(selectSingleReadSource(ctx)).toBe(sourceId ?? 'default');
+          if (remote !== false && sourceId === undefined && allowedSources !== undefined) {
+            expect(() => selectSingleReadSource(ctx)).toThrow('No readable source');
+          } else {
+            expect(selectSingleReadSource(ctx)).toBe(sourceId ?? 'default');
+          }
         }
       }
     });

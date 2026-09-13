@@ -23,11 +23,12 @@ const [A, B, FOREIGN] = ['chunk-privacy-a', 'chunk-privacy-b', 'chunk-privacy-fo
 const SOURCES = [A, B, FOREIGN];
 const TYPE = 'legacy-chunk-privacy-fixture';
 const PRIVATE = 'PRIVATE_PERSISTED_CHUNK_CANARY';
+const NORMALIZED = 'WORLD_NORMALIZED_CHUNK_FACT';
 const QUERY = 'orbitchunkmarker';
 const takes = (body: string) => `${TAKES_FENCE_BEGIN}\n${body}\n${TAKES_FENCE_END}`;
 const facts = (world: string) => renderFactsTable([
   { rowNum: 1, claim: world, kind: 'fact', confidence: 1, visibility: 'world', notability: 'high', active: true },
-  { rowNum: 2, claim: PRIVATE, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
+  { rowNum: 2, claim: NORMALIZED, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
 ]);
 const variants = [
   { name: 'repeated-takes', body: `${takes(PRIVATE)}\n${takes(`${PRIVATE}_SECOND`)}`, world: undefined },
@@ -42,6 +43,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
   const suite = kind === 'postgres' && !process.env.DATABASE_URL ? describe.skip : describe;
   suite(`${kind}: imported and legacy chunk privacy`, () => {
     let engine: BrainEngine;
+    const previousPolicy = new Map<string, string | null>();
 
     beforeAll(async () => {
       configureGateway({ ...LEGACY_EMBEDDING_CONFIG, env: {} });
@@ -49,12 +51,19 @@ for (const kind of ['pglite', 'postgres'] as const) {
       if (kind === 'postgres') assertSafeE2eDatabaseUrl(process.env.DATABASE_URL!);
       await engine.connect(kind === 'postgres' ? { database_url: process.env.DATABASE_URL! } : {});
       await engine.initSchema();
+      // Exercise strict page/chunk policy explicitly; this fork defaults to world.
+      for (const key of ['facts.default_visibility', 'search.remote_private_pages']) {
+        previousPolicy.set(key, await engine.getConfig(key));
+      }
       for (const source of SOURCES) {
         await engine.executeRaw('INSERT INTO sources (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING', [source]);
       }
     }, 120_000);
 
     beforeEach(async () => {
+      await engine.setConfig('facts.default_visibility', 'private');
+      await engine.unsetConfig('search.remote_private_pages');
+      __resetPrivateVisibilityCacheForTests();
       await engine.executeRaw('DELETE FROM pages WHERE source_id = ANY($1::text[])', [SOURCES]);
       await engine.setConfig('search.mcp_keyword_only', 'true');
       await engine.setConfig('search.crag_escalation', 'false');
@@ -67,7 +76,12 @@ for (const kind of ['pglite', 'postgres'] as const) {
         try {
           await engine.executeRaw('DELETE FROM sources WHERE id = ANY($1::text[])', [SOURCES]);
           for (const key of ['search.mcp_keyword_only', 'search.crag_escalation', 'search.remote_private_pages']) await engine.unsetConfig(key);
-        } finally { await engine.disconnect(); }
+        } finally { for (const [key, value] of previousPolicy) {
+          if (value === null) await engine.unsetConfig(key);
+          else await engine.setConfig(key, value);
+        }
+        __resetPrivateVisibilityCacheForTests();
+        await engine.disconnect(); }
       }
       __resetPrivateVisibilityCacheForTests();
       resetGateway();
@@ -115,14 +129,17 @@ for (const kind of ['pglite', 'postgres'] as const) {
           { type: TYPE, title: `Imported ${variant.name}`, tags: [] });
         const imported = await importFromContent(engine, slug, content, { sourceId: A, noEmbed: true, forceRechunk: true });
         expect(imported.status, `${variant.name}: ${imported.error ?? ''}`).toBe('imported');
-        expect((await engine.getPage(slug, { sourceId: A }))?.compiled_truth).toContain(PRIVATE);
+        expect((await engine.getPage(slug, { sourceId: A }))?.compiled_truth).toContain(variant.name === 'repeated-facts' ? NORMALIZED : PRIVATE);
         const [version] = await engine.executeRaw<{ chunker_version: number }>('SELECT chunker_version FROM pages WHERE source_id = $1 AND slug = $2', [A, slug]);
         expect(Number(version.chunker_version)).toBe(MARKDOWN_CHUNKER_VERSION);
         const stored = await engine.getChunks(slug, { sourceId: A });
         expect(stored.length).toBeGreaterThan(0);
         expect(JSON.stringify(stored)).toContain(publicToken);
         expect(JSON.stringify(stored)).not.toContain(PRIVATE);
-        if (variant.world) expect(JSON.stringify(stored)).toContain(variant.world);
+        if (variant.world) {
+          expect(JSON.stringify(stored)).toContain(variant.world);
+          expect(JSON.stringify(stored)).toContain(NORMALIZED);
+        }
         for (const remote of [true, undefined]) {
           const ctx = context(remote);
           const chunks = await call(ctx, 'get_chunks', { slug });
@@ -141,7 +158,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
       // Current bodies cannot prove what an older materialized chunk contains.
       // Both unsafe and entirely public old chunks require a rebuild remotely.
       const markerFree = await legacy('notes/legacy-marker-free', A, 'Current body has no fence markers.', `${QUERY} ${PRIVATE}_NO_MARKERS`);
-      await legacy('notes/legacy-public', A, `${QUERY} OLD_PUBLIC_CHUNK`, `${QUERY} OLD_PUBLIC_CHUNK`);
+      const legacyPublic = await legacy('notes/legacy-public', A, `${QUERY} OLD_PUBLIC_CHUNK`, `${QUERY} OLD_PUBLIC_CHUNK`);
       const cleanA = await safe('notes/current-clean', A, `${QUERY} PUBLIC_CLEAN_A`);
       const cleanB = await safe(slug, B, `${QUERY} PUBLIC_CLEAN_B`);
       await safe('notes/current-foreign', FOREIGN, `${QUERY} PUBLIC_FOREIGN`);
@@ -169,13 +186,51 @@ for (const kind of ['pglite', 'postgres'] as const) {
             { ctx: context(remote, A, []), allowedIds: [cleanA], sharedChunk: undefined },
             { ctx: context(remote, FOREIGN, [A, B]), allowedIds: [cleanA, cleanB], sharedChunk: 'PUBLIC_CLEAN_B' },
           ]) {
+            const policy = await readPolicyOpts(scope.ctx);
+            // Safe-chunk seals remain independently enforceable in BOTH modes.
+            for (const rows of [
+              await engine.searchKeyword(QUERY, { ...policy, requireSafeChunks: true, limit: 1 }),
+              await engine.searchKeywordChunks(QUERY, { ...policy, requireSafeChunks: true, limit: 1 }),
+              await engine.searchVector(vector, { ...policy, requireSafeChunks: true, limit: 1 }),
+            ]) {
+              expect(rows).toHaveLength(1);
+              expect(scope.allowedIds).toContain(rows[0].page_id);
+              expect(JSON.stringify(rows)).not.toContain(PRIVATE);
+            }
             const chunks = await call(scope.ctx, 'get_chunks', { slug });
+            if (exposePrivatePages) {
+              expect(policy.excludePrivate).toBe(false);
+              expect(policy.requireSafeChunks).toBe(false);
+              const expected = scope.sharedChunk ? [unsafe, cleanB] : [unsafe];
+              expect((chunks as Array<{ page_id: number }>).map(row => row.page_id).sort((a,b) => a-b)).toEqual(expected.sort((a,b) => a-b));
+              expect(JSON.stringify(chunks)).toContain(PRIVATE);
+              expect(JSON.stringify(await call(scope.ctx, 'get_chunks', { slug: 'notes/legacy-marker-free' }))).toContain(`${PRIVATE}_NO_MARKERS`);
+              const allowed = [unsafe, markerFree, legacyPublic, ...scope.allowedIds];
+              for (const rows of [
+                await engine.searchKeyword(QUERY, { ...policy, limit: 1 }),
+                await engine.searchKeywordChunks(QUERY, { ...policy, limit: 1 }),
+                await engine.searchVector(vector, { ...policy, limit: 1 }),
+              ]) {
+                expect(rows).toHaveLength(1);
+                expect(allowed).toContain(rows[0].page_id);
+                expect(JSON.stringify(rows)).not.toContain('PUBLIC_FOREIGN');
+              }
+              for (const keywordOnly of ['true', 'false']) {
+                await engine.setConfig('search.mcp_keyword_only', keywordOnly);
+                for (const name of ['search', 'query']) {
+                  const rows = await call(scope.ctx, name, { query: QUERY, expand: false, limit: 1 }) as SearchResult[];
+                  expect(rows).toHaveLength(1);
+                  expect(allowed).toContain(rows[0].page_id);
+                  expect(JSON.stringify(rows)).not.toContain('PUBLIC_FOREIGN');
+                }
+              }
+              continue;
+            }
             if (scope.sharedChunk) expect(JSON.stringify(chunks)).toContain(scope.sharedChunk);
             else expect(chunks).toEqual([]);
             expect(JSON.stringify(chunks)).not.toContain(PRIVATE);
             expect(await call(scope.ctx, 'get_chunks', { slug: 'notes/legacy-marker-free' })).toEqual([]);
             expect(await call(scope.ctx, 'get_chunks', { slug: 'notes/legacy-public' })).toEqual([]);
-            const policy = await readPolicyOpts(scope.ctx);
             for (const rows of [
               await engine.searchKeyword(QUERY, { ...policy, limit: 1 }),
               await engine.searchKeywordChunks(QUERY, { ...policy, limit: 1 }),
@@ -197,6 +252,8 @@ for (const kind of ['pglite', 'postgres'] as const) {
           }
         }
       }
+      await engine.unsetConfig('search.remote_private_pages');
+      __resetPrivateVisibilityCacheForTests();
       const policy = await readPolicyOpts(context(true));
       const before = await engine.searchVector(vector, { ...policy, limit: 1 });
       await engine.executeRaw('UPDATE content_chunks SET chunk_text = $1 WHERE page_id = $2', [`${QUERY} `.repeat(100) + PRIVATE, unsafe]);
@@ -352,7 +409,11 @@ for (const kind of ['pglite', 'postgres'] as const) {
         const chunks = await call(context(true), 'get_chunks', { slug });
         expect(JSON.stringify(chunks)).toContain('reindexpublic');
         expect(JSON.stringify(chunks)).not.toContain(PRIVATE);
-        if (slug !== markerFreeSlug) expect(JSON.stringify(await engine.getPage(slug, { sourceId: A }))).toContain(PRIVATE);
+        if (slug !== markerFreeSlug) {
+          const ownerCanary = slug.endsWith('repeated-facts') ? NORMALIZED : PRIVATE;
+          expect(JSON.stringify(await engine.getPage(slug, { sourceId: A }))).toContain(ownerCanary);
+          if (ownerCanary === NORMALIZED) expect(JSON.stringify(chunks)).toContain(NORMALIZED);
+        }
       }
       const rows = await call(context(true), 'search', { query: 'reindexpublic', limit: 20 }) as SearchResult[];
       expect(new Set(rows.map(row => row.slug))).toEqual(new Set(slugs));
