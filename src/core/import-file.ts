@@ -1561,7 +1561,7 @@ export async function importCodeFile(
       title,
       compiled_truth: storageContent,
       timeline: '',
-      frontmatter: { language: lang, file: relativePath },
+      frontmatter: { language: lang, file: relativePath, code_chunker_version: CHUNKER_VERSION },
       content_hash: hash,
       // A code page MUST carry its path. The full-sync reconcile finds a
       // deleted file's page by matching `source_path` against the git tree;

@@ -13,7 +13,7 @@ import { probeSourceGitState } from '../../../core/git-head.ts';
 // this pure comparator (no git subprocess on the HTTP MCP doctor path).
 import { lagFromContentMs, resolveStalenessCeilingSeconds } from '../../../core/source-health.ts';
 import { resolveEnvNumber, resolveHoursEnv, warnOnceForEnv } from '../../../core/env-number.ts';
-import { CHUNKER_VERSION } from '../../../core/chunkers/code.ts';
+import { AUTOMATIC_CODE_CHUNKER_VERSION } from '../../../core/chunkers/code.ts';
 import { LINK_EXTRACTOR_VERSION_TS } from '../../../core/link-extraction.ts';
 import { isUndefinedColumnError } from '../../../core/utils.ts';
 import {
@@ -1261,11 +1261,11 @@ export async function checkSyncFreshness(
     // (local CLI) passes true; doctorReportRemote keeps the default.
     const localOnly = opts?.localOnly === true;
 
-    // v0.41.27.0: D7 narrowed predicate. The CHUNKER_VERSION caller-side
+    // v0.41.27.0: D7 narrowed predicate. The AUTOMATIC_CODE_CHUNKER_VERSION caller-side
     // check mirrors sync.ts:1057's chunker-version gate so doctor agrees
     // with sync on "is there work to do?". `sources.chunker_version` is
-    // a TEXT column storing String(CHUNKER_VERSION).
-    const currentChunkerVersion = String(CHUNKER_VERSION);
+    // a TEXT column storing String(AUTOMATIC_CODE_CHUNKER_VERSION).
+    const currentChunkerVersion = String(AUTOMATIC_CODE_CHUNKER_VERSION);
 
     const issues: string[] = [];
     // v0.41.27.0: D6 three-bucket count math. Every source falls into

@@ -15,6 +15,10 @@ Large declaration splits preserve the original contiguous declaration/header.
 The exact code_refs file predicate precedes LIMIT and composes with the upstream
 source resolver; --file must be skipped by positional argument parsing.
 Chunker version migration needs a reviewed finite admission, never a global rewalk.
+CHUNKER_VERSION=7 describes new chunks; AUTOMATIC_CODE_CHUNKER_VERSION=6
+retains the admitted source recovery floor in sync, cost planning and doctor.
+Each imported code page stamps frontmatter.code_chunker_version. A source stamp
+is not proof that every file uses v7; the finite host manifest owns that check.
 
 ## Source-fork upgrade contract
 
@@ -545,3 +549,13 @@ prior configuration. Fact-fence legacy private cells normalize to world in this
 fork; keep their public canary distinct from protected takes/malformed markers.
 Open page/chunk policy still requires source grants, and engine safe-chunk seal
 checks remain independently enforced in both modes.
+
+## Atom processing receipts
+
+The operator-initialized observability.atom_processing.v1 row records aggregate
+page-only counters for actual dispatch/attempt/terminal transitions. Successful
+empty and quality-rejected scans are completed empty work; operational failures
+are failed attempts. Publish counts follow the final atom receipt flip. No
+helper resets the epoch, schedules work, changes mass gates or stores raw text.
+Retired epochs fail before changing counters. Treat crash/interrupted attempts
+as uncompleted, never reconstruct success from publications or page timestamps.

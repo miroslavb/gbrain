@@ -84,6 +84,7 @@ import {
 } from './atom-safety.ts';
 import { resolveTierDefault } from '../model-config.ts';
 import { finalizeAtomCompletionReceipt } from './atom-completion-receipt.ts';
+import { atomProcessingWriter } from './atom-processing.ts';
 
 const DEFAULT_BUDGET_USD = 0.3;
 // Fork's DEFAULT_EXTRACT_ATOMS_MODEL is intentionally gone: upstream #3813
@@ -788,6 +789,9 @@ export async function runPhaseExtractAtoms(
   }
   const boundedWork = opts.dryRun ? work.slice(0, MAX_DRY_RUN_WORK_ITEMS) : work;
   const dryRunOmittedItems = work.length - boundedWork.length;
+  const recordProcessing = await atomProcessingWriter(engine, opts.dryRun);
+  await recordProcessing({ phase_dispatches: 1, no_work_dispatches: work.length === 0 ? 1 : 0,
+    eligible_dispatches: boundedWork.filter(item => item.kind === 'page').length });
 
   // Phase-level no-op: nothing to extract today.
   if (work.length === 0 && transcripts.length === 0 && pages.length === 0) {
@@ -1101,6 +1105,9 @@ export async function runPhaseExtractAtoms(
     }
 
     const originLabel = item.kind === 'transcript' ? item.filePath : item.slug;
+    const observePage = item.kind === 'page' && !opts.dryRun;
+    let scanCompleted = false, scanEmpty = false, atomsPublished = 0;
+    if (observePage) await recordProcessing({ attempted_scans: 1 });
     const itemRejectedByReason: Record<string, number> = {};
     let itemGateOperationalFailure = false;
     try {
@@ -1162,6 +1169,8 @@ export async function runPhaseExtractAtoms(
       const atoms = parseOutcome.atoms;
       candidatesCount += atoms.length;
       if (atoms.length === 0) {
+        scanCompleted = true;
+        scanEmpty = true;
         // #2144: tombstone zero-yield pages so they stop being rediscovered.
         // Idempotency is keyed on atom rows — a page that yields no atoms
         // leaves no row, so pre-fix it re-entered the discovery window every
@@ -1246,6 +1255,8 @@ export async function runPhaseExtractAtoms(
       }
 
       if (acceptedAtoms.length === 0) {
+        scanCompleted = !itemGateOperationalFailure;
+        scanEmpty = scanCompleted;
         // Candidates that all failed QUALITY gates get a bounded retry
         // allowance. Validator/config operational failures are never charged.
         if (
@@ -1340,6 +1351,7 @@ export async function runPhaseExtractAtoms(
         // stamp the source page. A crash between flip and stamp degrades to
         // the legacy atom-rows-mean-done semantics — safe, not lossy.
         await finalizeAtomCompletionReceipt(engine, sourceId, hash16, importedSlugs);
+        atomsPublished = importedSlugs.length;
         // #3961: bank the provenance edges so `gbrain backlinks <source-page>`
         // and the graph surface atom lineage. ON CONFLICT-deduped by the
         // batch write, so the deterministic-slug re-run path upserts instead
@@ -1363,6 +1375,7 @@ export async function runPhaseExtractAtoms(
       }
       if (item.kind === 'transcript') transcriptsProcessed++;
       else pagesProcessed++;
+      scanCompleted = true;
       // v0.41.19.0 (T4): one tick per processed item, with a count note.
       // Reporter rate-limits to ~1 line/sec; safe to tick every iter.
       opts.progress?.tick(1, `${totalAtomsExtracted} atoms / ${duplicatesSkipped} skipped`);
@@ -1403,6 +1416,10 @@ export async function runPhaseExtractAtoms(
         source: originLabel,
         error: transient ? `${message} [transient — retried next run]` : message,
       });
+    } finally {
+      if (observePage) await recordProcessing({ completed_scans: scanCompleted ? 1 : 0,
+        empty_scans: scanEmpty ? 1 : 0, failed_scans: scanCompleted ? 0 : 1,
+        published_atoms: atomsPublished });
     }
   }
   });

@@ -139,6 +139,9 @@ import G_ZIG from '../../assets/wasm/grammars/tree-sitter-zig.wasm' with { type:
 // v7: large-node splitting retains declaration/decorator text and its source
 // range before the first body child. Existing affected chunks require recovery.
 export const CHUNKER_VERSION = 7;
+// Version 7 is admitted per file on the host. Do not turn this release into
+// an automatic full-source recovery walk. New/changed files still use v7.
+export const AUTOMATIC_CODE_CHUNKER_VERSION = 6;
 
 // Lazy-loaded tree-sitter module (v0.22.x API: Parser is default export)
 let Parser: typeof import('web-tree-sitter') | null = null;

@@ -38,7 +38,7 @@ import {
   computeSyncDelta,
   buildDetachedWorkingTreeManifest,
 } from '../core/sync-delta.ts';
-import { CHUNKER_VERSION } from '../core/chunkers/code.ts';
+import { AUTOMATIC_CODE_CHUNKER_VERSION } from '../core/chunkers/code.ts';
 import type { SyncManifest, SyncFailure } from '../core/sync.ts';
 import { createProgress } from '../core/progress.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
@@ -1902,13 +1902,13 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
 
   // v0.20.0 Cathedral II Layer 12 (codex SP-1 fix): before returning
   // 'up_to_date' on git-HEAD equality, check the chunker version gate.
-  // If sources.chunker_version mismatches CURRENT_CHUNKER_VERSION, force
+  // If sources.chunker_version mismatches CURRENT_AUTOMATIC_CODE_CHUNKER_VERSION, force
   // a full re-walk so existing chunks get re-chunked under the new
   // pipeline (qualified symbol names, parent scope, doc-comment column
   // population, etc.). Without this, upgraded brains silently stay on
   // the old chunks — the whole reason we bumped the version.
   const storedVersion = await readChunkerVersion(engine, opts.sourceId);
-  const currentVersion = String(CHUNKER_VERSION);
+  const currentVersion = String(AUTOMATIC_CODE_CHUNKER_VERSION);
   const versionMismatch = storedVersion !== null && storedVersion !== currentVersion;
   const versionNeverSet = storedVersion === null && opts.sourceId !== undefined;
   // Untracked-gap fix: the working-tree manifest is now built for attached
@@ -2338,7 +2338,7 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
     // completes cleanly here).
     await writeSyncAnchor(engine, opts.sourceId, 'last_commit', pin, commitTimeMs(gitContextRoot, pin), gitContextRoot);
     await engine.setConfig('sync.last_run', new Date().toISOString());
-    await writeChunkerVersion(engine, opts.sourceId, String(CHUNKER_VERSION));
+    await writeChunkerVersion(engine, opts.sourceId, String(AUTOMATIC_CODE_CHUNKER_VERSION));
     await clearOpCheckpoint(engine, ckpt.paths);
     await clearOpCheckpoint(engine, ckpt.target);
     // A commit whose ONLY changes are malformed filenames lands here with
@@ -3611,7 +3611,7 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
     await writeSyncAnchor(engine, opts.sourceId, 'last_commit', pin, commitTimeMs(gitContextRoot, pin), gitContextRoot);
     await engine.setConfig('sync.last_run', new Date().toISOString());
     await writeSyncAnchor(engine, opts.sourceId, 'repo_path', anchorPath);
-    await writeChunkerVersion(engine, opts.sourceId, String(CHUNKER_VERSION));
+    await writeChunkerVersion(engine, opts.sourceId, String(AUTOMATIC_CODE_CHUNKER_VERSION));
     await clearOpCheckpoint(engine, ckpt.paths);
     await clearOpCheckpoint(engine, ckpt.target);
   };
@@ -4136,7 +4136,7 @@ async function performFullSync(
     await writeSyncAnchor(engine, opts.sourceId, 'last_commit', headCommit, newestCommitMs(gitContextRoot), gitContextRoot);
     await engine.setConfig('sync.last_run', new Date().toISOString());
     await writeSyncAnchor(engine, opts.sourceId, 'repo_path', anchorPath);
-    await writeChunkerVersion(engine, opts.sourceId, String(CHUNKER_VERSION));
+    await writeChunkerVersion(engine, opts.sourceId, String(AUTOMATIC_CODE_CHUNKER_VERSION));
   };
 
   const fullGate = await applySyncFailureGate({

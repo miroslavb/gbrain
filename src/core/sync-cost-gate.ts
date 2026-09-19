@@ -22,7 +22,7 @@ import {
   formatUsdLimit,
   resolveSpendPosture,
 } from './spend-posture.ts';
-import { estimateTokens, CHUNKER_VERSION } from './chunkers/code.ts';
+import { estimateTokens, AUTOMATIC_CODE_CHUNKER_VERSION } from './chunkers/code.ts';
 import {
   estimateEmbeddingCostUsd,
   getEmbeddingModelName,
@@ -495,7 +495,7 @@ export async function runInlineCostGate(
   }
 
   // ── Inline path ───────────────────────────────────────────────
-  const inline = estimateInlineNewTokens(sources, String(CHUNKER_VERSION), {
+  const inline = estimateInlineNewTokens(sources, String(AUTOMATIC_CODE_CHUNKER_VERSION), {
     forceFullTree: ctx.includeGitignored === true,
   });
   // D7A: `--full` runs `performFullSync` → `runEmbedCore({stale:true})`, which
