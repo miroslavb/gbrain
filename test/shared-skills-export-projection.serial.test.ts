@@ -60,8 +60,11 @@ test('export rejects every changed canonical take field before binding and leave
 }), 120_000);
 
 test('export rejects every changed canonical fact field including provenance, confidence, dates and metrics', () => fixture(async (ctx, root) => {
-  const [fact] = await ctx.engine.executeRaw<{ id: number }>('SELECT id FROM facts');
-  const changes: Record<string, unknown> = { fact: 'Changed fact', kind: 'preference', visibility: 'world', entity_slug: 'notes/other',
+  const [fact] = await ctx.engine.executeRaw<{ id: number; visibility: string }>('SELECT id,visibility FROM facts');
+  // Fork contract (world-only host): the fixture's `private` fence row is stored
+  // as `world`, so the canonical visibility change under test is to `private`.
+  expect(fact.visibility).toBe('world');
+  const changes: Record<string, unknown> = { fact: 'Changed fact', kind: 'preference', visibility: 'private', entity_slug: 'notes/other',
     notability: 'high', context: 'Changed context', source: 'Changed provenance', confidence: 0.2,
     valid_from: '2024-01-01', valid_until: '2027-01-01', expired_at: '2026-01-01',
     claim_metric: 'arr', claim_value: 999, claim_unit: 'EUR', claim_period: 'yearly', superseded_by: fact.id };

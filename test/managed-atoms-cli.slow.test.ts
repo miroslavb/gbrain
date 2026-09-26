@@ -24,13 +24,28 @@ test('disk PGLite CLI atom retry requires a safely stopped owner and persists ac
   let providerCalls = 0;
   const routes: string[] = [];
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method !== 'POST' || !new URL(request.url).pathname.endsWith('/messages')) {
+      routes.push(new URL(request.url).pathname);
+      return new Response('Unexpected fixture provider route', { status: 400 });
+    }
+    const body = await request.json() as { system?: unknown; messages?: Array<{ content?: unknown }> };
+    // Fork contract: gateway atom extraction also runs the fail-closed semantic
+    // validator through the same provider; answer it with all-pass verdicts
+    // without counting it as an extraction call.
+    if (JSON.stringify(body.system ?? '').includes('You are a fail-closed atom quality gate.')) {
+      const raw = body.messages?.[0]?.content;
+      const text = typeof raw === 'string' ? raw : Array.isArray(raw) ? raw.map((part: { text?: string }) => part.text ?? '').join('') : '{}';
+      const candidates = (JSON.parse(text) as { candidates?: unknown[] }).candidates ?? [];
+      const scores = { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 };
+      return Response.json({ id: 'msg_validator', type: 'message', role: 'assistant', model: 'claude-haiku-4-5',
+        content: [{ type: 'text', text: JSON.stringify({ verdicts: candidates.map((_, index) => ({ index, scores })) }) }],
+        stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+    }
     routes.push(new URL(request.url).pathname);
-    if (request.method !== 'POST' || !new URL(request.url).pathname.endsWith('/messages')) return new Response('Unexpected fixture provider route', { status: 400 });
-    await request.json();
     providerCalls++;
     return Response.json({ id: 'msg_fixture', type: 'message', role: 'assistant', model: 'claude-haiku-4-5',
       content: [{ type: 'text', text: malformed ? 'This is not valid extraction JSON.' :
-        '[{"title":"CLI verified atom","atom_type":"insight","body":"A lampreyfixture benchmark requires measured delivery before rollout."}]' }],
+        '[{"title":"CLI verified atom","atom_type":"insight","body":"A lampreyfixture benchmark requires measured delivery before rollout.","source_quote":"A lampreyfixture benchmark requires measured delivery before rollout."}]' }],
       stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 10 } });
   } });
   const env = keylessBrainEnv({ PATH: process.env.PATH, TZ: 'UTC' }, home, {

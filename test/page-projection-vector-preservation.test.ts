@@ -97,7 +97,7 @@ for (const kind of backends) {
       return prepared.snapshot;
     }
 
-    test('migration 153 queues real rebuilds without erasing legacy vectors or canonical state', async () => {
+    test('migration 161 (upstream 153) queues real rebuilds without erasing legacy vectors or canonical state', async () => {
       const original = await seed();
       const sibling = await seed(neighborId);
       const before = await storedChunks(), neighbor = await storedChunks(neighborId);
@@ -105,7 +105,7 @@ for (const kind of backends) {
       expect(canonical.page).toMatchObject([{ page: { compiled_truth: body, timeline, knowledge_revision: original.revision } }]);
       expect(canonical.versions).toHaveLength(1);
       expect(canonical.tags).toEqual(['preserved-tag']);
-      const migration = MIGRATIONS.find(m => m.version === 153)!;
+      const migration = MIGRATIONS.find(m => m.version === 161)!; // fork numbering: upstream 153
       expect(migration.name).toBe('verified_text_projection_activation');
       await engine.transaction(tx => tx.runMigration(migration.version, migration.sql!));
       const jobs = await engine.executeRaw(`SELECT s.id AS source_id,j.slug,j.reason,j.revision FROM page_projection_jobs j

@@ -200,7 +200,11 @@ describe('put_page write-through — happy path', () => {
     fs.writeFileSync(file, bytes);
     const remote = makeCtx({ remote: true });
     const visible = await operations.find(op => op.name === 'get_page')!.handler(remote, { slug, include_content: true }) as { content: string; revision: string };
-    expect(visible.content).not.toContain('Private fixture claim');
+    // Fork contract: the world-only host parses every fence fact row as
+    // `world`, so the remote view carries the legacy row (never a textual
+    // private cell); the round-trip must still be an unstamped no-op.
+    expect(visible.content).toContain('Private fixture claim');
+    expect(visible.content).not.toContain('| private |');
     expect(await putPage.handler(remote, { slug, content: visible.content, expected_revision: visible.revision }))
       .toMatchObject({ state: 'committed', noop: true, revision: before.revision });
     expect((await engine.readPageSnapshot(slug, { sourceId: 'default' }))!.page.frontmatter).toEqual({});

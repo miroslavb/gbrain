@@ -124,9 +124,10 @@ describe('projection migration ledger verification', () => {
   test('a failed final postcondition never advances the schema version', async () => {
     await engine.executeRaw('DROP STATISTICS pages_text_projection_current_stats');
     await engine.executeRaw('CREATE STATISTICS pages_text_projection_current_stats ON ((knowledge_revision IS NULL)) FROM pages');
-    await engine.setConfig('version', '159');
+    // Fork numbering: upstream migration 160 (projection statistics) is 168 here.
+    await engine.setConfig('version', '167');
     await expect(runMigrations(engine)).rejects.toThrow('wrong definition');
-    expect(await engine.getConfig('version')).toBe('159');
+    expect(await engine.getConfig('version')).toBe('167');
     await engine.executeRaw('DROP STATISTICS pages_text_projection_current_stats');
     await runMigrations(engine);
     expect(await engine.getConfig('version')).toBe(String(LATEST_VERSION));

@@ -339,14 +339,16 @@ describe('gbrain reindex --markdown (v0.32.7)', () => {
           SET last_retrieved_at = '2026-08-23T00:00:00Z'::timestamptz
             - (id * interval '1 second')`,
     );
-    const originalGetPage = engine.getPage.bind(engine);
+    // The override must keep `this`: upstream's writer re-enters getPage on the
+    // transaction engine, and a bound outer engine deadlocks single-connection PGLite.
+    const originalGetPage = engine.getPage;
     let failedReads = 0;
-    engine.getPage = async (slug, opts) => {
+    engine.getPage = async function(this: PGLiteEngine, slug, opts) {
       if (slug === 'analysis/hottest-fails') {
         failedReads++;
         throw new Error('synthetic hot read failure');
       }
-      return originalGetPage(slug, opts);
+      return originalGetPage.call(this, slug, opts);
     };
 
     try {

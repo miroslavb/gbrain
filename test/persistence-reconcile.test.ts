@@ -223,12 +223,17 @@ test('private and withdrawn timeline facts survive file choices without resurrec
     const initial = await runReconcilePreview(engine, { source_id: f.id, slug: f.slug });
     const decisions = initial.preview.conflicts.map(c => ({ path: c.path, action: 'take_file' }));
     const resolved = await runReconcilePreview(engine, { source_id: f.id, slug: f.slug, from: initial.preview, decisions });
-    expect(parseFactsFence(resolved.preview.result.compiled_truth).facts[0].visibility).toBe('private');
+    // Fork contract: the world-only host parses every fence row as `world`,
+    // so the legacy "private" row is file-governed like any world fact and
+    // the reviewed take_file choice (which omits it) is honored. Only the
+    // withdrawn timeline fact must stay retired.
+    expect(parseFactsFence(resolved.preview.result.compiled_truth).facts).toHaveLength(0);
+    expect(resolved.preview.result.compiled_truth).not.toContain('| private |');
     const retired = parseFactsFence(resolved.preview.result.timeline).facts[0];
     expect(retired.validUntil).toBeDefined();
     expect((await runReconcileApply(engine, { source_id: f.id, slug: f.slug, preview: resolved.preview, request_id: randomUUID() })).state).toBe('committed');
     const current = (await engine.readPageSnapshot(f.slug, { sourceId: f.id }))!;
-    expect(parseFactsFence(current.page.compiled_truth).facts[0].visibility).toBe('private');
+    expect(parseFactsFence(current.page.compiled_truth).facts).toHaveLength(0);
     expect(parseFactsFence(current.page.timeline).facts[0].validUntil).toBe(retired.validUntil);
   });
 }), 120_000);

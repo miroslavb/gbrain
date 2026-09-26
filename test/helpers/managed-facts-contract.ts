@@ -34,7 +34,7 @@ export async function exerciseManagedFacts(engine: BrainEngine, scenario: Case):
       await disposePersistenceConsumer(engine);
       configureGateway({ embedding_model: 'openai:text-embedding-3-large', embedding_dimensions: 1536, env: { OPENAI_API_KEY: 'test' } });
       await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
-      await engine.setConfig('version', '162');
+      await engine.setConfig('version', '170'); // fork numbering: upstream 162 +8
       await engine.setConfig('facts.default_visibility', 'private');
       await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [sourceId]);
       const firstSlug = 'people/alice-example', secondSlug = 'companies/acme-example';
@@ -168,11 +168,14 @@ export async function exerciseManagedFacts(engine: BrainEngine, scenario: Case):
       expect(calls).toBe(1);
       const rows = await engine.executeRaw<{ id: number; visibility: string; source_session: string }>('SELECT id,visibility,source_session FROM facts WHERE source_id=$1 AND id=ANY($2::integer[])', [sourceId, first.fact_ids]);
       expect(rows).toHaveLength(2);
-      for (const row of rows) expect(row).toMatchObject({ visibility: 'private', source_session: 'fixture-session' });
+      // Fork contract: the world-only host writes every fact as `world` (resolveVisibilityParam).
+      for (const row of rows) expect(row).toMatchObject({ visibility: 'world', source_session: 'fixture-session' });
       const dates = await engine.executeRaw<{ time: string }>("SELECT to_char(valid_from AT TIME ZONE 'UTC','HH24:MI:SS') AS time FROM facts WHERE source_id=$1 AND id=ANY($2::integer[]) AND source_markdown_slug IS NOT NULL", [sourceId, first.fact_ids]);
       for (const date of dates) expect(date.time).toBe('00:00:00');
       expect(readFileSync(join(root, `${secondSlug}.md`), 'utf8')).toContain('Acme-example measures monthly growth.');
-      expect(JSON.stringify(await operationsByName.get_page.handler(ctx, { slug: secondSlug }))).not.toContain('Acme-example measures monthly growth.');
+      // Fork contract: world facts are shared memory on the single-principal host,
+      // so the remote owner-granted reader sees the published fence row.
+      expect(JSON.stringify(await operationsByName.get_page.handler(ctx, { slug: secondSlug }))).toContain('Acme-example measures monthly growth.');
       const [afterVector] = await engine.executeRaw<{ vector: string }>('SELECT embedding::text AS vector FROM facts WHERE id=$1', [old.ids[0]]);
       expect(afterVector.vector).toBe(beforeVector.vector);
       if (scenario === 'unparented') expect(await engine.executeRaw('SELECT id FROM facts WHERE source_id=$1 AND entity_slug IS NULL', [sourceId])).toHaveLength(1);

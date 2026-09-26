@@ -38,17 +38,15 @@ and maintenance commands remain available.
 | `reranker` (cross-encoder)    | off            | `voyage:rerank-2.5` | `voyage:rerank-2.5` |
 | `autocut` (rerank-cliff cut)  | off            | off        | off            |
 
-The `expansion` row is not decisive for any shipped verb today: `gbrain query`
-(the only verb that can expand) expands by default in every mode — pass
-`--no-expand` / `expand: false` to opt out — while `gbrain search`, the memory
-verbs and the eval harnesses pin expansion per call. The bundle value (and the
-`search.expansion` config key) only reaches a core-library caller that leaves `expansion`
-unset AND wires an `expandFn`; none ship today. `gbrain search modes` reports
-the bundle value and prints the operation-level exception before its knob table.
+The `expansion` row governs `gbrain query` on this fork: `query` (the only verb
+that can expand) leaves `expansion` unset unless the caller passes `expand`, so
+`search.expansion` decides first and the active bundle second. Pass
+`--no-expand` / `expand: false` to opt out or `expand: true` to opt in for one
+call. `gbrain search`, the memory verbs and the eval harnesses pin expansion per
+call. `gbrain search modes` reports the resolved value and the per-call rule.
 
-This preserves the existing query contract: changing modes does not silently
-enable or disable expansion. `query` defaults to `expand: true`; explicit
-`expand: false` (CLI `--no-expand`) wins even in `tokenmax`. `search` never
+Changing `search.expansion` or the mode therefore changes bare `query` calls;
+explicit `expand: false` (CLI `--no-expand`) wins even in `tokenmax`. `search` never
 expands, even with `search.expansion=true`. Keyless retrieval takes the
 keyword-only path before expansion; configured embedding and expansion
 providers are prerequisites. Image-only retrieval also skips expansion.
@@ -67,9 +65,8 @@ Seven of the knobs deserve a sentence:
 - **`expansion`** rewrites your query into multiple variants via a cheap
   LLM call when available (the historical Haiku estimate is roughly $1.50 per
   1K queries; actual charges depend on model and token counts). It can recover
-  alternate phrasings but can also hurt precision. `gbrain query` requests
-  expansion in every mode unless `--no-expand`;
-  this knob does not turn it off (see the caption under the table).
+  alternate phrasings but can also hurt precision. `gbrain query` follows this
+  knob unless the call passes `expand` (see the caption under the table).
 - **`expansion_variant_budget`** (config key
   `search.expansion_variant_budget`) is the total RRF weight the expansion
   variants share at fusion time (`weight_i = b / n_voting_arms`; the original

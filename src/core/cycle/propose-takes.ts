@@ -997,6 +997,9 @@ class ProposeTakesPhase extends BaseCyclePhase {
   readonly name = 'propose_takes' as CyclePhase;
   protected readonly budgetUsdKey = 'cycle.propose_takes.budget_usd';
   protected readonly budgetUsdDefault = 5.0;
+  // Fork contract: the strict extractor previews in dry-run and writes no
+  // proposals, receipts or rollup rows (see process()).
+  protected override readonly supportsDryRun = true;
 
   protected override mapErrorCode(err: unknown): string {
     if (err instanceof GBrainError) return err.problem;

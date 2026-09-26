@@ -47,6 +47,10 @@ describe('operation authorization boundaries', () => {
       'cannot expire a %s/%s fact', async (sourceId, visibility) => {
         const claim = 'Protected fixture memory';
         const fact = await engine.insertFact({ fact: claim, source: 'test', visibility }, { source_id: sourceId });
+        // Fork contract: insertFact normalizes new rows to `world` on the
+        // world-only host; recreate the legacy private row the remote
+        // world-only forget_fact lookup must still refuse.
+        if (visibility === 'private') await engine.executeRaw("UPDATE facts SET visibility='private' WHERE id=$1", [fact.id]);
         const requestId = randomUUID();
         await expect(op.handler(caller(), { id: fact.id, request_id: requestId })).rejects.toMatchObject({ code: 'fact_not_found' });
         expect(await engine.executeRaw('SELECT expired_at FROM facts WHERE id=$1', [fact.id])).toEqual([{ expired_at: null }]);

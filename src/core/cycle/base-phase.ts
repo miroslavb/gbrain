@@ -110,6 +110,13 @@ export abstract class BaseCyclePhase {
   protected abstract readonly budgetUsdDefault: number;
 
   /**
+   * Fork: a subclass with its own write-free dry-run path lets a direct
+   * ctx.dryRun preview through the #4823 skip below. Cycle-threaded
+   * opts.dryRun still skips. Default false keeps the upstream guard.
+   */
+  protected readonly supportsDryRun: boolean = false;
+
+  /**
    * The phase's actual work. Subclass implements this; base wraps it with
    * source-scope enforcement, budget metering, error catching, and progress
    * accounting. `scope` is the only sanctioned way to read source-scoped data.
@@ -208,7 +215,9 @@ export abstract class BaseCyclePhase {
     // calibration_profiles), so skip here — one guard for all three, the same
     // shape extract / resolve_symbol_edges use (#4823). Read both channels so
     // a caller that forgets to thread opts.dryRun still can't bill.
-    if (opts.dryRun || ctx.dryRun === true) {
+    // Fork: a cycle-threaded opts.dryRun always skips (no spend on `dream
+    // --dry-run`); a direct ctx.dryRun preview reaches phases that opt in.
+    if (opts.dryRun || (ctx.dryRun === true && !this.supportsDryRun)) {
       return {
         phase: this.name,
         status: 'skipped',

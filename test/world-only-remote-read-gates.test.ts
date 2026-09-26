@@ -55,6 +55,12 @@ beforeAll(async () => {
     'UPDATE pages SET chunker_version = $1 WHERE slug = $2',
     [SAFE_FENCE_CHUNKER_VERSION - 1, SLUG],
   );
+  // v0.51+ search also requires a revision-sealed text projection. Seal it so
+  // this fixture isolates the pre-seal-sanitizer (chunker_version) gate.
+  await engine.executeRaw(
+    'UPDATE pages SET text_projection_revision = knowledge_revision WHERE slug = $1',
+    [SLUG],
+  );
 });
 
 afterAll(async () => {

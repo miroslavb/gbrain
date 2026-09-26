@@ -92,18 +92,19 @@ export function formatKnobValue(knob: string, value: unknown): string {
  * the BRAIN-LEVEL planes (config override > mode bundle); per-call
  * SearchOpts overrides on individual searches are not represented here —
  * a live search that passes its own knobs can legitimately differ from
- * this report for that one call. #4601: the `query` op ALWAYS supplies
- * `expand` (default on), so the `expansion` row never governs it — say so
- * here, on the surface operators actually read, or the dashboard gives a
- * confident wrong answer for the primary agent verb.
+ * this report for that one call. Fork contract (1a0349730): the `query` op
+ * leaves `expand` unset unless the caller passes it, so the resolved
+ * `expansion` row DOES govern bare query calls — say so here, on the surface
+ * operators actually read.
  */
 export const MODES_REPORT_PER_CALL_NOTE =
   'Resolved from config overrides + the active mode bundle. Per-call SearchOpts ' +
   'overrides on individual searches are not shown — a call that passes its own ' +
   'knobs (e.g. expand, autocut, relational) wins for that call only. The `query` ' +
-  'op always passes `expand` (default on in every mode; `--no-expand` or ' +
-  '`expand: false` opts out), while `search` never expands. Neither inherits ' +
-  '`search.expansion`. Expansion needs configured embedding and expansion ' +
+  'op passes `expand` only when the caller sets it; otherwise `search.expansion` ' +
+  'and then the active mode bundle decide (fork resolution chain; `--no-expand` or ' +
+  '`expand: false` opts out, `expand: true` opts in), while `search` never expands. ' +
+  'Expansion needs configured embedding and expansion ' +
   'providers; requested expansion is not proof a provider ran. A configured ' +
   'cloud expander receives the query and may charge for the call.';
 

@@ -153,7 +153,9 @@ for (const transport of ['stdio', 'http'] as const) {
           await start();
 
           const blockedId = randomUUID();
-          const memoryParams = { fact, provenance, entity: slug, visibility: 'private' };
+          // Fork contract: the world-only host's remember schema accepts only
+          // `world`; the journey's durability/ownership checks are unchanged.
+          const memoryParams = { fact, provenance, entity: slug, visibility: 'world' };
           const blocked = await call('remember', { ...memoryParams, request_id: blockedId });
           expect(blocked.exitCode).toBe(1);
           const blockedError = JSON.parse(blocked.stdout);
@@ -235,7 +237,7 @@ for (const transport of ['stdio', 'http'] as const) {
           const readback = success(await call('get_page', { slug }));
           expect(readback.source_id).toBe(sourceId);
           expect(parseFactsFence(readback.compiled_truth).facts).toEqual(expect.arrayContaining([
-            expect.objectContaining({ claim: fact, visibility: 'private', source: provenance }),
+            expect.objectContaining({ claim: fact, visibility: 'world', source: provenance }),
           ]));
           const rememberedBytes = readFileSync(file);
           expect(parseMarkdown(rememberedBytes.toString(), slug).compiled_truth).toBe(readback.compiled_truth);
@@ -259,7 +261,7 @@ for (const transport of ['stdio', 'http'] as const) {
           expect(parsedFile.frontmatter).toEqual(durable.page.frontmatter);
           expect(parsedFile.compiled_truth).toBe(durable.page.compiled_truth);
           expect(await engine.executeRaw('SELECT fact,source_id,source,visibility,entity_slug,source_markdown_slug FROM facts WHERE id=$1', [Number(remembered.id)]))
-            .toEqual([{ fact, source_id: sourceId, source: provenance, visibility: 'private', entity_slug: slug, source_markdown_slug: slug }]);
+            .toEqual([{ fact, source_id: sourceId, source: provenance, visibility: 'world', entity_slug: slug, source_markdown_slug: slug }]);
           expect(await engine.executeRaw('SELECT id FROM facts WHERE source_id=$1 AND fact=$2', [sourceId, fact])).toHaveLength(1);
           expect(await engine.executeRaw('SELECT request_id,state,error_code FROM persistence_requests WHERE request_id=$1::uuid', [blockedId]))
             .toEqual([{ request_id: blockedId, state: blockedError.write_request.state, error_code: 'source_changed' }]);

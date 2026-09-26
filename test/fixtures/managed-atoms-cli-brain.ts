@@ -20,14 +20,16 @@ try {
   if (action === 'seed') {
     const root = join(home, 'repo');
     const slug = 'documents/2026-09-22-example';
-    await engine.setConfig('version', '162');
+    await engine.setConfig('version', '170'); // fork numbering: upstream 162 +8
     await engine.setConfig('models.dream.extract_atoms', 'anthropic:claude-haiku-4-5');
     await engine.setConfig('cycle.extract_atoms.budget_usd', '1');
     await engine.setConfig('sync.repo_path', root);
     await engine.setConfig('facts.extraction_enabled', 'false');
     await engine.executeRaw("UPDATE sources SET local_path=$1 WHERE id='default'", [root]);
     await engine.putPage(slug, { type: 'source', title: 'CLI example source',
-      compiled_truth: 'A synthetic project source requires measured delivery criteria before rollout. '.repeat(40).trim(), frontmatter: { visibility: 'private' } }, { sourceId: 'default' });
+      compiled_truth: 'A synthetic project source requires measured delivery criteria before rollout. '.repeat(40).trim()
+        // Fork contract: the grounded atom quotes this exact source sentence.
+        + ' A lampreyfixture benchmark requires measured delivery before rollout.', frontmatter: { visibility: 'private' } }, { sourceId: 'default' });
     const file = join(root, `${slug}.md`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, serializePageToMarkdown((await engine.getPage(slug, { sourceId: 'default' }))!, []));

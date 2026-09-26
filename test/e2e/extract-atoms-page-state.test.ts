@@ -11,7 +11,9 @@ const describeDb = hasDatabase() ? describe : describe.skip;
 describeDb('Postgres derived atom page state', () => {
   let engine: PostgresEngine;
   const slug = 'meetings/atom-state-example';
-  const body = 'Synthetic evidence with sufficient source detail for extraction. '.repeat(20);
+  // Fork contract: atoms must quote an exact self-contained sentence of the source.
+  const body = 'Synthetic evidence with sufficient source detail for extraction. '.repeat(20)
+    + 'The parity fixture recorded its first synthetic outcome. The parity fixture recorded its second synthetic outcome. ';
   const chat = async (): Promise<ChatResult> => ({ text: '[]', blocks: [{ type: 'text', text: '[]' }], stopReason: 'end',
     usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 },
     model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' });
@@ -122,7 +124,10 @@ describeDb('Postgres derived atom page state', () => {
     await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
   });
 
-  test.each(['atom', 'links', 'deleted-before-completion'])('partial %s writes retain pending receipts until every atom and edge persists', async failure => {
+  // Fork contract: provenance edges are banked best-effort AFTER the completion
+  // flip (upstream #4733 links-before-flip is not adopted). Only a failed atom
+  // write leaves pending receipts; link failures keep the completed atoms.
+  test.each(['atom'] as string[])('partial %s writes retain pending receipts until every atom and edge persists', async failure => {
     const put = engine.putPage, addLinks = engine.addLinksBatch;
     let writes = 0;
     engine.putPage = async function (...args) {
@@ -138,8 +143,10 @@ describeDb('Postgres derived atom page state', () => {
       return result;
     };
     const atomChat = async (): Promise<ChatResult> => ({ ...await chat(), text: JSON.stringify([
-      { title: 'First parity insight', atom_type: 'insight', body: 'Synthetic first evidence.' },
-      { title: 'Second parity insight', atom_type: 'insight', body: 'Synthetic second evidence.' },
+      { title: 'First parity insight', atom_type: 'insight', body: 'The parity fixture recorded its first synthetic outcome.',
+        source_quote: 'The parity fixture recorded its first synthetic outcome.' },
+      { title: 'Second parity insight', atom_type: 'insight', body: 'The parity fixture recorded its second synthetic outcome.',
+        source_quote: 'The parity fixture recorded its second synthetic outcome.' },
     ]) });
     try {
       const result = await runPhaseExtractAtoms(engine, { _transcripts: [], _chat: atomChat });
@@ -156,5 +163,29 @@ describeDb('Postgres derived atom page state', () => {
     expect((await runPhaseExtractAtoms(engine, { _transcripts: [], _chat: atomChat })).status).toBe('ok');
     expect(await countExtractAtomsBacklog(engine, 'default')).toBe(0);
     expect((await engine.getLinks(slug)).filter(link => link.link_source === 'atom-provenance')).toHaveLength(2);
+  });
+
+  test.each(['links', 'deleted-before-completion'])('fork: %s failure after the completion flip keeps completed atoms', async failure => {
+    const scannedHash = (await snapshot()).page.content_hash!.slice(0, 16);
+    const addLinks = engine.addLinksBatch;
+    engine.addLinksBatch = async function (...args) {
+      if (failure === 'links') throw new Error('synthetic link failure');
+      const result = await addLinks.apply(this, args);
+      await this.executeRaw("DELETE FROM pages WHERE source_id='default' AND slug=$1", [args[0][0].to_slug]);
+      return result;
+    };
+    const atomChat = async (): Promise<ChatResult> => ({ ...await chat(), text: JSON.stringify([
+      { title: 'First parity insight', atom_type: 'insight', body: 'The parity fixture recorded its first synthetic outcome.',
+        source_quote: 'The parity fixture recorded its first synthetic outcome.' },
+      { title: 'Second parity insight', atom_type: 'insight', body: 'The parity fixture recorded its second synthetic outcome.',
+        source_quote: 'The parity fixture recorded its second synthetic outcome.' },
+    ]) });
+    try {
+      expect((await runPhaseExtractAtoms(engine, { _transcripts: [], _chat: atomChat })).status).toBe('ok');
+    } finally { engine.addLinksBatch = addLinks; }
+    const complete = await engine.executeRaw<{ hash: string }>("SELECT frontmatter->>'source_hash' AS hash FROM pages WHERE type='atom'");
+    expect(complete).toHaveLength(failure === 'links' ? 2 : 1);
+    expect(complete.every(row => row.hash === scannedHash)).toBe(true);
+    expect(await countExtractAtomsBacklog(engine, 'default')).toBe(0);
   });
 });

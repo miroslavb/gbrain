@@ -368,7 +368,11 @@ def protected_example():
     const text = chunks.map(c => c.chunk_text).join('\n');
     expect(text).toContain('Safe prose.');
     expect(text).not.toContain(claim);
-    expect(text).not.toContain('private-projection-sentinel');
+    // Fork contract: the world-only host parses every fence fact row as
+    // `world`, so the legacy "private" row is indexed like any world fact
+    // (never with a textual private cell); takes code stays excluded.
+    expect(text).toContain('private-projection-sentinel');
+    expect(text).not.toContain('| private |');
     expect(text).not.toContain('protected-code-sentinel');
     expect(text).not.toContain('protected_example');
     expect(chunks.filter(c => c.chunk_source === 'fenced_code').map(c => c.symbol_name)).toEqual(['public_example']);

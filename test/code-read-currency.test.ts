@@ -202,14 +202,17 @@ describe('code definition and reference currency', () => {
 
   for (const name of ['code_def', 'code_refs', 'code_callers', 'code_callees']) {
     test(`${name} remains suspended for remote and omitted trust before touching storage`, async () => {
-      let reads = 0;
-      const inaccessible = new Proxy({}, { get() { reads++; throw new Error('storage access'); } });
+      // Fork contract (world-only host): the suspension decision reads the
+      // visibility policy (getConfig) first, and fails closed when it cannot.
+      // No page, chunk or symbol storage may be touched before that decision.
+      const touched: string[] = [];
+      const inaccessible = new Proxy({}, { get(_t, prop) { touched.push(String(prop)); throw new Error('storage access'); } });
       for (const remote of [true, undefined]) {
         await expect(operationsByName[name].handler({ engine: inaccessible, remote,
           sourceId: 'source-a', auth: { allowedSources: ['source-a'] } } as unknown as OperationContext,
         { symbol: 'sampleSymbol' })).rejects.toThrow('temporarily unavailable');
       }
-      expect(reads).toBe(0);
+      expect(touched.filter(prop => prop !== 'getConfig')).toEqual([]);
     });
   }
 });

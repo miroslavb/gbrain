@@ -24,7 +24,7 @@ afterAll(async () => { await engine.disconnect(); });
 
 async function fixture(run: () => Promise<void>) {
   const home = mkdtempSync(join(tmpdir(), 'gbrain-facts-effect-'));
-  try { await withEnv({ GBRAIN_HOME: home }, async () => { await resetPgliteState(engine); await engine.setConfig('version', '156'); await registerLocalWriter(engine, 'cli'); await run(); }); }
+  try { await withEnv({ GBRAIN_HOME: home }, async () => { await resetPgliteState(engine); await engine.setConfig('version', '164'); /* fork numbering: upstream 156 +8 */ await registerLocalWriter(engine, 'cli'); await run(); }); }
   finally { rmSync(home, { force: true, recursive: true }); }
 }
 async function prepare(overrides: Partial<OperationContext> = {}, params: Record<string, unknown> = {}) {
@@ -61,7 +61,8 @@ test('page receipt and bounded extraction debt commit together; durable handoff 
   await dispatchFactsBackstopEffect(engine, effect, localHostId());
   const work = await jobs(); expect(work).toHaveLength(1);
   expect(work[0].idempotency_key).toBe(`facts-absorb:write:${row.id}`);
-  expect(work[0].data).toMatchObject({ persistence_request_id: row.id, visibility: 'private', sourceId: 'default' });
+  // Fork contract: resolveDefaultVisibility is world-only on this host.
+  expect(work[0].data).toMatchObject({ persistence_request_id: row.id, visibility: 'world', sourceId: 'default' });
   expect((await publicEffectsForRequest(engine, row.id)).find(effect => effect.kind === 'facts-backstop')).toEqual({ kind: 'facts-backstop', state: 'dispatched' });
   expect('page' in await readFactsBackstopJobPage(engine, work[0].data)).toBe(true);
   const current = (await engine.readPageSnapshot(row.slug, { sourceId: row.source_id }))!;

@@ -233,6 +233,13 @@ describe('doctorReportRemote — source scope (#4592)', () => {
 
 describe('run_doctor canonical projection readiness', () => {
   test('the real handler excludes private and ungranted pending pages while local callers can diagnose them', async () => {
+    // Fork contract: a fresh brain adopts the world-only host posture
+    // (facts.default_visibility=world), under which remote callers see every
+    // page. Exercise upstream's private-exclusion gate under the explicit legacy
+    // multi-principal posture, then assert the world-only behavior separately.
+    const priorVisibility = await engine.getConfig('facts.default_visibility');
+    await engine.setConfig('facts.default_visibility', 'private');
+    try {
     await engine.executeRaw("INSERT INTO sources(id,name) VALUES ('readiness-visible','readiness-visible'),('readiness-hidden','readiness-hidden') ON CONFLICT DO NOTHING");
     await engine.putPage('notes/current-example', { title: 'Example', type: 'note', compiled_truth: 'current' }, { sourceId: 'readiness-visible' });
     await engine.putPage('notes/private-example', { title: 'Private example', type: 'note', compiled_truth: 'private', frontmatter: { visibility: 'private' } }, { sourceId: 'readiness-hidden' });
@@ -252,9 +259,23 @@ describe('run_doctor canonical projection readiness', () => {
     expect(restricted.status).toBe('ok');
     expect(JSON.stringify(restricted)).not.toContain('readiness-hidden');
     expect(JSON.stringify(local)).not.toContain('notes/private-example');
+    // Fork world-only posture: the same remote caller may diagnose the private
+    // pending page, while an ungranted source still stays invisible.
+    await engine.setConfig('facts.default_visibility', 'world');
+    const worldRemote = check(await operationsByName.run_doctor.handler(ctx, {}) as DoctorReport);
+    expect(worldRemote.status).toBe('warn');
+    expect(worldRemote.details).toEqual({ readiness: 'projection_pending', ready: false });
+    const worldRestricted = check(await operationsByName.run_doctor.handler({ ...ctx, auth: { ...ctx.auth!, allowedSources: ['readiness-visible'] } }, {}) as DoctorReport);
+    expect(worldRestricted.status).toBe('ok');
+    expect(JSON.stringify(worldRestricted)).not.toContain('readiness-hidden');
+    await engine.setConfig('facts.default_visibility', 'private');
     await engine.executeRaw("UPDATE pages SET text_projection_revision=NULL WHERE source_id='readiness-visible'");
     const pending = check(await operationsByName.run_doctor.handler(ctx, {}) as DoctorReport);
     expect(pending.status).toBe('warn');
     expect(pending.details).toEqual({ readiness: 'projection_pending', ready: false });
+    } finally {
+      if (priorVisibility === null || priorVisibility === undefined) await engine.unsetConfig('facts.default_visibility');
+      else await engine.setConfig('facts.default_visibility', priorVisibility);
+    }
   });
 });

@@ -366,8 +366,10 @@ describe('autopilot-global-maintenance handler stamps last_global_at (PGLite)', 
     const stamped = await engine.getConfig(LAST_GLOBAL_AT_KEY);
     expect(stamped).not.toBeNull();
     expect(Number.isFinite(new Date(stamped!).getTime())).toBe(true);
-    expect(progress[0]).toMatchObject({ phase: 'embed', completed_phases: 0, total_phases: 2 });
-    expect(progress.at(-1)).toMatchObject({ phase: 'complete', completed_phases: 2, total_phases: 2 });
+    // Upstream narrowed this fixture to ['orphans'] (embed fails on a keyless
+    // empty brain, which now blocks the freshness stamp); fork progress follows.
+    expect(progress[0]).toMatchObject({ phase: 'orphans', completed_phases: 0, total_phases: 1 });
+    expect(progress.at(-1)).toMatchObject({ phase: 'complete', completed_phases: 1, total_phases: 1 });
     expect(progress.at(-1)?.last_completed_phase).toBe('orphans');
   });
 });

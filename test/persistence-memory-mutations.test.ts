@@ -171,7 +171,10 @@ describe('journaled memory publication, both engines', () => {
       expect(after.revision).not.toBe(before.revision);
       const chunks = await engine.getChunks(slug, { sourceId });
       expect(chunks.length).toBeGreaterThan(0);
-      expect(chunks.map(c => c.chunk_text).join('\n')).not.toContain('Private sentinel');
+      // Fork contract: the world-only host parses every fence fact row as
+      // `world`, so the legacy "private" row is searchable like any fact; the
+      // takes fence stays out of chunks.
+      expect(chunks.map(c => c.chunk_text).join('\n')).not.toContain('| private |');
       expect(chunks.map(c => c.chunk_text).join('\n')).not.toContain('Opaque private take');
     }
   }, 120_000);
@@ -201,6 +204,11 @@ describe('journaled memory publication, both engines', () => {
         await setupPage(engine, slug);
         const privateMemory = await submitRememberMutation(context(engine), { fact: 'Confidential unrelated claim',
           provenance: 'test', entity: slug, visibility: 'private' }, 30_000);
+        // Fork contract: remember normalizes new facts to `world` on the
+        // world-only host; recreate the legacy private row that remote
+        // supersession candidates must never include.
+        await engine.transaction(tx => withCoordinatedWrite(tx, [sourceId], () =>
+          tx.executeRaw("UPDATE facts SET visibility='private' WHERE id=$1", [Number(privateMemory.id)])));
         const first = await submitRememberMutation(context(engine, true), { fact: 'Works at acme-example',
           provenance: 'test', entity: slug }, 30_000);
         expect(first.status).toBe('inserted');

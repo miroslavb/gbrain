@@ -78,7 +78,7 @@ export async function readProjectionSnapshot(engine: BrainEngine, slug: string, 
 }
 
 /** No provider work under the guard. Delayed derived results lose to newer content. */
-export async function installPageProjection(engine: BrainEngine, prepared: ProjectionSnapshot, chunks: ChunkInput[], opts: { seal?: boolean; signature?: string; preserveEmbeddings?: boolean; code?: Awaited<ReturnType<typeof prepareCodeChunks>> } = {}): Promise<void> {
+export async function installPageProjection(engine: BrainEngine, prepared: ProjectionSnapshot, chunks: ChunkInput[], opts: { seal?: boolean; signature?: string; preserveEmbeddings?: boolean; preserveContextualVectors?: boolean; code?: Awaited<ReturnType<typeof prepareCodeChunks>> } = {}): Promise<void> {
   const { snapshot } = prepared;
   const sourceId = snapshot.page.source_id;
   const slug = snapshot.page.slug;
@@ -116,7 +116,12 @@ export async function installPageProjection(engine: BrainEngine, prepared: Proje
         embedded_at=NULL,embedded_text_hash=NULL WHERE page_id=$1 AND
         (model IS DISTINCT FROM $2 OR embedded_text_hash <> md5(chunk_text) OR $3::boolean)`,
       [snapshot.page.id, context.column.name === 'embedding' ? context.model : context.column.embeddingModel,
-        ![null, undefined, 'none'].includes(snapshot.page.contextual_retrieval_mode)]);
+        // Fork: the one-time protocol_activation rebuild re-verifies unchanged
+        // pages. Their contextual vectors were produced by the same wrapper
+        // (buildContextualPrefix is unchanged since v0.50), so identical chunks
+        // with a matching model and text hash keep them instead of forcing a
+        // brain-wide re-embed. Any real content/title change still re-embeds.
+        ![null, undefined, 'none'].includes(snapshot.page.contextual_retrieval_mode) && !opts.preserveContextualVectors]);
     } else if (opts.seal) await tx.deleteChunks(slug, { sourceId });
     await tx.upsertChunks(slug, chunks, { sourceId, expectedRevision: snapshot.revision, embeddingColumn: context.column });
     if (opts.code) await installCodeChunkEdges(tx, slug, sourceId, opts.code);
@@ -194,7 +199,7 @@ export async function preparePageProjection(prepared: ProjectionSnapshot) {
 
 /** Bounded and keyless. Unsupported media remains queued for its source importer. */
 export async function rebuildPendingPageProjections(engine: BrainEngine, limit = 20): Promise<{ rebuilt: number; superseded: number }> {
-  const jobs = await engine.executeRaw<{ source_id: string; source_incarnation: string; slug: string; revision: string; page_kind: string }>(`SELECT s.id AS source_id,j.source_incarnation,j.slug,j.revision,p.page_kind
+  const jobs = await engine.executeRaw<{ source_id: string; source_incarnation: string; slug: string; revision: string; page_kind: string; reason: string }>(`SELECT s.id AS source_id,j.source_incarnation,j.slug,j.revision,p.page_kind,j.reason
     FROM page_projection_jobs j JOIN sources s ON s.incarnation=j.source_incarnation
     JOIN pages p ON p.source_id=s.id AND p.slug=j.slug
     WHERE p.deleted_at IS NULL AND NOT s.archived AND p.page_kind IN ('markdown','code')
@@ -212,7 +217,8 @@ export async function rebuildPendingPageProjections(engine: BrainEngine, limit =
     if (!prepared || prepared.snapshot.sourceIncarnation !== job.source_incarnation || prepared.snapshot.revision !== job.revision) { superseded++; continue; }
     try {
       const projection = await preparePageProjection(prepared);
-      await installPageProjection(engine, prepared, projection.chunks, { seal: true, preserveEmbeddings: true, code: projection.code });
+      await installPageProjection(engine, prepared, projection.chunks, { seal: true, preserveEmbeddings: true,
+        preserveContextualVectors: job.reason === 'protocol_activation', code: projection.code });
       rebuilt++;
     } catch (error) {
       if (!(error instanceof PageRevisionConflictError)) {

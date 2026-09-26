@@ -12,7 +12,7 @@
  *   2. a genuinely absent symbol still returns not_found — now carrying the
  *      edge-grain readiness signal (status/ready),
  *   3. not_found envelopes are never written to code_traversal_cache
- *      (ok envelopes are).
+ *      (walks are uncached since the v0.58.1 merge).
  */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -59,6 +59,9 @@ beforeAll(async () => {
     );
     chunks.push(r[0]!.id);
   }
+  // v0.51 read gates only serve pages whose text projection is sealed at the
+  // current knowledge revision; this raw fixture stands in for a rebuilt page.
+  await engine.executeRaw('UPDATE pages SET text_projection_revision = knowledge_revision WHERE id = $1', [pageId]);
   // Short-name call graph: beta_fn -> alpha_fn -> target_fn.
   await engine.executeRaw(
     `INSERT INTO code_edges_symbol (from_chunk_id, from_symbol_qualified, to_symbol_qualified, edge_type, source_id)
@@ -102,10 +105,12 @@ describe('code_blast symbol-edge seed fallback', () => {
       `SELECT count(*)::int AS n FROM code_traversal_cache WHERE symbol_qualified = 'missing_fn'`,
     );
     expect(cached[0]!.n).toBe(0);
+    // Since the v0.58.1 merge code_blast/code_flow run uncached (upstream
+    // v0.51.7 read-policy walks), so even the ok envelope is not persisted.
     const okCached = await engine.executeRaw<{ n: number }>(
       `SELECT count(*)::int AS n FROM code_traversal_cache WHERE symbol_qualified = 'target_fn'`,
     );
-    expect(okCached[0]!.n).toBe(1);
+    expect(okCached[0]!.n).toBe(0);
   });
 
   test('code_flow seeds the callee direction the same way', async () => {

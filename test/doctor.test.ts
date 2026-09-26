@@ -999,8 +999,11 @@ describe('v0.41.27.0 — sync_freshness git short-circuit', () => {
   beforeEach(async () => {
     const { _setGitHeadProbeForTests, _setGitCleanProbeForTests } =
       await import('../src/core/git-head.ts');
-    const { CHUNKER_VERSION } = await import('../src/core/chunkers/code.ts');
-    currentChunkerVersion = String(CHUNKER_VERSION);
+    // Fork contract: sync_freshness compares against the automatic recovery
+    // floor (AUTOMATIC_CODE_CHUNKER_VERSION), not the per-file CHUNKER_VERSION,
+    // so an unchanged v6 source is not reported stale after the v7 bump.
+    const { AUTOMATIC_CODE_CHUNKER_VERSION } = await import('../src/core/chunkers/code.ts');
+    currentChunkerVersion = String(AUTOMATIC_CODE_CHUNKER_VERSION);
     _setGitHeadProbeForTests(null);
     _setGitCleanProbeForTests(null);
   });
@@ -1251,8 +1254,11 @@ describe('v0.41.32.0 — commit-relative staleness', () => {
   beforeEach(async () => {
     const { _setGitHeadProbeForTests, _setGitCleanProbeForTests } =
       await import('../src/core/git-head.ts');
-    const { CHUNKER_VERSION } = await import('../src/core/chunkers/code.ts');
-    currentChunkerVersion = String(CHUNKER_VERSION);
+    // Fork contract: sync_freshness compares against the automatic recovery
+    // floor (AUTOMATIC_CODE_CHUNKER_VERSION), not the per-file CHUNKER_VERSION,
+    // so an unchanged v6 source is not reported stale after the v7 bump.
+    const { AUTOMATIC_CODE_CHUNKER_VERSION } = await import('../src/core/chunkers/code.ts');
+    currentChunkerVersion = String(AUTOMATIC_CODE_CHUNKER_VERSION);
     _setGitHeadProbeForTests(null);
     _setGitCleanProbeForTests(null);
   });
@@ -1921,8 +1927,11 @@ describe('sync_freshness — clone-unavailable content-lag fallback', () => {
   beforeEach(async () => {
     const { _setGitHeadProbeForTests, _setGitCleanProbeForTests } =
       await import('../src/core/git-head.ts');
-    const { CHUNKER_VERSION } = await import('../src/core/chunkers/code.ts');
-    currentChunkerVersion = String(CHUNKER_VERSION);
+    // Fork contract: sync_freshness compares against the automatic recovery
+    // floor (AUTOMATIC_CODE_CHUNKER_VERSION), not the per-file CHUNKER_VERSION,
+    // so an unchanged v6 source is not reported stale after the v7 bump.
+    const { AUTOMATIC_CODE_CHUNKER_VERSION } = await import('../src/core/chunkers/code.ts');
+    currentChunkerVersion = String(AUTOMATIC_CODE_CHUNKER_VERSION);
     _setGitHeadProbeForTests(null);
     _setGitCleanProbeForTests(null);
   });

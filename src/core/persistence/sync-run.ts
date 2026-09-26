@@ -20,6 +20,7 @@ import { recordManagedSyncFailure, clearManagedSyncFailureAfterSuccess, formatMa
 import { writeFailureDiagnostic } from './verb-errors.ts';
 import { isTerminalWriteState, publicWriteReceipt, type WriteReceipt } from './types.ts';
 import type { WriteRequest } from './model.ts';
+import { resolveSyncStrategy } from '../sync-strategy.ts';
 
 export interface ManagedSyncWriteDiagnostic {
   source_id: string;
@@ -177,6 +178,11 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
 /** One immutable page is admitted at a time; foreground writes can never sit behind a whole scan. */
 export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, slice?: { maxPages: number; maxMs: number }): Promise<SyncResult> {
   await assertManagedSyncActive(engine);
+  // Fork (d17ebd725): every entry (CLI performSync, resident delegation,
+  // direct library callers) inherits the source's validated strategy before
+  // the cursor key is derived, so a delegated code source never syncs as
+  // markdown and a pinned run resumes under the same identity.
+  opts = { ...opts, strategy: await resolveSyncStrategy(engine, opts.strategy, opts.sourceId) };
   if (opts.sourceId && !currentCompanyBrainSync(opts.sourceId) && await getCompanyBrainProfile(engine, opts.sourceId)) {
     return (await import('../company-brain/runtime.ts')).performCompanyBrainSync(engine, opts);
   }

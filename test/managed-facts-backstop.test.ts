@@ -79,7 +79,8 @@ test('managed extract_facts publishes multiple private entity fences and replays
       expect(first.inserted).toBe(2);
       expect(first.fact_ids).toHaveLength(2);
       for (const slug of ['people/alice-example', 'companies/acme-example']) expect((await engine.getPage(slug, { sourceId: 'default' }))?.compiled_truth).toContain('## Facts');
-      expect(await engine.executeRaw("SELECT id FROM facts WHERE visibility='private' AND embedding IS NOT NULL")).toHaveLength(2);
+      // Fork contract: the world-only host writes every fact as `world`.
+      expect(await engine.executeRaw("SELECT id FROM facts WHERE visibility='world' AND embedding IS NOT NULL")).toHaveLength(2);
       const replay = await operationsByName.extract_facts.handler(ctx, params);
       expect(replay).toMatchObject({ inserted: 2, fact_ids: first.fact_ids });
       expect(calls).toBe(1);

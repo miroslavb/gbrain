@@ -26,7 +26,14 @@ beforeAll(async () => {
     const isolated = await isolatedPersistencePostgres(process.env.DATABASE_URL);
     engines.push(isolated.engine); closePostgres = isolated.close;
   }
-  for (const engine of engines) await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [sourceId]);
+  for (const engine of engines) {
+    await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [sourceId]);
+    // Fork contract: fresh fork brains seed the world-only host posture
+    // (facts.default_visibility=world, migrations 147/152), which exposes every
+    // page to the single host principal. These upstream cases exercise the
+    // legacy multi-principal posture, so opt this file into it explicitly.
+    await engine.setConfig('facts.default_visibility', 'private');
+  }
 }, 120_000);
 afterAll(async () => {
   for (const engine of engines) { await disposePersistenceConsumer(engine); await engine.disconnect(); }
@@ -95,5 +102,23 @@ test('sandboxed subagents keep intentional database-only writes despite a config
     expect(existsSync(join(root, 'wiki/agents/7/example.md'))).toBe(false);
     const bindings = await engine.executeRaw('SELECT source_id FROM persistence_source_bindings WHERE source_id=$1', [sandboxSource]);
     expect(bindings).toHaveLength(0);
+  }
+});
+
+test('fork world-only host: a remote writer may replace a legacy private-frontmatter page', async () => {
+  for (const engine of engines) {
+    await engine.setConfig('facts.default_visibility', 'world');
+    try {
+      await engine.putPage('world-host', page('private'), { sourceId });
+      const [source] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation FROM sources WHERE id=$1', [sourceId]);
+      const auth = await submissionAuthority(context(engine), 'put_page', sourceId, source.incarnation, 'world-host');
+      expect(auth.excludePrivate).toBe(false);
+      const result = await submitPageMutation(context(engine), { operation: 'put_page', params: {
+        slug: 'world-host', content: 'Replacement', force: true, request_id: randomUUID(),
+      } });
+      expect(result.state).toBe('committed');
+    } finally {
+      await engine.setConfig('facts.default_visibility', 'private');
+    }
   }
 });

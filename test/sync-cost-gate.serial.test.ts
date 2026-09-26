@@ -30,7 +30,7 @@ import {
 } from '../src/core/sync-embed-backfill.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { configureGateway, resetGateway, __setEmbedTransportForTests } from '../src/core/ai/gateway.ts';
-import { CHUNKER_VERSION } from '../src/core/chunkers/code.ts';
+import { AUTOMATIC_CODE_CHUNKER_VERSION, CHUNKER_VERSION } from '../src/core/chunkers/code.ts';
 import type { ChunkInput } from '../src/core/types.ts';
 
 /** Offline embed stub so inline-proceed paths (posture tokenmax) don't network. */
@@ -482,7 +482,9 @@ describe('v0.41.31 — sync --all cost gate wiring', () => {
     // Mirrors the executor's up_to_date predicate: HEAD==last_commit AND chunker
     // matches → 0 new tokens → below floor → proceeds without deferring.
     await runSources(engine, ['add', 'vault', '--path', repoPath, '--no-federated']);
-    await engine.executeRaw(`UPDATE sources SET last_commit = $1, chunker_version = $2 WHERE id = 'vault'`, [headSha, String(CHUNKER_VERSION)]);
+    // Fork contract (dc4715f6b): a source is current at the automatic recovery
+    // floor (AUTOMATIC_CODE_CHUNKER_VERSION), not the per-file CHUNKER_VERSION.
+    await engine.executeRaw(`UPDATE sources SET last_commit = $1, chunker_version = $2 WHERE id = 'vault'`, [headSha, String(AUTOMATIC_CODE_CHUNKER_VERSION)]);
     await engine.setConfig('sync.cost_gate_min_usd', '0');
 
     const { exitCode, stdout } = await runSyncCaptured(['--all', '--serial', '--json', '--no-pull']);
@@ -497,7 +499,9 @@ describe('v0.41.31 — sync --all cost gate wiring', () => {
     // git-clean, but the commits are caught up. The OLD estimator priced the
     // whole tree (158M-token phantom); the new one mirrors execution → $0.
     await runSources(engine, ['add', 'vault', '--path', repoPath, '--no-federated']);
-    await engine.executeRaw(`UPDATE sources SET last_commit = $1, chunker_version = $2 WHERE id = 'vault'`, [headSha, String(CHUNKER_VERSION)]);
+    // Fork contract (dc4715f6b): a source is current at the automatic recovery
+    // floor (AUTOMATIC_CODE_CHUNKER_VERSION), not the per-file CHUNKER_VERSION.
+    await engine.executeRaw(`UPDATE sources SET last_commit = $1, chunker_version = $2 WHERE id = 'vault'`, [headSha, String(AUTOMATIC_CODE_CHUNKER_VERSION)]);
     // Dirty the tree with an untracked non-syncable scratch file (agents/crons
     // write constantly) — attached-HEAD sync never imports it.
     writeFileSync(join(repoPath, 'scratch.tmp'), 'uncommitted agent scratch');

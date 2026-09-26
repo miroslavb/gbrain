@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as realEmbedding from '../src/core/embedding.ts';
 import type { HybridSearchMeta } from '../src/core/types.ts';
+import { installFixtureChunks } from './helpers/page-projection.ts';
 
 /** Deterministic 1536d unit vector so consults match writes at cosine 1.0. */
 function fixedEmbedding(): Float32Array {
@@ -70,7 +71,8 @@ beforeAll(async () => {
   for (const [slug, title, type] of fixtures) {
     const truth = `${title} is a builder.`;
     await engine.putPage(slug, { type, title, compiled_truth: truth });
-    await engine.upsertChunks(slug, [
+    // v0.51+: search serves only sealed, revision-bound projections.
+    await installFixtureChunks(engine, slug, [
       { chunk_index: 0, chunk_text: truth, chunk_source: 'compiled_truth' },
     ]);
   }

@@ -16,14 +16,18 @@ beforeAll(async () => {
 afterAll(async () => { await engine.disconnect(); });
 beforeEach(async () => { await resetPgliteState(engine); });
 
-const body = 'Evidence about a synthetic example and its repeatable outcomes. '.repeat(20);
+// Fork contract: atoms must quote an exact self-contained sentence of the source.
+const body = 'Evidence about a synthetic example and its repeatable outcomes. '.repeat(20)
+  + 'The synthetic example recorded its first repeatable outcome. The synthetic example recorded its second repeatable outcome. ';
 const slug = 'meetings/example';
 const response = (text: string): ChatResult => ({ text, blocks: [{ type: 'text', text }], stopReason: 'end',
   usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
   model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' });
 const atoms = JSON.stringify([
-  { title: 'First synthetic atom', atom_type: 'insight', body: 'First evidence.' },
-  { title: 'Second synthetic atom', atom_type: 'insight', body: 'Second evidence.' },
+  { title: 'First synthetic atom', atom_type: 'insight', body: 'The synthetic example recorded its first repeatable outcome.',
+    source_quote: 'The synthetic example recorded its first repeatable outcome.' },
+  { title: 'Second synthetic atom', atom_type: 'insight', body: 'The synthetic example recorded its second repeatable outcome.',
+    source_quote: 'The synthetic example recorded its second repeatable outcome.' },
 ]);
 async function seed(sourceId = 'default') {
   await engine.putPage(slug, { type: 'meeting', title: 'Example', compiled_truth: body, timeline: '', frontmatter: { custom: { keep: true } } }, { sourceId });
@@ -98,6 +102,7 @@ describe('derived atom page state', () => {
 
   test.each(['[]', atoms])('a page edited during the provider call cannot complete stale extraction: %s', async text => {
     await seed();
+    const scannedHash = (await snapshot()).page.content_hash!.slice(0, 16);
     const result = await runPhaseExtractAtoms(engine, { _transcripts: [], _chat: async () => {
       await engine.putPage(slug, { ...(await snapshot()).page, content_hash: undefined, compiled_truth: body + 'Concurrent edit.' }, { sourceId: 'default' });
       return response(text);
@@ -107,7 +112,10 @@ describe('derived atom page state', () => {
     expect(await rows()).toEqual([]);
     expect(await countExtractAtomsBacklog(engine, 'default')).toBe(1);
     const receipts = await engine.executeRaw<{ hash: string }>("SELECT frontmatter->>'source_hash' AS hash FROM pages WHERE type='atom'");
-    expect(receipts.every(row => row.hash.startsWith('pending:'))).toBe(true);
+    // Fork contract: atom completion receipts are keyed to the content hash that
+    // was actually scanned (flip before the page stamp), never to the edited
+    // content; the edited page stays in the backlog for a fresh extraction.
+    expect(receipts.every(row => row.hash === scannedHash)).toBe(true);
   });
 
   test.each(['[]', atoms])('a page recreated during the provider call cannot complete stale extraction: %s', async text => {
@@ -119,9 +127,13 @@ describe('derived atom page state', () => {
     } });
     expect(result.status).toBe('warn');
     expect(await rows()).toEqual([]);
-    expect(await countExtractAtomsBacklog(engine, 'default')).toBe(1);
+    // Fork contract: completion is keyed to (source page slug, content hash).
+    // A byte-identical recreation is already covered by the atoms extracted
+    // from that same content, so it is not re-extracted; zero-yield output
+    // stays retryable because no completion record exists.
+    expect(await countExtractAtomsBacklog(engine, 'default')).toBe(text === '[]' ? 1 : 0);
     const receipts = await engine.executeRaw<{ hash: string }>("SELECT frontmatter->>'source_hash' AS hash FROM pages WHERE type='atom'");
-    expect(receipts.every(row => row.hash.startsWith('pending:'))).toBe(true);
+    expect(receipts.every(row => !row.hash.startsWith('pending:'))).toBe(true);
   });
 
   test.each([
@@ -167,7 +179,10 @@ describe('derived atom page state', () => {
     expect(await rows()).toEqual([]);
   });
 
-  test.each(['atom', 'links', 'deleted-before-completion'])('partial %s publication never finalizes source_hash or scan state', async failure => {
+  // Fork contract: provenance links are banked best-effort AFTER the completion
+  // flip (upstream #4733 links-before-flip is not adopted), so only a failed
+  // atom write can leave pending receipts; see the fork case below.
+  test.each(['atom'] as string[])('partial %s publication never finalizes source_hash or scan state', async failure => {
     await seed();
     const put = engine.putPage, links = engine.addLinksBatch;
     let writes = 0;
@@ -202,6 +217,33 @@ describe('derived atom page state', () => {
     expect(complete.every(row => row.hash === (pending[0].hash.slice('pending:'.length)))).toBe(true);
     expect((await engine.getLinks(slug)).filter(link => link.link_source === 'atom-provenance')).toHaveLength(2);
     expect(await countExtractAtomsBacklog(engine, 'default')).toBe(0);
+  });
+
+  test.each(['links', 'deleted-before-completion'])('fork: %s failure after the completion flip keeps completed atoms', async failure => {
+    await seed();
+    const scannedHash = (await snapshot()).page.content_hash!.slice(0, 16);
+    const links = engine.addLinksBatch;
+    const log = console.error;
+    const messages: string[] = [];
+    console.error = (...args: unknown[]) => { messages.push(args.map(String).join(' ')); };
+    engine.addLinksBatch = async (...args) => {
+      if (failure === 'links') throw new Error('synthetic provenance failure');
+      const result = await links.apply(engine, args);
+      await engine.executeRaw("DELETE FROM pages WHERE source_id='default' AND slug=$1", [args[0][0].to_slug]);
+      return result;
+    };
+    try {
+      expect((await scan(atoms)).status).toBe('ok');
+    } finally { engine.addLinksBatch = links; console.error = log; }
+    const complete = await engine.executeRaw<{ hash: string }>("SELECT frontmatter->>'source_hash' AS hash FROM pages WHERE type='atom'");
+    expect(complete).toHaveLength(failure === 'links' ? 2 : 1);
+    expect(complete.every(row => row.hash === scannedHash)).toBe(true);
+    expect(await countExtractAtomsBacklog(engine, 'default')).toBe(0);
+    if (failure === 'links') {
+      // Best-effort edges are logged loudly, never silently lost.
+      expect(messages.join('\n')).toContain('atom-provenance link batch failed');
+      expect((await engine.getLinks(slug)).filter(link => link.link_source === 'atom-provenance')).toHaveLength(0);
+    }
   });
 });
 

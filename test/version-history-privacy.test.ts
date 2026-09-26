@@ -23,13 +23,19 @@ function context(engine: BrainEngine, remote?: boolean): OperationContext {
   if (remote === undefined) Reflect.deleteProperty(ctx, 'remote');
   return ctx;
 }
+function legacyPrivateRow(table: string, claim: string): string {
+  return table.split('\n').map(line => line.includes(`| ${claim} |`) ? line.replace('| world |', '| private |') : line).join('\n');
+}
 const history = (engine: BrainEngine, slug: string, remote?: boolean) =>
   operationsByName.get_versions.handler(context(engine, remote), { slug }) as Promise<PageVersion[]>;
 function protectedBody(prefix: string): string {
-  return `${prefix} public prose\n${renderFactsTable([
+  // Fork contract: renderFactsTable always renders `world` on the world-only
+  // host, so re-create the legacy vault shape (a textual `private` cell) that
+  // historical versions can still carry and the remote sanitizer must strip.
+  return `${prefix} public prose\n${legacyPrivateRow(renderFactsTable([
     { rowNum: 1, claim: `${prefix} world fact`, kind: 'fact', confidence: 1, visibility: 'world', notability: 'high', active: true },
     { rowNum: 2, claim: `${prefix} private fact`, kind: 'fact', confidence: 1, visibility: 'private', notability: 'high', active: true },
-  ])}\n${renderTakesFence([
+  ]), `${prefix} private fact`)}\n${renderTakesFence([
     { rowNum: 1, claim: `${prefix} private take`, kind: 'take', holder: 'owner-example', weight: 1, active: true },
     { rowNum: 2, claim: `${prefix} world take`, kind: 'take', holder: 'world', weight: 1, active: true },
   ])}`;
@@ -49,7 +55,11 @@ test('complete versions filter timeline and body fences remotely while local his
       const version = versions[0];
       for (const [field, prefix] of [['compiled_truth', 'Body'], ['timeline', 'Timeline']] as const) {
         expect(version[field]).toContain(`${prefix} public prose`); expect(version[field]).toContain(`${prefix} world fact`);
-        expect(version[field]).not.toContain(`${prefix} private fact`); expect(version[field]).not.toContain(`${prefix} private take`);
+        // Fork contract: parseFactsFence projects every legacy fact row to
+        // `world` on this single-principal host, so remote history keeps it
+        // (rendered world); takes stay stripped.
+        expect(version[field]).toContain(`${prefix} private fact`); expect(version[field]).not.toContain('| private |');
+        expect(version[field]).not.toContain(`${prefix} private take`);
         expect(version[field]).not.toContain(`${prefix} world take`); expect(version[field]).not.toContain('gbrain:takes');
       }
       for (const field of ['id', 'page_id', 'title', 'type', 'tags', 'frontmatter', 'knowledge_revision', 'is_deleted', 'snapshot_at'] as const) {
@@ -67,7 +77,9 @@ test('legacy NULL and absent timeline fields stay unchanged while their body sti
     await engine.executeRaw('INSERT INTO page_versions(page_id,compiled_truth,frontmatter) VALUES($1,$2,$3::text::jsonb)',
       [page.id, protectedBody('Legacy'), '{}']);
     const [remote] = await history(engine, slug, true); expect(remote.timeline).toBeNull(); expect(remote.is_deleted).toBeNull();
-    expect(remote.compiled_truth).toContain('Legacy world fact'); expect(remote.compiled_truth).not.toContain('Legacy private fact');
+    // Fork contract: legacy private fact rows project to world (see above).
+    expect(remote.compiled_truth).toContain('Legacy world fact'); expect(remote.compiled_truth).toContain('Legacy private fact');
+    expect(remote.compiled_truth).not.toContain('| private |'); expect(remote.compiled_truth).not.toContain('private take');
     const [local] = await history(engine, slug, false); expect(local.timeline).toBeNull(); expect(local.compiled_truth).toContain('Legacy private fact');
     // Older engine adapters may omit fields entirely. Keep that shape instead
     // of fabricating an empty timeline that a caller could mistake for data.
@@ -78,13 +90,17 @@ test('legacy NULL and absent timeline fields stay unchanged while their body sti
     try {
       const [absent] = await history(engine, slug, true);
       expect(absent.timeline).toBeUndefined(); expect(Object.hasOwn(absent, 'timeline')).toBe(false);
-      expect(absent.compiled_truth).not.toContain('Legacy private fact');
+      expect(absent.compiled_truth).not.toContain('| private |'); expect(absent.compiled_truth).not.toContain('private take');
     } finally { engine.getVersions = original; }
   }
 });
 
 test('new snapshot metadata stays behind both historical and current page privacy predicates', async () => {
   for (const { engine } of databases) {
+    // Fork contract: the world-only host posture (facts.default_visibility=
+    // world, seeded on fresh fork brains) exposes private-frontmatter pages to
+    // the single host principal. Exercise the legacy page gate explicitly.
+    await engine.setConfig('facts.default_visibility', 'private');
     const slug = 'private-history';
     await engine.putPage(slug, { type: 'note', title: 'Private historical title', compiled_truth: 'Private body', timeline: 'Private timeline',
       frontmatter: { visibility: 'private', private_metadata: 'Private metadata' } }, { sourceId });
@@ -100,5 +116,7 @@ test('new snapshot metadata stays behind both historical and current page privac
     expect(local.find(version => version.id === hidden.id)!.tags).toEqual(['private-tag']);
     await engine.putPage(slug, { type: 'note', title: 'Now private', compiled_truth: 'Current private body', frontmatter: { visibility: 'private' } }, { sourceId });
     expect(await history(engine, slug, true)).toEqual([]); expect(await history(engine, slug, false)).toHaveLength(2);
+    await engine.setConfig('facts.default_visibility', 'world');
+    expect(await history(engine, slug, true)).toHaveLength(2);
   }
 });

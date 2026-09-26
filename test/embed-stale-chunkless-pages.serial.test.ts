@@ -405,7 +405,8 @@ describe('embed --stale chunkless-page safety net (end-to-end)', () => {
     for (let i = 0; i < 8; i++) {
       const slug = `outage/page-${i}`;
       await engine.putPage(slug, { type: 'note', title: slug, compiled_truth: `content ${i}` });
-      await engine.upsertChunks(slug, [
+      // v0.51+: embed --stale only visits sealed, revision-bound projections.
+      await installFixtureChunks(engine, slug, [
         { chunk_index: 0, chunk_text: `content ${i}`, chunk_source: 'compiled_truth' },
       ]);
     }

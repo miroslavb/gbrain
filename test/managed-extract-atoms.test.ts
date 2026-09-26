@@ -10,6 +10,7 @@ import { stopPersistenceConsumer } from '../src/core/persistence/service.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { atomContractCases, exerciseManagedAtoms, atomBatchCases, exerciseManagedAtomBatch, atomAuthorityCases, exerciseManagedAtomAuthority } from './helpers/managed-atoms-contract.ts';
+import { GROUNDED_ATOM_EVIDENCE } from './helpers/fork-grounded-atoms.ts';
 
 let engine: PGLiteEngine;
 beforeAll(async () => {
@@ -29,13 +30,13 @@ test('managed public atom extraction publishes searchable atoms and replays with
   const home = mkdtempSync(join(tmpdir(), 'gbrain-managed-atoms-'));
   try {
     await withEnv({ GBRAIN_HOME: home }, async () => {
-      await engine.putPage('notes/example', { type: 'note', title: 'Example', compiled_truth: 'A private project record. '.repeat(40), frontmatter: { visibility: 'private' } });
+      await engine.putPage('notes/example', { type: 'note', title: 'Example', compiled_truth: 'A private project record. '.repeat(40) + GROUNDED_ATOM_EVIDENCE, frontmatter: { visibility: 'private' } });
       const page = (await engine.getPage('notes/example', { sourceId: 'default' }))!;
       await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
       let calls = 0;
       const chat = async (): Promise<ChatResult> => {
         calls++;
-        return { text: '[{"title":"Measured progress","atom_type":"insight","body":"Measure progress against clear exit criteria."}]', blocks: [], stopReason: 'end',
+        return { text: '[{"title":"Measured progress","atom_type":"insight","body":"Measure progress against clear exit criteria.","source_quote":"Measure progress against clear exit criteria."}]', blocks: [], stopReason: 'end',
           usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
       };
       const opts = { _transcripts: [], _pages: [{ slug: page.slug, content: page.compiled_truth, contentHash: page.content_hash! }], _chat: chat };

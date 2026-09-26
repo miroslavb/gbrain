@@ -47,7 +47,10 @@ Historical section\n${renderFactsTable([fact(expired, { active: false, validUnti
     expect(rows[0]).toMatchObject({ active: false, forgotten: true });
     expect(rows[0].context).toStartWith('forgotten:');
     expect(rows[0].context).toContain('Original evidence context');
-    expect(rows[1]).toMatchObject({ active: true, visibility: 'private', forgotten: false });
+    // Fork contract: the world-only host renders and parses every fence row
+    // as `world`, so the legacy "private" duplicate shares the withdrawn world
+    // fingerprint and is retired too (no private copy survives a forget).
+    expect(rows[1]).toMatchObject({ active: false, visibility: 'world', forgotten: true });
     expect(rows[2]).toMatchObject({ active: false, forgotten: true, validUntil: '2020-01-01' });
     expect(rows[2].context).toContain('superseded by #9');
     expect(sanitizeRemoteBody(snapshot.page.compiled_truth)).not.toContain(active);

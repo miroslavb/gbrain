@@ -9,7 +9,6 @@ import { OperationError } from '../../src/core/ops/contract.ts';
 import { managedAtomSession } from '../../src/core/persistence/atom-maintenance.ts';
 import { retryManagedAtomBatch } from '../../src/core/persistence/atom-retry.ts';
 import { withCoordinatedWrite } from '../../src/core/persistence/context.ts';
-import { sha256 } from '../../src/core/persistence/digest.ts';
 import { refreshManagedFilesystemRoots } from '../../src/core/persistence/filesystem-guard.ts';
 import { registerLocalWriter } from '../../src/core/persistence/identity.ts';
 import type { WriteRequest } from '../../src/core/persistence/model.ts';
@@ -17,6 +16,8 @@ import { claimWorktree } from '../../src/core/persistence/ownership.ts';
 import { disposePersistenceConsumer, waitForWrite } from '../../src/core/persistence/service.ts';
 import { withEnv } from './with-env.ts';
 import { exerciseManagedAtomAuthority } from './managed-atoms-contract.ts';
+import { GROUNDED_ATOM_EVIDENCE } from './fork-grounded-atoms.ts';
+import { atomSlug } from '../../src/core/cycle/atom-slug.ts';
 
 export const retryStates = ['failed', 'conflict', 'committed'] as const;
 export const retryEdits = ['unchanged', 'before_retry', 'after_validation', 'before_admission', 'after_admission'] as const;
@@ -68,10 +69,11 @@ export async function exerciseAtomRetryFence(engine: BrainEngine, state: typeof 
       await disposePersistenceConsumer(engine);
       await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
       await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [sourceId]);
-      await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40), frontmatter: { visibility: 'private' } }, { sourceId });
+      await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40) + GROUNDED_ATOM_EVIDENCE, frontmatter: { visibility: 'private' } }, { sourceId });
       const page = (await engine.getPage('notes/2026-01-01-example', { sourceId }))!;
       const titles = state === 'committed' ? ['Measured progress', 'Explicit ownership'] : ['Measured progress'];
-      const slugs = titles.map(title => `atoms/2026-01-01/${title.toLowerCase().replaceAll(' ', '-')}-${sha256(`${page.slug}\0${title}`).slice(0, 8)}`);
+      // Fork contract: atom slugs keep the title-hash shape (upstream #4733 not adopted).
+      const slugs = titles.map(title => atomSlug(title, page.slug));
       if (state !== 'committed') await engine.putPage(slugs[0], { type: 'atom', title: titles[0], compiled_truth: 'Previously reviewed atom.',
         frontmatter: { source_slug: page.slug, visibility: 'private' } }, { sourceId });
       const originalTarget = await engine.readPageSnapshot(slugs[0], { sourceId });
@@ -121,7 +123,7 @@ export async function exerciseAtomRetryFence(engine: BrainEngine, state: typeof 
       let calls = 0;
       const chat = async (): Promise<ChatResult> => {
         calls++;
-        return { text: JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: `Use ${title.toLowerCase()} to guide the project.` }))),
+        return { text: JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: `Use ${title.toLowerCase()} to guide the project.`, source_quote: `Use ${title.toLowerCase()} to guide the project.` }))),
           blocks: [], stopReason: 'end', usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
       };
       const first = await runPhaseExtractAtoms(observedEngine, { sourceId, _chat: chat, _transcripts: [],
@@ -197,7 +199,7 @@ export async function exerciseAtomWriteThroughPolicy(engine: BrainEngine, value:
       mkdirSync(root);
       writeFileSync(join(root, 'operator-file.md'), 'Operator content must not change.');
       await engine.executeRaw('INSERT INTO sources(id,name,local_path) VALUES($1,$1,$2)', [sourceId, root]);
-      await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40), frontmatter: { visibility: 'private' } }, { sourceId });
+      await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40) + GROUNDED_ATOM_EVIDENCE, frontmatter: { visibility: 'private' } }, { sourceId });
       const page = (await engine.getPage('notes/2026-01-01-example', { sourceId }))!;
       await registerLocalWriter(engine, 'cli');
       if (owner !== 'absent') {
@@ -214,7 +216,7 @@ export async function exerciseAtomWriteThroughPolicy(engine: BrainEngine, value:
       let calls = 0;
       const chat = async (): Promise<ChatResult> => {
         calls++;
-        return { text: '[{"title":"Measured progress","atom_type":"insight","body":"Measure progress against clear exit criteria."}]',
+        return { text: '[{"title":"Measured progress","atom_type":"insight","body":"Measure progress against clear exit criteria.","source_quote":"Measure progress against clear exit criteria."}]',
           blocks: [], stopReason: 'end', usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
       };
       const run = () => runPhaseExtractAtoms(engine, { sourceId, _chat: chat, _transcripts: [], _pages: [{ slug: page.slug, content: page.compiled_truth, contentHash: page.content_hash! }] });

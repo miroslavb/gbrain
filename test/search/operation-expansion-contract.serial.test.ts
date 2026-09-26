@@ -49,7 +49,9 @@ describe('operation expansion remains independent of mode bundles', () => {
               query: 'Zirconiumneedle', ...(expand === undefined ? {} : { expand }),
             });
             expect(JSON.stringify(results)).toContain('notes/expansion-example');
-            expect(options.at(-1)?.expansion).toBe(expand !== false);
+            // Fork contract (1a0349730): an omitted `expand` stays unset so
+            // search.expansion / the mode bundle resolve it inside hybridSearch.
+            expect(options.at(-1)?.expansion).toBe(expand === undefined ? undefined : expand);
             expect(typeof options.at(-1)?.expandFn).toBe(expand === false ? 'undefined' : 'function');
             expect(meta.retrieval).toMatchObject({ expansion_applied: false, vector_enabled: false });
           }
@@ -62,8 +64,8 @@ describe('operation expansion remains independent of mode bundles', () => {
           }
           const report = await buildModesReport(engine);
           expect(report.resolved.expansion.value).toBe(override === 'true');
-          expect(report.per_call_note).toContain('default on in every mode');
-          expect(report.per_call_note).toContain('Neither inherits `search.expansion`');
+          expect(report.per_call_note).toContain('`search.expansion` and then the active mode bundle decide');
+          expect(report.per_call_note).toContain('`search` never expands');
           const text = searchCommand.formatModesText(report);
           expect(text.indexOf('`query` op')).toBeLessThan(text.indexOf('Resolved knobs:'));
         } finally {
@@ -77,7 +79,7 @@ describe('operation expansion remains independent of mode bundles', () => {
     expect(MODE_PICKER_MENU).not.toContain('no LLM expansion');
     expect(MODE_PICKER_MENU).not.toContain('LLM query expansion ON');
     expect(MODE_PICKER_MENU).not.toContain('cache hits skip downstream');
-    expect(MODE_PICKER_MENU).toContain('gbrain query requests expansion in every mode');
+    expect(MODE_PICKER_MENU).toContain('gbrain query follows search.expansion, else the mode bundle');
     expect(MODE_PICKER_MENU).toContain('keyless');
   });
 
@@ -94,7 +96,8 @@ describe('operation expansion remains independent of mode bundles', () => {
     expect(report.recommendations.some(row => row.knob.startsWith('search.cache.'))).toBe(false);
     const mode = report.recommendations.find(row => row.knob === 'search.mode');
     expect(mode?.suggested).toBe('balanced');
-    expect(mode?.reason).toContain('does not disable query expansion');
+    // Fork contract: bare query follows search.expansion, else the bundle.
+    expect(mode?.reason).toContain('Bare query calls follow search.expansion, else the bundle');
     expect(mode?.reason).toContain('12K tokens');
   });
 
@@ -104,7 +107,7 @@ describe('operation expansion remains independent of mode bundles', () => {
     try {
       expect(await runModePicker(engine, { force: true })).toBe('conservative');
       expect(await engine.getConfig('search.mode')).toBe('conservative');
-      expect(lines.join('\n')).toContain('query requests expansion in every mode');
+      expect(lines.join('\n')).toContain('query expansion follows search.expansion, else the mode bundle');
       expect(lines.join('\n')).toContain('Keyless retrieval skips expansion');
     } finally {
       output.mockRestore();

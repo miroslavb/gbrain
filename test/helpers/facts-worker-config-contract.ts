@@ -38,7 +38,7 @@ export async function exerciseFactsWorkerConfig(engine: BrainEngine): Promise<vo
         embeddedTexts.push(...values);
         return { embeddings: values.map(() => [1, ...Array(1535).fill(0)]) };
       }) as never);
-      await engine.setConfig('version', '162');
+      await engine.setConfig('version', '170'); // fork numbering: upstream 162 +8
       await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [sourceId]);
       await engine.putPage('people/example', { type: 'person', title: 'Example entity', compiled_truth: 'A searchable narrative remains on this registered entity.' }, { sourceId });
       await engine.executeRaw("INSERT INTO oauth_clients(client_id,client_secret_hash,client_name,scope,source_id) VALUES('worker-config-client','fixture-hash','example-client','read write',$1)", [sourceId]);

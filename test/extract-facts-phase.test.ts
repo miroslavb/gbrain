@@ -554,12 +554,15 @@ describe('runExtractFacts — happy path', () => {
       `| 1 | Alice likes tea | preference | 0.9 | private | medium |  |  | fence |  |`,
     ));
     const second = await runExtractFacts(engine, { slugs: ['people/alice'] });
-    expect(second.factsInserted).toBe(1);
+    // Fork contract (world-only host): a legacy `private` fence cell is
+    // projected to `world` on every read, so this edit changes nothing and
+    // the DB row stays world instead of re-healing to private.
+    expect(second.factsInserted).toBe(0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rows = await (engine as any).db.query(
       `SELECT visibility, notability FROM facts WHERE source_markdown_slug = 'people/alice'`,
     );
-    expect(rows.rows).toEqual([{ visibility: 'private', notability: 'medium' }]);
+    expect(rows.rows).toEqual([{ visibility: 'world', notability: 'medium' }]);
 
     const third = await runExtractFacts(engine, { slugs: ['people/alice'] });
     expect(third.factsInserted).toBe(0);

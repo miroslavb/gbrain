@@ -95,12 +95,13 @@ test('fresh and upgraded engines agree on the database-only pending index', asyn
         expect(await interrupted).toBe(true);
       } finally { abort.abort(); release.resolve(); await holding; await interrupted; }
     }
-    await engine.setConfig('version', '164');
-    expect(await runMigrations(engine)).toEqual({ applied: 1, current: 165 });
+    // Fork numbering: upstream migration 165 is fork 173 (upstream 150-165 +8).
+    await engine.setConfig('version', '172');
+    expect(await runMigrations(engine)).toEqual({ applied: 1, current: 173 });
     const [upgraded] = await engine.executeRaw<{ indexdef: string }>(
       "SELECT indexdef FROM pg_indexes WHERE indexname='persistence_requests_database_pending'");
     expect(upgraded.indexdef).toBe(fresh.indexdef);
-    expect(await engine.getConfig('version')).toBe('165');
+    expect(await engine.getConfig('version')).toBe('173');
   }
 }, 15000);
 

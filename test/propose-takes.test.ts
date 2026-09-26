@@ -1235,11 +1235,12 @@ describe('runPhaseProposeTakes — dry-run (#4823)', () => {
     expect(calls()).toBe(0);
   });
 
-  test('ctx.dryRun alone (caller forgot to thread opts): still skipped; engine never touched', async () => {
-    const { engine, calls } = armedEngine();
+  // Fork contract: a direct ctx.dryRun invocation is the write-free canary
+  // preview (see propose-takes-grounding.test.ts); only cycle-threaded
+  // opts.dryRun takes the upstream skip.
+  test('ctx.dryRun alone reaches the fork write-free preview instead of the base skip', async () => {
+    const { engine } = armedEngine();
     const r = await runPhaseProposeTakes({ ...buildCtx(engine), dryRun: true }, { meter: meter() });
-    expect(r.status).toBe('skipped');
-    expect(r.details.reason).toBe('no_dry_run_support');
-    expect(calls()).toBe(0);
+    expect(r.details.reason).not.toBe('no_dry_run_support');
   });
 });

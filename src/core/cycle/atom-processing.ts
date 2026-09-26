@@ -19,7 +19,15 @@ export function emptyAtomProcessing(epoch: string) {
 export async function atomProcessingWriter(engine: BrainEngine, dryRun = false) {
   const noop = async (_delta: Delta) => {};
   if (dryRun) return noop;
-  const raw = await engine.getConfig(ATOM_PROCESSING_KEY);
+  // The ledger is observability only: a failed config READ must not reject the
+  // extraction phase (the phase's own config reads are fail-soft). A readable
+  // but corrupt ledger still fails loudly below.
+  let raw: string | null;
+  try { raw = await engine.getConfig(ATOM_PROCESSING_KEY); }
+  catch {
+    console.warn('[extract_atoms] atom processing ledger unreadable; outcomes for this run are not counted');
+    return noop;
+  }
   if (raw == null) return noop;
   const state = JSON.parse(raw);
   if (state.version !== 1 || state.scope !== 'brain_wide_pages' ||

@@ -2,6 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { operationsByName, type OperationContext } from '../src/core/operations.ts';
 import { installFixtureChunks } from './helpers/page-projection.ts';
+import { FACTS_DEFAULT_VISIBILITY_KEY } from '../src/core/facts/visibility.ts';
+import { __resetPrivateVisibilityCacheForTests } from '../src/core/search/private-visibility.ts';
 
 describe('search operations disclose visible projection gaps', () => {
   let engine: PGLiteEngine;
@@ -60,12 +62,23 @@ describe('search operations disclose visible projection gaps', () => {
   });
 
   test('private-only pending pages cannot be disclosed by an empty remote search', async () => {
-    await engine.putPage('notes/private-pending', {
-      type: 'note', title: 'Private synthetic example', compiled_truth: 'readinessmarker', frontmatter: { visibility: 'private' },
-    }, { sourceId });
-    await operationsByName.search.handler(context(true), { query: 'missingtoken', source_id: sourceId });
-    expect(retrieval.projection_readiness).toEqual({ status: 'ready', ready: true });
-    expect(retrieval.degraded).toBeUndefined();
+    // Fork contract: a fresh brain takes the world-only host posture
+    // (facts.default_visibility=world), where remote callers see every page.
+    // The private-page gate this case pins applies under the legacy posture.
+    const posture = await engine.getConfig(FACTS_DEFAULT_VISIBILITY_KEY);
+    await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, '');
+    __resetPrivateVisibilityCacheForTests();
+    try {
+      await engine.putPage('notes/private-pending', {
+        type: 'note', title: 'Private synthetic example', compiled_truth: 'readinessmarker', frontmatter: { visibility: 'private' },
+      }, { sourceId });
+      await operationsByName.search.handler(context(true), { query: 'missingtoken', source_id: sourceId });
+      expect(retrieval.projection_readiness).toEqual({ status: 'ready', ready: true });
+      expect(retrieval.degraded).toBeUndefined();
+    } finally {
+      await engine.setConfig(FACTS_DEFAULT_VISIBILITY_KEY, posture ?? '');
+      __resetPrivateVisibilityCacheForTests();
+    }
   });
 
   test('the current-projection diagnostic honors the public type filter', async () => {

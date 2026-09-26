@@ -675,7 +675,6 @@
   "test/extract-atoms-drain-errors.test.ts": 31,
   "test/extract-atoms-drain-handler.test.ts": 395,
   "test/extract-atoms-drain.test.ts": 6,
-  "test/extract-atoms-empty-array-rule.test.ts": 657,
   "test/extract-atoms-extractable-types.test.ts": 8,
   "test/extract-atoms-failure-classes.test.ts": 2809,
   "test/extract-atoms-page-discovery.test.ts": 4524,

@@ -148,18 +148,22 @@ describe('#3037 — one bad chunk no longer darkens its page', () => {
       slug: 'llama-physical-batch-page', chunk_index: c.chunk_index, chunk_text: c.chunk_text,
       chunk_source: c.chunk_source, model: null, token_count: 1, source_id: 'default', page_id: 1,
     }));
-    const upsertCalls: Array<{ slug: string; chunks: any[] }> = [];
     const engine = mockEngine({
       countStaleChunks: async () => 3,
       listStaleChunks: async () => stale,
       getChunks: async () => THREE_CHUNKS,
-      upsertChunks: async (slug: string, chunks: any[]) => { upsertCalls.push({ slug, chunks }); },
+      upsertChunks: async () => { throw new Error('Embedding must not replace canonical chunks'); },
     });
 
     const result = await runEmbedCore(engine, { stale: true });
 
+    // Fork contract (7cbc7729f): the llama.cpp physical-batch overflow is a
+    // transient-typed 500 but still isolates per chunk. Since v0.51 vectors
+    // install through embedding updates rather than chunk replacement.
     expect(embedCalls.map(call => call.length)).toEqual([3, 1, 1, 1]);
-    expect(upsertCalls).toHaveLength(1);
+    const updates = embeddingUpdates(engine);
+    expect(updates.map((call: any) => call.args[1][5])).toEqual(['good-a', 'good-b']);
+    expect((engine as any)._calls.some((call: any) => call.method === 'upsertChunks')).toBe(false);
     expect(result.embedded).toBe(2);
     expect(result.failures).toBe(1);
   });

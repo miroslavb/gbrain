@@ -54,10 +54,12 @@ test('migration158 leaves old snapshots unknown and new versions record live or 
     const [legacy] = await engine.executeRaw<{ id: number }>('INSERT INTO page_versions(page_id,compiled_truth,frontmatter) VALUES($1,$2,$3::text::jsonb) RETURNING id',
       [page.id, page.compiled_truth, JSON.stringify(page.frontmatter)]);
     expect((await detectMissingColumns(engine)).missing).toContainEqual({ table: 'page_versions', column: 'is_deleted' });
-    // The ledger already says v158; the standalone schema replay must repair
-    // the missing column without relying on the pending migration runner.
+    // The ledger already says upstream v158 (fork v166, upstream 150-165 +8);
+    // the standalone schema replay must repair the missing column without
+    // relying on the pending migration runner.
     await engine.initSchema();
-    const migration = MIGRATIONS.find(value => value.version === 158)!;
+    const migration = MIGRATIONS.find(value => value.version === 166)!;
+    expect(migration.name).toBe('canonical_version_deletion_state');
     await engine.executeRaw(migration.sql); await engine.executeRaw(migration.sql);
     expect((await engine.executeRaw<PageVersion>('SELECT * FROM page_versions WHERE id=$1', [legacy.id]))[0].is_deleted).toBeNull();
     const liveVersion = await engine.createVersion('upgrade', { sourceId });

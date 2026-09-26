@@ -39,8 +39,11 @@ describe('actual page processing outcomes', () => {
   });
   test('published counts require the completion flip; transcript outputs are excluded', async () => {
     await engine.putPage(page.slug, { type: 'note', title: 'Probe', compiled_truth: page.content, timeline: '' });
+    // v0.58 derived atom page state pins the exact stored page (slug, content
+    // hash, body); completion is only recorded against that identity.
+    const pinned = { ...page, contentHash: (await engine.getPage(page.slug))!.content_hash! };
     const answer = JSON.stringify([{ title: 'Prototype requirement', atom_type: 'insight', body: page.content }]);
-    await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [page], _chat: chat(answer) });
+    await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [pinned], _chat: chat(answer) });
     expect(await state()).toMatchObject({ completed_scans: 1, empty_scans: 0, published_atoms: 1 });
     await runPhaseExtractAtoms(engine, { _pages: [], _transcripts: [{ filePath: '/fixture/transcript.txt',
       content: page.content, contentHash: '1234567890abcdef' }], _chat: chat('[]') });

@@ -14,6 +14,8 @@ import type { WriteRequest } from '../../src/core/persistence/model.ts';
 import { disposePersistenceConsumer, waitForWrite } from '../../src/core/persistence/service.ts';
 import { sha256 } from '../../src/core/persistence/digest.ts';
 import { withEnv } from './with-env.ts';
+import { GROUNDED_ATOM_EVIDENCE } from './fork-grounded-atoms.ts';
+import { atomSlug } from '../../src/core/cycle/atom-slug.ts';
 
 export const atomCompactionCases = ['all_failed', 'mixed_all', 'completion_only', 'failed_child_only', 'committed_child_only', 'changed_target', 'success', 'malformed'] as const;
 export const atomCompactionActions = ['resume', 'retry'] as const;
@@ -27,10 +29,11 @@ export async function exerciseAtomCompaction(engine: BrainEngine, scenario: type
       await disposePersistenceConsumer(engine);
       await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
       await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [sourceId]);
-      await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40), frontmatter: { visibility: 'private' } }, { sourceId });
+      await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40) + GROUNDED_ATOM_EVIDENCE, frontmatter: { visibility: 'private' } }, { sourceId });
       const page = (await engine.getPage('notes/2026-01-01-example', { sourceId }))!;
       const titles = ['Measured progress', 'Explicit ownership'];
-      const slugs = titles.map(title => `atoms/2026-01-01/${title.toLowerCase().replaceAll(' ', '-')}-${sha256(`${page.slug}\0${title}`).slice(0, 8)}`);
+      // Fork contract: atom slugs keep the title-hash shape (upstream #4733 not adopted).
+      const slugs = titles.map(title => atomSlug(title, page.slug));
       await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
       const observe = (target: BrainEngine): BrainEngine => new Proxy(target, {
         get(current, key) {
@@ -49,7 +52,7 @@ export async function exerciseAtomCompaction(engine: BrainEngine, scenario: type
       let calls = 0;
       const chat = async (): Promise<ChatResult> => {
         calls++;
-        return { text: scenario === 'malformed' ? 'Invalid model output' : JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: `Use ${title.toLowerCase()} to guide the project.` }))),
+        return { text: scenario === 'malformed' ? 'Invalid model output' : JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: `Use ${title.toLowerCase()} to guide the project.`, source_quote: `Use ${title.toLowerCase()} to guide the project.` }))),
           blocks: [], stopReason: 'end', usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
       };
       const opts = { sourceId, _chat: chat, _transcripts: [], _pages: [{ slug: page.slug, content: page.compiled_truth, contentHash: page.content_hash! }] };
