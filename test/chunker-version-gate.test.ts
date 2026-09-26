@@ -15,7 +15,7 @@ import { describe, test, expect } from 'bun:test';
 import { CHUNKER_VERSION } from '../src/core/chunkers/code.ts';
 
 describe('Layer 12 — CHUNKER_VERSION constant', () => {
-  test('bumped to 7 for declaration-preserving large-node splitting', () => {
+  test('bumped to 7 for declaration-preserving splitting and the Bash grammar (#5082)', () => {
     // v3: v0.19.0 Chonkie parity (tokenizer + small-sibling merge).
     // v4: v0.20.0 Cathedral II (qualified names + parent scope + doc_comment
     //     + fence extraction + chunk-grain FTS). Folded into content_hash
@@ -25,7 +25,8 @@ describe('Layer 12 — CHUNKER_VERSION constant', () => {
     // v6: #4511 mergeSmallSiblings stopped erasing symbol_name on short
     //     definitions; the bump re-chunks previously-merged files so the
     //     lost symbols come back.
-    // v7: preserve the declaration before a large function body split.
+    // v7: preserve the declaration before a large function body split (fork)
+    //     and the compatible Bash grammar (#5082, upstream v0.50.2).
     expect(CHUNKER_VERSION).toBe(7);
   });
 

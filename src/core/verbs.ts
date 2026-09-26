@@ -24,6 +24,8 @@
  */
 
 import type { Operation } from './operations.ts';
+import { WRITE_RECEIPT_SCHEMA, WRITE_REQUEST_PARAM, PAGE_MUTATION_PARAMS } from './persistence/params.ts';
+import { WRITE_ERROR_CODES } from './persistence/types.ts';
 
 /** Frozen protocol version for the MEMORY_VERBS v1 verb set. Single source of truth. */
 export const MEMORY_VERBS_VERSION = 1;
@@ -67,6 +69,7 @@ const remember: Operation = {
     'Response: branch on `status` (inserted|duplicate|superseded), never on `status_text` (human rendering only). ' +
     'On duplicate, `id` is the EXISTING fact\'s id. For bulk extraction from a raw transcript use extract_facts instead.',
   params: {
+    ...PAGE_MUTATION_PARAMS,
     fact: { type: 'string', required: true, description: 'The fact to remember, one claim per call.' },
     provenance: {
       type: 'string',
@@ -140,9 +143,8 @@ const remember: Operation = {
         'Use "world"; it is the only visibility supported on this single-principal host.',
       );
     }
-    const validUntil = parseTtlParam(p.ttl); // throws verbError(invalid_params) on bad input
-
     if (ctx.dryRun) {
+      parseTtlParam(p.ttl); // Dry runs still validate without admitting intent.
       return {
         dry_run: true,
         action: 'remember',
@@ -151,38 +153,9 @@ const remember: Operation = {
       };
     }
 
-    const { writeSingleFact, isNullLikeEntity } = await import('./facts/write-single.ts');
-    // #4755: a null-like entity token ("null", "None", "N/A", …) means the
-    // same thing as omitting the param — LLM callers emit these for
-    // subjectless statements, and resolving them would file the fact under
-    // a non-existent entity_slug no lookup can reach.
-    const entityParam = typeof p.entity === 'string' ? p.entity.trim() : null;
-    const result = await writeSingleFact(ctx.engine, ctx.sourceId ?? 'default', {
-      fact,
-      provenance,
-      kind: kind as (typeof FACT_KINDS)[number],
-      entity: entityParam && !isNullLikeEntity(entityParam) ? entityParam : null,
-      visibility,
-      validUntil,
-    });
-
-    const statusText =
-      result.status === 'inserted'
-        ? `remembered as fact #${result.id}`
-        : result.status === 'duplicate'
-          ? `already knew this — kept fact #${result.id}`
-          : `updated — fact #${result.id} supersedes the previous version`;
-
-    return {
-      // Opaque STRING at the protocol level [T4]; gbrain serializes its ints.
-      id: String(result.id),
-      status: result.status,
-      status_text: statusText,
-      entity_slug: result.entity_slug ?? null,
-      valid_until: result.valid_until ? result.valid_until.toISOString() : null,
-      ...(result.degraded_dedup ? { degraded_dedup: true } : {}),
-      protocol_version: MEMORY_VERBS_VERSION,
-    };
+    const { submitRememberMutation } = await import('./persistence/memory-mutations.ts');
+    const { runMemoryWrite } = await import('./persistence/verb-errors.ts');
+    return runMemoryWrite(() => submitRememberMutation(ctx, { ...p, fact, provenance, kind, visibility }));
   },
   cliHints: { name: 'remember', positional: ['fact'] },
 };
@@ -374,6 +347,7 @@ const forget: Operation = {
     'Idempotent: forgetting an already-expired fact returns expired:false (success), unknown id returns a not_found error. ' +
     'The fact is expired (audit trail kept), not deleted.',
   params: {
+    request_id: WRITE_REQUEST_PARAM,
     id: { type: 'string', required: true, description: 'Opaque fact id from remember/recall (facts[].fact_id). Never a page slug.' },
     reason: { type: 'string', description: 'Optional reason, written to the fact\'s audit trail. Default: "forgotten".' },
   },
@@ -398,38 +372,14 @@ const forget: Operation = {
       return { dry_run: true, action: 'forget', id: rawId, protocol_version: MEMORY_VERBS_VERSION };
     }
 
-    const { forgetFactInFence } = await import('./facts/forget.ts');
-    // Scope the forget to the caller's source. Visibility is intentionally
-    // unrestricted because every host agent can act on legacy facts too.
-    const result = await forgetFactInFence(ctx.engine, numericId, {
-      ...(reason ? { reason } : {}),
-      sourceId: ctx.sourceId ?? 'default',
-      worldOnly: false,
-    });
-
-    if (!result.ok && result.path === 'not_found') {
-      throw verbError(
-        'not_found',
-        `No fact with id "${rawId}".`,
-        'Ids come from remember/recall (facts[].fact_id). recall the entity first to find the right fact.',
-      );
-    }
-    if (!result.ok && result.path === 'already_expired') {
-      // Idempotent re-forget: success, nothing changed.
-      return {
-        id: rawId,
-        expired: false,
-        reason,
-        protocol_version: MEMORY_VERBS_VERSION,
-      };
-    }
-
-    return {
-      id: rawId,
-      expired: true,
-      reason,
-      protocol_version: MEMORY_VERBS_VERSION,
-    };
+    // Durable withdrawal on the upstream persistence path. It scopes the
+    // lookup to the caller's source and write grant (fork contract: a guessed
+    // global id cannot expire another source's fact). On this world-only
+    // host every stored fact is world-visible, so the remote visibility
+    // filter does not hide legacy rows from host agents.
+    const { submitForgetMutation } = await import('./persistence/memory-mutations.ts');
+    const { runMemoryWrite } = await import('./persistence/verb-errors.ts');
+    return runMemoryWrite(() => submitForgetMutation(ctx, 'forget', { ...p, id: rawId, ...(reason ? { reason } : {}) }));
   },
   // NO cliHints: `gbrain forget` is a CLI_ONLY command (recall.ts runForget)
   // that dispatches BEFORE cliOps — a cliHint here would be silently
@@ -458,6 +408,17 @@ const STATUS_ENUM = ['inserted', 'duplicate', 'superseded'];
 const SYNTHESIS_STATUS_ENUM = [
   'ok', 'empty_answer', 'not_json', 'output_truncated', 'no_llm', 'model_unusable', 'llm_error', 'extractive_fallback',
 ];
+
+const RECALL_BUDGET_ARM_SCHEMA = {
+  type: 'object',
+  required: ['candidates', 'kept', 'dropped', 'used'],
+  properties: {
+    candidates: { type: 'integer', minimum: 0, description: 'Authorized, filtered, limit-capped candidates before packing.' },
+    kept: { type: 'integer', minimum: 0 },
+    dropped: { type: 'integer', minimum: 0 },
+    used: { type: 'integer', minimum: 0, description: 'Estimated tokens in retained evidence, excluding the JSON envelope.' },
+  },
+};
 
 export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
   recall: {
@@ -500,9 +461,21 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
         },
       },
       search_degraded: { type: 'string', description: 'Present when the search arm fell back to keyword-only (no embedding provider).' },
-      budget_tokens: { type: 'integer', description: 'Present when budget_tokens was passed.' },
+      budget_tokens: { type: 'integer', description: 'Present for a positive finite numeric budget, including when its floor is zero.' },
       budget_used: { type: 'integer' },
       dropped_count: { type: 'integer' },
+      budget_packing: {
+        type: 'object',
+        description: 'Present only when a valid budget_policy is supplied. Per-arm used and dropped sums match budget_used and dropped_count when those fields exist.',
+        required: ['policy', 'applied', 'reason', 'facts', 'results'],
+        properties: {
+          policy: { type: 'string', enum: ['facts_first', 'query_first'], description: 'Effective policy; ineligible query_first requests fall back to facts_first.' },
+          applied: { type: 'boolean', description: 'Whether the requested budget policy applied, not whether all required evidence fit.' },
+          reason: { type: 'string', enum: ['no_query', 'no_positive_finite_budget', 'budget_below_one', 'no_candidates', 'first_items_exceed_budget', 'packed'] },
+          facts: RECALL_BUDGET_ARM_SCHEMA,
+          results: RECALL_BUDGET_ARM_SCHEMA,
+        },
+      },
     },
   },
   remember: {
@@ -516,6 +489,7 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
       entity_slug: { type: ['string', 'null'] },
       valid_until: { type: ['string', 'null'], description: 'ISO 8601 or null (never expires).' },
       degraded_dedup: { type: 'boolean', description: 'Present (true) when no embedding provider — near-duplicates may insert.' },
+      write_request: WRITE_RECEIPT_SCHEMA,
     },
   },
   entity: {
@@ -635,6 +609,7 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
       id: { type: 'string' },
       expired: { type: 'boolean', description: 'true = this call expired the fact; false = it was ALREADY expired (idempotent re-forget).' },
       reason: { type: ['string', 'null'] },
+      write_request: WRITE_RECEIPT_SCHEMA,
     },
   },
   // v0.45.7 (issue #1) — ambient recall. The host is now world-only;
@@ -811,5 +786,7 @@ export const ERROR_SCHEMA: Record<string, unknown> = {
     suggestion: { type: 'string', description: 'Populated on every verb error: problem + cause + fix.' },
     detail: { type: 'string', description: 'Freeform specifics (e.g. which dependency failed).' },
     protocol_version: { type: 'integer', const: MEMORY_VERBS_VERSION },
+    write_request: WRITE_RECEIPT_SCHEMA,
+    write_error: { type: 'string', enum: [...WRITE_ERROR_CODES] },
   },
 };

@@ -332,7 +332,8 @@ describe('autopilot-global-maintenance handler stamps last_global_at (PGLite)', 
     expect(ranPhases).toContain('synthesize');
     expect(ranPhases).toContain('patterns');
     expect(ranPhases).not.toContain('sync');
-    expect(await engine.getConfig(LAST_GLOBAL_AT_KEY)).not.toBeNull();
+    expect(result.report.phases.some((p: any) => p.status === 'fail')).toBe(true);
+    expect(await engine.getConfig(LAST_GLOBAL_AT_KEY)).toBeNull();
   }, 60_000);
 
   test('runs global phases (no source_id) and stamps autopilot.last_global_at on success', async () => {
@@ -351,7 +352,7 @@ describe('autopilot-global-maintenance handler stamps last_global_at (PGLite)', 
     const progress: Array<Record<string, unknown>> = [];
     const result = await handler!({
       id: 4102,
-      data: { phases: ['orphans', 'embed'], repoPath },
+      data: { phases: ['orphans'], repoPath },
       signal: undefined,
       updateProgress: async (value: Record<string, unknown>) => { progress.push(value); },
     });
@@ -359,7 +360,8 @@ describe('autopilot-global-maintenance handler stamps last_global_at (PGLite)', 
     const orphans = result.report.phases.find((p: any) => p.phase === 'orphans');
     expect(orphans).toBeTruthy();
     expect(orphans.details.source_id).toBeUndefined();
-    expect(['ok', 'clean', 'partial']).toContain(result.report.status);
+    expect(result.report.phases.some((p: any) => p.status === 'fail')).toBe(false);
+    expect(['ok', 'clean']).toContain(result.report.status);
     // Freshness stamped so the dispatch gate backs off.
     const stamped = await engine.getConfig(LAST_GLOBAL_AT_KEY);
     expect(stamped).not.toBeNull();

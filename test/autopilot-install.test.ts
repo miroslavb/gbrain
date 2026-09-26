@@ -77,6 +77,20 @@ function makeFakeGbrainOnPath(): { binDir: string; restore: () => void } {
   };
 }
 
+test('wrapper and env template stay under the per-test GBRAIN_HOME', () => {
+  const fakeBin = makeFakeGbrainOnPath();
+  try {
+    const repoDir = join(tmp, 'repo-isolated');
+    mkdirSync(repoDir, { recursive: true });
+    const wrapper = writeWrapperScript(repoDir, 'linux-cron');
+    expect(wrapper).toBe(join(tmp, '.gbrain', 'autopilot-run.sh'));
+    expect(existsSync(join(tmp, '.gbrain', 'env'))).toBe(true);
+    expect(readFileSync(wrapper, 'utf8')).toContain(`export GBRAIN_HOME='${tmp}'`);
+  } finally {
+    fakeBin.restore();
+  }
+});
+
 describe('detectInstallTarget', () => {
   test('returns "macos" on darwin regardless of env', () => {
     if (process.platform !== 'darwin') return; // Skip on non-mac CI

@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { v0_32_2, __setTestEngineOverride, __testing } from '../src/commands/migrations/v0_32_2.ts';
-import { parseFactsFence } from '../src/core/facts-fence.ts';
+import { parseFactsFence, upsertFactRow } from '../src/core/facts-fence.ts';
 
 let engine: PGLiteEngine;
 let brainDir: string;
@@ -39,6 +39,7 @@ beforeEach(async () => {
   brainDir = mkdtempSync(join(tmpdir(), 'mig-v0_32_2-test-'));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (engine as any).db.query('DELETE FROM facts');
+  await engine.executeRaw('DELETE FROM pages');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (engine as any).db.query(
     `UPDATE sources SET local_path = $1 WHERE id = 'default'`,
@@ -55,15 +56,23 @@ async function seedLegacyFact(input: {
   source_id?: string;
   visibility?: 'private' | 'world';
   notability?: 'high' | 'medium' | 'low';
+  withPage?: boolean;
 }): Promise<number> {
-  if (input.entity_slug) {
+  const sourceId = input.source_id ?? 'default';
+  if (input.entity_slug && input.withPage !== false &&
+      !await engine.getPage(input.entity_slug, { sourceId })) {
     await engine.putPage(input.entity_slug, {
-      type: input.entity_slug.startsWith('people/') ? 'person' : 'concept',
-      title: input.entity_slug,
-      compiled_truth: `# ${input.entity_slug}`,
-      timeline: '',
-      frontmatter: {},
-    }, { sourceId: input.source_id ?? 'default' });
+      type: 'note', title: input.entity_slug, compiled_truth: '# Existing page\n', frontmatter: {},
+    }, { sourceId });
+    const sources = await engine.executeRaw<{ local_path: string | null }>(
+      'SELECT local_path FROM sources WHERE id = $1', [sourceId],
+    );
+    const root = sources[0]?.local_path;
+    if (root) {
+      const path = join(root, `${input.entity_slug}.md`);
+      mkdirSync(join(path, '..'), { recursive: true });
+      if (!existsSync(path)) writeFileSync(path, '# Existing page\n');
+    }
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = await (engine as any).db.query(
@@ -111,10 +120,11 @@ describe('phaseBFenceFacts — dry-run reporting', () => {
     const r = await __testing.phaseBFenceFacts(engine, DRY_OPTS);
     expect(r.status).toBe('skipped');
     expect(r.detail).toContain('dry-run');
-    expect(r.detail).toContain('would fence 2 guarded row(s)');
+    expect(r.detail).toContain('would fence 2 rows');  // 3 total - 1 unparented
+    expect(r.detail).toContain('1 unfenceable');
 
-    // No files created.
-    expect(existsSync(join(brainDir, 'people/alice.md'))).toBe(false);
+    expect(readFileSync(join(brainDir, 'people/alice.md'), 'utf8')).toBe('# Existing page\n');
+    expect(readFileSync(join(brainDir, 'people/bob.md'), 'utf8')).toBe('# Existing page\n');
     // DB rows still have NULL row_num.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = await (engine as any).db.query(
@@ -134,7 +144,7 @@ describe('phaseBFenceFacts — happy path backfill', () => {
     expect(r.detail).toContain('fenced=2');
     expect(r.detail).toContain('pages=1');
 
-    // Stub-page exists with fence content.
+    // Existing page now has fence content.
     const filePath = join(brainDir, 'people/alice.md');
     expect(existsSync(filePath)).toBe(true);
     const body = readFileSync(filePath, 'utf-8');
@@ -221,10 +231,17 @@ describe('phaseBFenceFacts — happy path backfill', () => {
     expect(rows.rows.map((r: { row_num: number }) => r.row_num)).toEqual([1, 2]);
   });
 
-  test('rebuilds a stale file fence around occupied DB row numbers without losing indexed facts', async () => {
+  test('fences a legacy row above a DB-owned number and writes the page projection through', async () => {
+    // Upstream v0.50.2 allocation: the Markdown file is canonical, so a
+    // DB-indexed row missing from a stale file fence is not re-materialized
+    // into the file; the legacy row is allocated above every DB-owned number.
+    // Fork contract: the rewritten body is projected into pages.compiled_truth
+    // before row ownership is published.
     await engine.putPage('companies/acme', {
       type: 'company', title: 'Acme', compiled_truth: '# Acme', timeline: '', frontmatter: {},
     });
+    mkdirSync(join(brainDir, 'companies'), { recursive: true });
+    writeFileSync(join(brainDir, 'companies/acme.md'), '# Acme\n');
     // Indexed fact #1 exists in DB but the source file has no fence yet.
     await (engine as any).db.query(
       `INSERT INTO facts
@@ -238,16 +255,15 @@ describe('phaseBFenceFacts — happy path backfill', () => {
     const r = await __testing.phaseBFenceFacts(engine, OPTS);
     expect(r.status).toBe('complete');
     const parsed = parseFactsFence(readFileSync(join(brainDir, 'companies/acme.md'), 'utf-8'));
-    expect(parsed.facts.map(f => [f.rowNum, f.claim])).toEqual([
-      [1, 'Existing indexed'],
-      [2, 'Legacy pending'],
-    ]);
+    expect(parsed.facts.map(f => [f.rowNum, f.claim])).toEqual([[2, 'Legacy pending']]);
     expect(await engine.executeRaw(
       `SELECT row_num, fact FROM facts WHERE entity_slug='companies/acme' ORDER BY row_num`,
     )).toEqual([
       { row_num: 1, fact: 'Existing indexed' },
       { row_num: 2, fact: 'Legacy pending' },
     ]);
+    const page = await engine.getPage('companies/acme', { sourceId: 'default' });
+    expect(parseFactsFence(page?.compiled_truth ?? '').facts.map(f => f.claim)).toEqual(['Legacy pending']);
   });
 
   test('skips facts with NULL entity_slug (unfenceable)', async () => {
@@ -257,7 +273,7 @@ describe('phaseBFenceFacts — happy path backfill', () => {
     const r = await __testing.phaseBFenceFacts(engine, OPTS);
     expect(r.status).toBe('complete');
     expect(r.detail).toContain('fenced=1');
-    expect(r.detail).toContain('skipped_no_entity=0');
+    expect(r.detail).toContain('skipped_no_entity=1');
 
     // The unparented fact's row_num remains NULL.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -276,11 +292,188 @@ describe('phaseBFenceFacts — happy path backfill', () => {
 
     const r = await __testing.phaseBFenceFacts(engine, OPTS);
     expect(r.status).toBe('complete');
-    expect(r.detail).toContain('scanned=0');
+    expect(r.detail).toContain('skipped_no_local_path=1');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = await (engine as any).db.query('SELECT row_num FROM facts');
     expect(rows.rows[0].row_num).toBeNull();
+  });
+});
+
+describe('phaseBFenceFacts — missing pages and occupied fence rows', () => {
+  const slug = 'people/alice-example';
+
+  async function page(body = '# Existing notes\n', sourcePath = `${slug}.md`): Promise<string> {
+    await engine.putPage(slug, {
+      type: 'person', title: 'Alice Example', compiled_truth: body, frontmatter: {}, source_path: sourcePath,
+    }, { sourceId: 'default' });
+    const filePath = join(brainDir, sourcePath);
+    mkdirSync(join(filePath, '..'), { recursive: true });
+    writeFileSync(filePath, body);
+    return filePath;
+  }
+
+  test('skips unresolved root slugs and missing page files without creating stubs or deleting facts', async () => {
+    const existingPath = await page();
+    await seedLegacyFact({ entity_slug: slug, fact: 'Existing page fact' });
+    await seedLegacyFact({ entity_slug: 'missing-example', fact: 'Unresolved root fact', withPage: false });
+    await seedLegacyFact({ entity_slug: 'projects/missing-example', fact: 'Missing prefixed fact', withPage: false });
+    await engine.putPage('projects/missing-example', {
+      type: 'project', title: 'Missing Example', compiled_truth: 'DB-only page', frontmatter: {},
+    }, { sourceId: 'default' });
+    const result = await __testing.phaseBFenceFacts(engine, OPTS);
+    expect(result.status).toBe('complete');
+    expect(result.detail).toContain('skipped_no_page=2');
+    expect(result.detail).toContain('fenced=1');
+    expect(existsSync(join(brainDir, 'missing-example.md'))).toBe(false);
+    expect(existsSync(join(brainDir, 'projects/missing-example.md'))).toBe(false);
+    expect(readFileSync(existingPath, 'utf8')).toContain('# Existing notes');
+    const rows = await engine.executeRaw<{ fact: string; row_num: number | null }>(
+      `SELECT fact, row_num FROM facts ORDER BY id`,
+    );
+    expect(rows).toEqual([
+      { fact: 'Existing page fact', row_num: 1 },
+      { fact: 'Unresolved root fact', row_num: null },
+      { fact: 'Missing prefixed fact', row_num: null },
+    ]);
+  });
+
+  test('requires a live entity page in the fact source even when an orphan file exists', async () => {
+    await engine.executeRaw(`INSERT INTO sources (id, name) VALUES ('migration-other', 'Other') ON CONFLICT DO NOTHING`);
+    await engine.putPage('foreign-example', {
+      type: 'note', title: 'Foreign Example', compiled_truth: 'Other source', frontmatter: {},
+    }, { sourceId: 'migration-other' });
+    const orphan = join(brainDir, 'foreign-example.md');
+    writeFileSync(orphan, '# Local orphan file\n');
+    await seedLegacyFact({ entity_slug: 'foreign-example', fact: 'Keep unparented', withPage: false });
+    const result = await __testing.phaseBFenceFacts(engine, OPTS);
+    expect(result.detail).toContain('skipped_no_page=1');
+    expect(readFileSync(orphan, 'utf8')).toBe('# Local orphan file\n');
+  });
+
+  test('dry-run reports missing pages and a dirty source containing only unfenceable facts is a no-op', async () => {
+    execFileSync('git', ['-C', brainDir, 'init', '-q']);
+    writeFileSync(join(brainDir, 'unrelated.md'), '# Uncommitted notes\n');
+    await seedLegacyFact({ entity_slug: 'missing-example', fact: 'No target', withPage: false });
+    const dry = await __testing.phaseBFenceFacts(engine, DRY_OPTS);
+    expect(dry.status).toBe('skipped');
+    expect(dry.detail).toContain('would fence 0 rows');
+    expect(dry.detail).toContain('skipped_no_page=1');
+    const write = await __testing.phaseBFenceFacts(engine, OPTS);
+    expect(write.status).toBe('complete');
+    expect(write.detail).toContain('skipped_no_page=1');
+    expect(existsSync(join(brainDir, 'missing-example.md'))).toBe(false);
+  });
+
+  test('writes and verifies the recorded page path instead of creating a slug-named twin', async () => {
+    const path = await page('# Existing notes\n', 'People/Alice Example.md');
+    await seedLegacyFact({ entity_slug: slug, fact: 'Recorded file fact' });
+    expect((await __testing.phaseBFenceFacts(engine, OPTS)).status).toBe('complete');
+    expect(parseFactsFence(readFileSync(path, 'utf8')).facts[0]?.claim).toBe('Recorded file fact');
+    expect(existsSync(join(brainDir, `${slug}.md`))).toBe(false);
+    expect((await __testing.phaseCVerify(engine, OPTS)).status).toBe('complete');
+  });
+
+  test('allocates above DB-owned numbers after a markdown fence disappeared', async () => {
+    await page();
+    await engine.executeRaw(
+      `INSERT INTO facts (source_id, entity_slug, fact, kind, source, row_num, source_markdown_slug)
+       VALUES ('default', $1, 'Already indexed', 'fact', 'mcp:put_page', 7, $1)`, [slug],
+    );
+    await seedLegacyFact({ entity_slug: slug, fact: 'Needs fencing' });
+    const result = await __testing.phaseBFenceFacts(engine, OPTS);
+    expect(result.status).toBe('complete');
+    expect(await engine.executeRaw(`SELECT fact, row_num FROM facts ORDER BY row_num`)).toEqual([
+      { fact: 'Already indexed', row_num: 7 }, { fact: 'Needs fencing', row_num: 8 },
+    ]);
+  });
+
+  test('moves a stranded colliding row without dropping an earlier appended fact', async () => {
+    const body = upsertFactRow('# Existing notes\n', {
+      rowNum: 1, claim: 'Stranded fact', kind: 'fact', confidence: 1, visibility: 'private',
+      notability: 'medium', source: 'mcp:put_page',
+    }).body;
+    const path = await page(body);
+    await engine.executeRaw(
+      `INSERT INTO facts (source_id, entity_slug, fact, kind, source, row_num, source_markdown_slug)
+       VALUES ('default', $1, 'Already indexed', 'fact', 'mcp:put_page', 1, $1)`, [slug],
+    );
+    await seedLegacyFact({ entity_slug: slug, fact: 'Append before stranded' });
+    await seedLegacyFact({ entity_slug: slug, fact: 'Stranded fact' });
+    expect((await __testing.phaseBFenceFacts(engine, OPTS)).status).toBe('complete');
+    const facts = parseFactsFence(readFileSync(path, 'utf8')).facts;
+    expect(facts.map(f => [f.claim, f.rowNum])).toEqual([
+      ['Stranded fact', 3], ['Append before stranded', 2],
+    ]);
+    expect(await engine.executeRaw(`SELECT fact, row_num FROM facts ORDER BY row_num`)).toEqual([
+      { fact: 'Already indexed', row_num: 1 },
+      { fact: 'Append before stranded', row_num: 2 },
+      { fact: 'Stranded fact', row_num: 3 },
+    ]);
+  });
+
+  test('never lets two legacy rows claim the same stranded fence row', async () => {
+    const path = await page(upsertFactRow('# Notes\n', {
+      rowNum: 5, claim: 'Same claim', kind: 'fact', confidence: 1, visibility: 'private',
+      notability: 'medium', source: 'mcp:put_page',
+    }).body);
+    await seedLegacyFact({ entity_slug: slug, fact: 'Same claim' });
+    await seedLegacyFact({ entity_slug: slug, fact: 'Same claim', visibility: 'world' });
+    expect((await __testing.phaseBFenceFacts(engine, OPTS)).status).toBe('complete');
+    expect(parseFactsFence(readFileSync(path, 'utf8')).facts.map(f => f.rowNum)).toEqual([5, 6]);
+    expect((await __testing.phaseCVerify(engine, OPTS)).status).toBe('complete');
+  });
+
+  test('preserves a legitimate DB-owned matching fence row and appends the separate legacy fact', async () => {
+    const path = await page(upsertFactRow('# Notes\n', {
+      rowNum: 4, claim: 'Shared claim', kind: 'fact', confidence: 0.8, visibility: 'private',
+      notability: 'high', source: 'mcp:put_page', context: 'Original provenance',
+      claimMetric: 'count', claimValue: 8,
+    }).body);
+    await engine.executeRaw(
+      `INSERT INTO facts (source_id, entity_slug, fact, kind, source, row_num, source_markdown_slug)
+       VALUES ('default', $1, 'Shared claim', 'fact', 'mcp:put_page', 4, $1)`, [slug],
+    );
+    await seedLegacyFact({ entity_slug: slug, fact: 'Shared claim', visibility: 'world' });
+    expect((await __testing.phaseBFenceFacts(engine, OPTS)).status).toBe('complete');
+    const facts = parseFactsFence(readFileSync(path, 'utf8')).facts;
+    expect(facts).toHaveLength(2);
+    // World-only host (fork): every rendered fence row is world-visible.
+    expect(facts[0]).toMatchObject({
+      rowNum: 4, claim: 'Shared claim', confidence: 0.8, visibility: 'world',
+      notability: 'high', context: 'Original provenance', claimMetric: 'count', claimValue: 8,
+    });
+    expect(facts[1]).toMatchObject({ rowNum: 5, claim: 'Shared claim', visibility: 'world' });
+    expect((await __testing.phaseCVerify(engine, OPTS)).status).toBe('complete');
+  });
+
+  test('does not re-fence soft-expired facts or rewrite a malformed existing fence', async () => {
+    const path = await page();
+    const id = await seedLegacyFact({ entity_slug: slug, fact: 'Withdrawn fact' });
+    await engine.executeRaw('UPDATE facts SET expired_at = now() WHERE id = $1', [id]);
+    expect((await __testing.phaseBFenceFacts(engine, OPTS)).status).toBe('complete');
+    expect(readFileSync(path, 'utf8')).toBe('# Existing notes\n');
+    expect((await engine.executeRaw<{ row_num: number | null }>(
+      'SELECT row_num FROM facts WHERE id = $1', [id],
+    ))[0].row_num).toBeNull();
+
+    const malformed = '# Notes\n\n## Facts\n<!--- gbrain:facts:begin -->\n| not a valid header |\n<!--- gbrain:facts:end -->\n';
+    writeFileSync(path, malformed);
+    await seedLegacyFact({ entity_slug: slug, fact: 'New fact' });
+    expect((await __testing.phaseBFenceFacts(engine, OPTS)).status).toBe('failed');
+    expect(readFileSync(path, 'utf8')).toBe(malformed);
+  });
+});
+
+describe('subdirectory source dirty check', () => {
+  test('ignores sibling changes but refuses changes inside the source', async () => {
+    execFileSync('git', ['-C', brainDir, 'init', '-q']);
+    const sourcePath = join(brainDir, 'source');
+    mkdirSync(sourcePath);
+    writeFileSync(join(brainDir, 'sibling.md'), 'Unrelated change');
+    expect(__testing.isLocalPathDirty(sourcePath)).toBe(false);
+    writeFileSync(join(sourcePath, 'local.md'), 'Local change');
+    expect(__testing.isLocalPathDirty(sourcePath)).toBe(true);
   });
 });
 
@@ -398,7 +591,7 @@ describe('orchestrator end-to-end', () => {
   });
 
   test('dry-run returns 3 phases all skipped (no FS or DB changes)', async () => {
-    await seedLegacyFact({ entity_slug: 'people/alice', fact: 'Should not get fenced' });
+    await seedLegacyFact({ entity_slug: 'people/alice', fact: 'Should not get fenced', withPage: false });
 
     const result = await v0_32_2.orchestrator(DRY_OPTS);
     expect(result.status).toBe('complete');

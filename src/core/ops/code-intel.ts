@@ -10,8 +10,9 @@
 
 import type { Operation, OperationContext } from './contract.ts';
 import { OperationError } from './contract.ts';
-import { resolveCodeIntelScope, routeCodeIntelScope } from './context.ts';
+import { resolveCodeIntelScope, routeCodeIntelScope, readPolicyOpts } from './context.ts';
 import { resolveExcludePrivatePages } from '../search/private-visibility.ts';
+import type { PageReadPolicy } from '../types.ts';
 import type { WalkResult } from '../code-intel/recursive-walk.ts';
 import {
   CODE_CALLERS_DESCRIPTION,
@@ -33,6 +34,21 @@ import {
 // All four are scope:'read'. Source-scoped via ctx.sourceId when set.
 // Both `source_id` and `all_sources` are params so per-call overrides work.
 // ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read policy for code_def / code_refs. Trusted local callers read brain-wide;
+ * remote callers read their resolved grant (upstream readPolicyOpts, which on
+ * this fork keys the pre-seal chunk withhold on the world-only resolver).
+ * Fork (d46b29d10): an explicit `source_id` is checked against the caller's
+ * grants and then narrows the lookup to that one source BEFORE the LIMIT.
+ */
+async function codeLookupPolicy(ctx: OperationContext, sourceIdParam: unknown): Promise<PageReadPolicy> {
+  const policy = await readPolicyOpts(ctx, ctx.remote === false ? {} : undefined);
+  if (typeof sourceIdParam !== 'string') return policy;
+  const { sourceId } = resolveCodeIntelScope(ctx, sourceIdParam);
+  if (sourceId === undefined) return policy;
+  return { ...policy, sourceId, sourceIds: undefined };
+}
 
 const code_callers: Operation = {
   name: 'code_callers',
@@ -93,6 +109,7 @@ const code_callees: Operation = {
       limit,
       allSources,
       sourceId,
+      bareFallback: true, // #4670: honor the documented "bare or qualified" contract
     });
     const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');
     // #4352: thread trust — see code_callers.
@@ -115,23 +132,22 @@ const code_def: Operation = {
   params: {
     symbol: { type: 'string', required: true, description: 'Symbol name (bare token; e.g., parseMarkdown, BrainEngine).' },
     limit: { type: 'number', description: 'Max definition sites returned. Default 20.' },
-    source_id: { type: 'string', description: 'Explicit source filter applied before the result limit; checked against caller grants. Omit for legacy brain-wide lookup.' },
+    source_id: { type: 'string', description: 'Explicit source filter applied before the result limit; checked against caller grants. Omit for the default read scope (brain-wide for trusted local callers, your granted sources for remote callers).' },
     lang: { type: 'string', description: "Filter by content_chunks.language (e.g. 'typescript', 'python')." },
   },
   scope: 'read',
   handler: async (ctx, p) => {
-    const sourceId = typeof p.source_id === 'string'
-      ? resolveCodeIntelScope(ctx, p.source_id).sourceId : undefined;
+    const policy = await codeLookupPolicy(ctx, p.source_id);
     const { findCodeDef } = await import('../../commands/code-def.ts');
     const defs = await findCodeDef(ctx.engine, p.symbol as string, {
+      ...policy,
       limit: (p.limit as number) ?? 20,
       language: (p.lang as string) || undefined,
-      sourceId,
     });
-    // code_def is brain-wide unless source_id is explicit; readiness is 'symbol' grain.
-    const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');
-    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: defs.length, sourceId, remote: ctx.remote });
-    return { symbol: p.symbol as string, count: defs.length, status: readiness.status, ready: readiness.ready, defs };
+    // Caller read scope unless source_id is explicit; readiness is 'symbol' grain.
+    const { resolveCodeReadiness, readinessHint } = await import('../code-graph-readiness.ts');
+    const readiness = await resolveCodeReadiness(ctx.engine, { ...policy, remote: ctx.remote, kind: 'symbol', count: defs.length });
+    return { symbol: p.symbol as string, count: defs.length, status: readiness.status, ready: readiness.ready, hint: readinessHint(readiness), defs };
   },
   cliHints: { name: 'code_def', hidden: true },
 };
@@ -142,25 +158,24 @@ const code_refs: Operation = {
   params: {
     symbol: { type: 'string', required: true, description: 'Symbol to find references to.' },
     limit: { type: 'number', description: 'Max references returned. Default 50.' },
-    source_id: { type: 'string', description: 'Explicit source filter applied before the result limit; checked against caller grants. Omit for legacy brain-wide lookup.' },
+    source_id: { type: 'string', description: 'Explicit source filter applied before the result limit; checked against caller grants. Omit for the default read scope (brain-wide for trusted local callers, your granted sources for remote callers).' },
     lang: { type: 'string', description: "Filter by content_chunks.language." },
     file: { type: 'string', description: 'Exact indexed file path (frontmatter.file), applied before the result limit together with source_id. No glob or regex matching.' },
   },
   scope: 'read',
   handler: async (ctx, p) => {
-    const sourceId = typeof p.source_id === 'string'
-      ? resolveCodeIntelScope(ctx, p.source_id).sourceId : undefined;
+    const policy = await codeLookupPolicy(ctx, p.source_id);
     const { findCodeRefs } = await import('../../commands/code-refs.ts');
     const refs = await findCodeRefs(ctx.engine, p.symbol as string, {
+      ...policy,
       limit: (p.limit as number) ?? 50,
       language: (p.lang as string) || undefined,
-      sourceId,
       file: typeof p.file === 'string' ? p.file : undefined,
     });
-    // code_refs is brain-wide unless source_id is explicit; readiness is 'symbol' grain.
-    const { resolveCodeReadiness } = await import('../code-graph-readiness.ts');
-    const readiness = await resolveCodeReadiness(ctx.engine, { kind: 'symbol', count: refs.length, sourceId, remote: ctx.remote });
-    return { symbol: p.symbol as string, count: refs.length, status: readiness.status, ready: readiness.ready, refs };
+    // Caller read scope unless source_id is explicit; readiness is 'symbol' grain.
+    const { resolveCodeReadiness, readinessHint } = await import('../code-graph-readiness.ts');
+    const readiness = await resolveCodeReadiness(ctx.engine, { ...policy, remote: ctx.remote, kind: 'symbol', count: refs.length });
+    return { symbol: p.symbol as string, count: refs.length, status: readiness.status, ready: readiness.ready, hint: readinessHint(readiness), refs };
   },
   cliHints: { name: 'code_refs', hidden: true },
 };
@@ -208,7 +223,6 @@ const code_blast: Operation = {
   scope: 'read',
   handler: async (ctx, p) => {
     const { runRecursiveWalk } = await import('../code-intel/recursive-walk.ts');
-    const { getCachedOrCompute } = await import('../code-intel/traversal-cache.ts');
     const symbol = p.symbol as string;
     const depth = Math.min((p.depth as number) ?? 5, 8);
     const max_nodes = Math.min((p.max_nodes as number) ?? 200, 200);
@@ -219,21 +233,15 @@ const code_blast: Operation = {
     // exactly preserving pre-fix local behavior.
     const { sourceId: scopedSourceId } = await routeCodeIntelScope(ctx, typeof p.source_id === 'string' ? p.source_id : undefined);
     const sourceId = scopedSourceId ?? ctx.sourceId;
-    const walk = await getCachedOrCompute(
-      ctx.engine,
-      { symbol_qualified: symbol, depth, source_id: sourceId },
-      () => runRecursiveWalk(ctx.engine, symbol, {
+    // Upstream v0.51+ runs the walk uncached (the traversal cache could not
+    // honor the current read policy); the fork's shouldCache guard is moot.
+    const walk = await runRecursiveWalk(ctx.engine, symbol, {
         direction: 'callers',
         depth,
         maxNodes: max_nodes,
         sourceId,
         exact,
-      }),
-      // Never pin not_found/ambiguous: those answers flip when edges or
-      // symbols get (re)built, and a pinned not_found masks the walk's
-      // symbol-edge seed fallback.
-      { shouldCache: (r) => r.result === 'ok' },
-    );
+      });
     return attachWalkReadiness(ctx, walk, sourceId);
   },
   cliHints: { name: 'code_blast', hidden: true },
@@ -252,7 +260,6 @@ const code_flow: Operation = {
   scope: 'read',
   handler: async (ctx, p) => {
     const { runRecursiveWalk } = await import('../code-intel/recursive-walk.ts');
-    const { getCachedOrCompute } = await import('../code-intel/traversal-cache.ts');
     const symbol = p.entry_point as string;
     const depth = Math.min((p.depth as number) ?? 8, 12);
     const max_nodes = Math.min((p.max_nodes as number) ?? 200, 200);
@@ -260,19 +267,13 @@ const code_flow: Operation = {
     // Single trust+grant resolver (see code_blast).
     const { sourceId: scopedSourceId } = await routeCodeIntelScope(ctx, typeof p.source_id === 'string' ? p.source_id : undefined);
     const sourceId = scopedSourceId ?? ctx.sourceId;
-    const walk = await getCachedOrCompute(
-      ctx.engine,
-      { symbol_qualified: symbol + ':flow', depth, source_id: sourceId },
-      () => runRecursiveWalk(ctx.engine, symbol, {
+    const walk = await runRecursiveWalk(ctx.engine, symbol, {
         direction: 'callees',
         depth,
         maxNodes: max_nodes,
         sourceId,
         exact,
-      }),
-      // See code_blast: never pin non-ok envelopes.
-      { shouldCache: (r) => r.result === 'ok' },
-    );
+      });
     return attachWalkReadiness(ctx, walk, sourceId);
   },
   cliHints: { name: 'code_flow', hidden: true },

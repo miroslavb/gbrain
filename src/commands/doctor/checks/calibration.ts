@@ -19,6 +19,7 @@ import {
 // drift from what search actually filters.
 import { resolveHardExcludes, DEFAULT_HARD_EXCLUDES } from '../../../core/search/source-boost.ts';
 import { escapeLikePattern, buildVisibilityClause } from '../../../core/search/sql-ranking.ts';
+import { safeChunksFilter } from '../../../core/search/safe-chunks.ts';
 import type { Check } from '../../doctor.ts';
 
 // --- v0.36.1.0 calibration doctor checks (T12) ---
@@ -49,22 +50,34 @@ import type { Check } from '../../doctor.ts';
  * `src/core/audit-synopsis.ts`. Failure-only audit means low write
  * volume on healthy brains.
  */
-export async function checkContextualRetrievalCoverage(engine: BrainEngine): Promise<Check> {
+export async function checkContextualRetrievalCoverage(
+  engine: BrainEngine,
+  // Source isolation (#4592 class): the remote report threads the caller's
+  // resolved grant here so a source-bound token never reads brain-wide
+  // page counts. Unset = brain-wide (trusted/unrestricted).
+  opts: { sourceIds?: string[] } = {},
+): Promise<Check> {
   try {
     const { MARKDOWN_CHUNKER_VERSION } = await import('../../../core/chunkers/recursive.ts');
-    const rows = await engine.executeRaw<{ chunker_drift: number; mode_null: number }>(
+    const rows = await engine.executeRaw<{ chunker_drift: number; unsealed: number; mode_null: number }>(
       `SELECT
          COUNT(*) FILTER (WHERE chunker_version < $1)::int AS chunker_drift,
+         -- #5004: pages the safe-chunk fence withholds from every remote read.
+         -- Counted separately from drift: the chunker version may move past
+         -- the fence floor, and only the fence has this consequence.
+         COUNT(*) FILTER (WHERE NOT (${safeChunksFilter('pages')}))::int AS unsealed,
          -- #4009 belt+braces: extract receipts are audit artifacts stamped
          -- mode 'none' at write time, but a reindex DB fallback can clear
          -- the stamp — never count them as "never evaluated".
          COUNT(*) FILTER (WHERE contextual_retrieval_mode IS NULL AND type <> 'extract_receipt')::int AS mode_null
        FROM pages
        WHERE page_kind = 'markdown'
-         AND deleted_at IS NULL`,
-      [MARKDOWN_CHUNKER_VERSION],
+         AND deleted_at IS NULL
+         ${opts.sourceIds ? 'AND source_id = ANY($2::text[])' : ''}`,
+      opts.sourceIds ? [MARKDOWN_CHUNKER_VERSION, opts.sourceIds] : [MARKDOWN_CHUNKER_VERSION],
     );
     const chunkerDrift = rows[0]?.chunker_drift ?? 0;
+    const unsealed = rows[0]?.unsealed ?? 0;
     const modeNull = rows[0]?.mode_null ?? 0;
 
     // Synopsis-failures audit summary (best-effort; missing audit file = 0).
@@ -83,7 +96,8 @@ export async function checkContextualRetrievalCoverage(engine: BrainEngine): Pro
       // Audit module unavailable — skip the summary line.
     }
 
-    if (chunkerDrift === 0 && modeNull === 0 && failureSummaryLine === '') {
+    const needsReindex = chunkerDrift > 0 || unsealed > 0 || modeNull > 0;
+    if (!needsReindex && failureSummaryLine === '') {
       return {
         name: 'contextual_retrieval_coverage',
         status: 'ok',
@@ -95,16 +109,16 @@ export async function checkContextualRetrievalCoverage(engine: BrainEngine): Pro
     if (chunkerDrift > 0) {
       parts.push(`${chunkerDrift} page(s) at older chunker_version`);
     }
+    if (unsealed > 0) {
+      parts.push(`${unsealed} page(s) below the safe-chunk index version — withheld from remote/MCP chunk retrieval until reindexed`);
+    }
     if (modeNull > 0) {
       parts.push(`${modeNull} page(s) never evaluated against CR ladder`);
     }
-    const fixHint =
-      chunkerDrift > 0 || modeNull > 0
-        ? ` Run \`gbrain reindex --markdown\` to align.`
-        : '';
+    const fixHint = needsReindex ? ` Run \`gbrain reindex --markdown\` to align.` : '';
     return {
       name: 'contextual_retrieval_coverage',
-      status: chunkerDrift > 0 || modeNull > 0 ? 'warn' : 'ok',
+      status: needsReindex ? 'warn' : 'ok',
       message: `${parts.join('; ')}.${fixHint}${failureSummaryLine}`,
     };
   } catch (e) {
@@ -563,28 +577,6 @@ export async function checkVoiceGateHealth(engine: BrainEngine): Promise<Check> 
   }
 }
 
-/**
- * v0.35.0.0+ reranker_health doctor check.
- *
- * Logic (post-CDX2 review):
- *   1) Read `search.reranker.enabled` first. When disabled and no
- *      failures in window → 'ok: reranker disabled'. Avoids interpreting
- *      "no events" as "broken" when reranker is simply not in use.
- *   2) Walk last 7 days of `~/.gbrain/audit/rerank-failures-*.jsonl`.
- *   3) Auth failures (key present but rejected): ANY single one warns.
- *      v0.48.2: enablement + model resolve through the mode plane; a
- *      reranker that is enabled but NOT ready (key absent / provider past
- *      sunset / unknown model) warns with the paste-ready fix BEFORE any
- *      audit read, and `no_key` / `sunset_short_circuit` skip rows warn.
- *   4) Transient (network/timeout/rate_limit): warn at >=5 in window.
- *      Below that they're noise; reranker fails open anyway.
- *   5) Payload-too-large failures: warn at >=1 (indicates a workload
- *      mismatch that the operator should know about).
- *   6) Budget/pricing failures: warn at >=1 with the rerank pricing surface
- *      and --max-cost escape hatch.
- *
- * Engine-agnostic (file-based + one config-key read).
- */
 export async function checkRerankerHealth(engine: BrainEngine, now: Date = new Date()): Promise<Check> {
   try {
     const {
@@ -606,7 +598,7 @@ export async function checkRerankerHealth(engine: BrainEngine, now: Date = new D
     // Same config plane the CLI hands the gateway (env > file > DB-plane
     // provider keys + provider_base_urls) — shared with `gbrain search modes`
     // through rerankerReadinessForEngine so the two surfaces cannot drift.
-    const { readiness } = await rerankerReadinessForEngine(engine, model, { now });
+    const { readiness } = await rerankerReadinessForEngine(engine, model);
     const ready = readiness.ready;
 
     // A brain with NO embedding provider never reaches the reranker (search
@@ -647,16 +639,18 @@ export async function checkRerankerHealth(engine: BrainEngine, now: Date = new D
             : ''),
       };
     }
-    // Only the RESOLVED model's rows count: audit rows for a retired default
-    // (e.g. the pre-v0.48.2 ZeroEntropy model) must not make a healthy Voyage
-    // reranker warn — or send the operator to verify the wrong key.
     const allRows = readRecentRerankFailures(7).filter((f) => f.model === model);
-    // Skip rows (no_key / sunset_short_circuit) describe processes that ran
-    // unreranked BEFORE the current state; readiness above already proves the
-    // current state, so once ready they are informational, never a warn (a
-    // warn here would outlive the fix by the 7-day audit window).
-    const skipRows = allRows.filter((f) => f.reason === 'no_key' || f.reason === 'sunset_short_circuit');
-    const allFailures = allRows.filter((f) => f.reason !== 'no_key' && f.reason !== 'sunset_short_circuit');
+    // Skip rows describe processes that ran unreranked BEFORE the current
+    // state; readiness above already proves the current state, so once ready
+    // they are informational, never a warn (a warn here would outlive the fix
+    // by the 7-day audit window). v0.56.2 retired the hosted-provider
+    // `sunset_short_circuit` reason from the type, but append-only audit files
+    // written before the upgrade can still carry it — compare as a string so
+    // those historical skip rows are not re-read as live failures.
+    const isSkipRow = (f: { reason: unknown }) =>
+      String(f.reason) === 'no_key' || String(f.reason) === 'sunset_short_circuit';
+    const skipRows = allRows.filter(isSkipRow);
+    const allFailures = allRows.filter((f) => !isSkipRow(f));
     // Fork recovery ledger: a later same-model production rerank that succeeded
     // clears the earlier failure rows, so a healed reranker stops warning
     // before the 7-day audit window rolls past the incident.
@@ -747,7 +741,6 @@ export async function checkRerankerHealth(engine: BrainEngine, now: Date = new D
       const setupHint = unknownFails.some((f) => {
         const summary = String(f.error_summary ?? '');
         return (
-          summary.includes('ZEROENTROPY_API_KEY') ||
           summary.includes('VOYAGE_API_KEY') ||
           summary.toLowerCase().includes('api key')
         );

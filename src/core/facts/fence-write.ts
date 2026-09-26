@@ -55,6 +55,7 @@ import { rollbackFactFile } from './file-rollback.ts';
 import { factPageProjection } from './page-projection.ts';
 import { logStubGuardEvent } from './stub-guard-audit.ts';
 import { selectExactFenceFacts } from './fence-exact-dedup.ts';
+import { assertUnmanagedCanonicalWriter } from '../persistence/maintenance.ts';
 
 /** Resolved source binding for the entity page. */
 export interface FenceTarget {
@@ -281,6 +282,7 @@ export async function writeFactsToFence(
   target: FenceTarget,
   facts: FenceInputFact[],
 ): Promise<FenceWriteResult> {
+  await assertUnmanagedCanonicalWriter(engine, 'direct facts fence write');
   if (target.localPath === null) {
     return { inserted: 0, ids: [], legacyFallback: true };
   }

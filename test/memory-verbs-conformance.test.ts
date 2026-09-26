@@ -64,7 +64,7 @@ beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
-});
+}, 60_000);
 
 afterAll(async () => {
   await engine.disconnect();
@@ -79,7 +79,7 @@ afterAll(async () => {
   __setChatTransportForTests(null);
   __setEmbedTransportForTests(null);
   try { rmSync(home, { recursive: true, force: true }); } catch { /* best-effort */ }
-});
+}, 60_000);
 
 beforeEach(async () => {
   await resetPgliteState(engine);

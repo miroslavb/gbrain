@@ -117,7 +117,6 @@ async function restampVisibilityPosture(newRaw: string | null): Promise<void> {
 export const FILE_PLANE_API_KEYS: readonly string[] = [
   'openai_api_key',
   'anthropic_api_key',
-  'zeroentropy_api_key',
   'openrouter_api_key',
   'together_api_key', // file-plane fold lives in mergedProviderEnv (provider-env.ts)
   'voyage_api_key',

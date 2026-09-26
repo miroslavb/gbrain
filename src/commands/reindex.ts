@@ -42,6 +42,7 @@ import {
   type ReindexHotCursor,
   type ReindexScope,
 } from './reindex-scope.ts';
+import { refreshProjectionStatistics } from '../core/search/projection-statistics.ts';
 
 interface ReindexOpts {
   /** Cap total pages reindexed. Useful for triage runs on huge brains. */
@@ -565,6 +566,7 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
 
   reporter.finish();
 
+  if (reindexed > 0) await refreshProjectionStatistics(engine);
   const pendingAfter = await countPending(engine, selectionScope, !!opts.noEmbed);
   if (failed > 0) setCliExitVerdict(1);
 

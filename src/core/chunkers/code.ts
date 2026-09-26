@@ -137,10 +137,15 @@ import G_ZIG from '../../assets/wasm/grammars/tree-sitter-zig.wasm' with { type:
 // previously-merged file, so the bump forces a re-chunk that recovers the
 // erased symbols.
 // v7: large-node splitting retains declaration/decorator text and its source
-// range before the first body child. Existing affected chunks require recovery.
+// range before the first body child (fork 1812e5a8f); upstream v0.50.2 also
+// shipped the checksum-verified tree-sitter-bash v0.23.3 grammar under v7.
+// Existing affected chunks require recovery.
 export const CHUNKER_VERSION = 7;
 // Version 7 is admitted per file on the host. Do not turn this release into
 // an automatic full-source recovery walk. New/changed files still use v7.
+// Historical Bash sources are recovered explicitly with a source-scoped
+// `sync --full --no-embed` / `reindex-code --force --no-embed`, not by a
+// global sources.chunker_version gate.
 export const AUTOMATIC_CODE_CHUNKER_VERSION = 6;
 
 // Lazy-loaded tree-sitter module (v0.22.x API: Parser is default export)

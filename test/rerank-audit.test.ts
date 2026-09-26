@@ -48,7 +48,7 @@ describe('rerank-audit JSONL round-trip', () => {
   test('log → read returns the same event shape', async () => {
     await withFreshAuditDir(() => {
       logRerankFailure({
-        model: 'zeroentropyai:zerank-2',
+        model: 'voyage:rerank-2.5',
         reason: 'auth',
         query_hash: 'a1b2c3d4',
         doc_count: 30,
@@ -57,7 +57,7 @@ describe('rerank-audit JSONL round-trip', () => {
       const events = readRecentRerankFailures(7);
       expect(events.length).toBe(1);
       expect(events[0]).toMatchObject({
-        model: 'zeroentropyai:zerank-2',
+        model: 'voyage:rerank-2.5',
         reason: 'auth',
         query_hash: 'a1b2c3d4',
         doc_count: 30,
@@ -72,7 +72,7 @@ describe('rerank-audit JSONL round-trip', () => {
     await withFreshAuditDir(() => {
       const longMsg = 'x'.repeat(500);
       logRerankFailure({
-        model: 'zeroentropyai:zerank-2',
+        model: 'voyage:rerank-2.5',
         reason: 'unknown',
         query_hash: 'deadbeef',
         doc_count: 0,
@@ -87,7 +87,7 @@ describe('rerank-audit JSONL round-trip', () => {
     await withFreshAuditDir(() => {
       for (let i = 0; i < 5; i++) {
         logRerankFailure({
-          model: 'zeroentropyai:zerank-2',
+          model: 'voyage:rerank-2.5',
           reason: 'network',
           query_hash: `hash${i}`,
           doc_count: 30,
@@ -106,7 +106,7 @@ describe('rerank-audit JSONL round-trip', () => {
       const filepath = path.join(tmpDir, filename);
       // First write a valid row, then garbage, then another valid row.
       logRerankFailure({
-        model: 'zeroentropyai:zerank-2',
+        model: 'voyage:rerank-2.5',
         reason: 'timeout',
         query_hash: 'good1',
         doc_count: 30,
@@ -115,7 +115,7 @@ describe('rerank-audit JSONL round-trip', () => {
       fs.appendFileSync(filepath, 'not valid json\n');
       fs.appendFileSync(filepath, '{"partial":\n');
       logRerankFailure({
-        model: 'zeroentropyai:zerank-2',
+        model: 'voyage:rerank-2.5',
         reason: 'timeout',
         query_hash: 'good2',
         doc_count: 30,
@@ -186,7 +186,7 @@ describe('ISO-week filename rotation', () => {
     await withFreshAuditDir((tmpDir) => {
       // Write a row in the "current" week's file.
       logRerankFailure({
-        model: 'zeroentropyai:zerank-2',
+        model: 'voyage:rerank-2.5',
         reason: 'auth',
         query_hash: 'now',
         doc_count: 1,
@@ -200,7 +200,7 @@ describe('ISO-week filename rotation', () => {
         lastWeekPath,
         JSON.stringify({
           ts: new Date(Date.now() - 3 * 86400000).toISOString(),
-          model: 'zeroentropyai:zerank-2',
+          model: 'voyage:rerank-2.5',
           reason: 'auth',
           query_hash: 'old',
           doc_count: 1,

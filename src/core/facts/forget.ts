@@ -23,6 +23,7 @@ import { parseFactsFence, renderFactsTable, type ParsedFact } from '../facts-fen
 import { parseMarkdown } from '../markdown.ts';
 import { contentHash } from '../utils.ts';
 import { recordFactWithdrawal, recordFactWithdrawalInTransaction } from './withdrawal.ts';
+import { withdrawnFact } from './withdrawal-overlay.ts';
 
 export interface ForgetFactResult {
   /** True iff the row was found AND a forget was applied (fence or DB). */
@@ -69,13 +70,9 @@ function strikeFenceRow(body: string, rowNum: number, reason: string, today: str
   const parsed = parseFactsFence(body);
   const target = parsed.facts.find(f => f.rowNum === rowNum);
   if (!target) return null;
-  const existingContext = target.context?.trim() ?? '';
-  const newContext = existingContext
-    ? `${existingContext} | forgotten: ${reason}`
-    : `forgotten: ${reason}`;
   const updated: ParsedFact[] = parsed.facts.map(f =>
     f.rowNum === rowNum
-      ? { ...f, active: false, validUntil: today, context: newContext, forgotten: true }
+      ? withdrawnFact(f, today, reason)
       : f,
   );
   const begin = body.indexOf(FENCE_BEGIN);
@@ -141,6 +138,12 @@ export async function forgetFactInFence(
   }
   const row = rows[0];
 
+  const { assertCoordinatedWrite } = await import('../persistence/context.ts');
+  await assertCoordinatedWrite(engine, row.source_id);
+
+  // Fork contract (forget-expired-noop): an already-expired id records no
+  // withdrawal, so a live re-assertion of the same claim stays active. The
+  // withdrawal commits below together with its canonical page projection.
   if (row.expired_at !== null) {
     return { ok: false, path: 'already_expired', reason };
   }
@@ -168,7 +171,7 @@ export async function forgetFactInFence(
   // holds the same per-page lock the fence writers do (`locked` = the fence
   // tier is calling from inside its own withPageLock).
   const legacyExpire = async (locked = false): Promise<ForgetFactResult> => {
-    await recordFactWithdrawal(engine, factId, row.source_id, opts.worldOnly === true);
+    await recordFactWithdrawal(engine, factId, row.source_id, opts.worldOnly === true, { strict: true });
     const ok = true;
     if (ok && row.source_markdown_slug !== null) {
       const slug = row.source_markdown_slug;
@@ -240,7 +243,7 @@ export async function forgetFactInFence(
       // A failure rolls back withdrawal plus only our own file bytes.
       try {
         await engine.transaction(async tx => {
-          await recordFactWithdrawalInTransaction(tx, factId, row.source_id, opts.worldOnly === true);
+          await recordFactWithdrawalInTransaction(tx, factId, row.source_id, opts.worldOnly === true, { strict: true });
           await tx.executeRaw(
             `UPDATE facts SET valid_until = $1
              WHERE id = $2 AND source_id = $3`,

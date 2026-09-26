@@ -31,7 +31,9 @@ import { isUndefinedTableError } from '../utils.ts';
  *
  * Resolution order:
  *   1. Verify a qualified canonical slug first; then a unique curated alias;
- *      then an exact root slug. Ambiguous aliases throw before fuzzy matching.
+ *      then an exact root slug; then one exact hyphenated basename under a
+ *      known entity directory (several → deterministic fallback, never a
+ *      guess). Ambiguous aliases throw before fuzzy matching.
  *   2. Resolve a bare name only when prefix expansion finds one candidate.
  *   3. For multi-token input, require a high-specificity fuzzy match against
  *      pages.slug + pages.title within the source (case-insensitive).
@@ -71,6 +73,10 @@ export async function resolveEntitySlug(
     const exact = await tryExactSlug(engine, source_id, trimmed);
     if (exact) return exact;
   }
+
+  const basenames = await findExactBasenameCandidates(engine, source_id, trimmed);
+  if (basenames.length === 1) return basenames[0].slug;
+  if (basenames.length > 1) return fallbackSlugify(trimmed);
 
   // 2. Prefix-expansion match: when the input looks like a bare first name
   //    (no slash, no prefix, slugifies to a single short token), try
@@ -174,6 +180,25 @@ function isBareName(raw: string): boolean {
 // doc would trip the ambiguity gate and re-break bare-token resolution.
 const PREFIX_EXPANSION_DIRS = ['people', 'companies', 'hosts', 'projects'] as const;
 
+async function findExactBasenameCandidates(
+  engine: BrainEngine,
+  source_id: string,
+  raw: string,
+): Promise<Array<{ slug: string }>> {
+  const token = slugify(raw);
+  if (raw.includes('/') || !token.includes('-')) return [];
+  try {
+    return await engine.executeRaw<{ slug: string }>(
+      `SELECT slug FROM pages
+        WHERE source_id = $1 AND deleted_at IS NULL AND slug = ANY($2::text[])
+        LIMIT 2`,
+      [source_id, [...PREFIX_EXPANSION_DIRS, 'concepts'].map(dir => `${dir}/${token}`)],
+    );
+  } catch {
+    return [];
+  }
+}
+
 /**
  * v0.40.2.0 — resolution-source-tagged variant for trajectory routing.
  *
@@ -216,6 +241,10 @@ export async function resolveEntitySlugWithSource(
     const exact = await tryExactSlug(engine, source_id, trimmed);
     if (exact) return { slug: exact, source: 'exact_page' };
   }
+
+  const basenames = await findExactBasenameCandidates(engine, source_id, trimmed);
+  if (basenames.length === 1) return { slug: basenames[0].slug, source: 'fuzzy_match' };
+  if (basenames.length > 1) return { slug: fallbackSlugify(trimmed), source: 'fallback_slugify' };
 
   if (isBareName(trimmed)) {
     const expanded = await tryUnambiguousPrefixExpansion(engine, source_id, slugify(trimmed));

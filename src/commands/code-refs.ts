@@ -21,11 +21,12 @@
 import type { BrainEngine } from '../core/engine.ts';
 import { errorFor, serializeError } from '../core/errors.ts';
 import { resolveCodeReadiness, readinessHint } from '../core/code-graph-readiness.ts';
-import { resolveCliCodeScope, positionalArgs, parseFlag, pushSourcePredicate } from './code-scope.ts';
+import { resolveCliCodeScope, positionalArgs, parseFlag } from './code-scope.ts';
+import { codeReadFilter, type CodeReadScope } from '../core/code-intel/read-scope.ts';
 
 export interface CodeRefResult {
-  source_id: string;
   slug: string;
+  source_id: string;
   file: string | null;
   language: string | null;
   symbol_name: string | null;
@@ -38,7 +39,7 @@ export interface CodeRefResult {
 export async function findCodeRefs(
   engine: BrainEngine,
   symbol: string,
-  opts: { limit?: number; language?: string; sourceId?: string; allSources?: boolean; file?: string } = {},
+  opts: { limit?: number; language?: string; file?: string } & CodeReadScope = {},
 ): Promise<CodeRefResult[]> {
   const limit = opts.limit ?? 50;
   const params: unknown[] = [`%${symbol}%`];
@@ -47,36 +48,38 @@ export async function findCodeRefs(
     params.push(opts.language);
     whereLang = `AND cc.language = $${params.length}`;
   }
-  const whereSource = pushSourcePredicate(params, opts);
-  let whereFile = "";
+  const whereSource = `AND ${codeReadFilter(params, opts)}`;
+  // Fork (1812e5a8f): an exact file filter is applied in SQL before LIMIT, so a
+  // busy symbol cannot push the requested file's references out of the top-k.
+  let whereFile = '';
   if (opts.file !== undefined) {
     params.push(opts.file);
     whereFile = `AND p.frontmatter->>'file' = $${params.length}`;
   }
   params.push(limit);
   const rows = await engine.executeRaw<{
-    source_id: string; slug: string; file: string | null; language: string | null;
+    slug: string; source_id: string; file: string | null; language: string | null;
     symbol_name: string | null; symbol_type: string | null;
     start_line: number | null; end_line: number | null;
     chunk_text: string;
   }>(
-    `SELECT p.source_id, p.slug, (p.frontmatter->>'file') AS file, cc.language,
+    `SELECT p.slug, p.source_id, (p.frontmatter->>'file') AS file, cc.language,
             cc.symbol_name, cc.symbol_type, cc.start_line, cc.end_line,
             cc.chunk_text
      FROM content_chunks cc
      JOIN pages p ON p.id = cc.page_id
-     WHERE p.page_kind = 'code' AND p.deleted_at IS NULL
+     WHERE p.page_kind = 'code'
        AND cc.chunk_text ILIKE $1
        ${whereLang}
        ${whereSource}
        ${whereFile}
-     ORDER BY p.slug, cc.start_line NULLS LAST
+     ORDER BY p.slug, cc.start_line NULLS LAST, p.source_id
      LIMIT $${params.length}`,
     params,
   );
   return rows.map((r) => ({
-    source_id: r.source_id,
     slug: r.slug,
+    source_id: r.source_id,
     file: r.file,
     language: r.language,
     symbol_name: r.symbol_name,
@@ -129,6 +132,7 @@ export async function runCodeRefs(engine: BrainEngine, args: string[]): Promise<
     const readiness = await resolveCodeReadiness(engine, {
       kind: 'symbol', count: results.length, sourceId, allSources, remote: false,
     });
+    const hint = readinessHint(readiness);
     if (shouldEmitJson(args)) {
       console.log(JSON.stringify({
         symbol: sym,
@@ -137,16 +141,15 @@ export async function runCodeRefs(engine: BrainEngine, args: string[]): Promise<
         count: results.length,
         status: readiness.status,
         ready: readiness.ready,
+        ...(hint ? { hint } : {}),
         ...(readiness.scoped_source_id ? { scoped_source_id: readiness.scoped_source_id } : {}),
         results,
       }, null, 2));
     } else {
       if (results.length === 0) {
         console.log(!allSources && sourceId
-          ? `No references found for "${sym}" in source '${sourceId}'. Try --all-sources to search every source.`
+          ? `No references found for "${sym}" in source '${sourceId}'.${!['projection_pending', 'unknown'].includes(readiness.status) ? ' Try --all-sources to search every source.' : ''}`
           : `No references found for "${sym}"`);
-        const hint = readinessHint(readiness);
-        if (hint) console.log(hint);
       } else {
         console.log(`Found ${results.length} reference(s) to "${sym}":`);
         for (const r of results) {
@@ -155,6 +158,7 @@ export async function runCodeRefs(engine: BrainEngine, args: string[]): Promise<
           console.log(`  ${r.file || r.slug}${loc}${sig}`);
         }
       }
+      if (hint) console.log(hint);
     }
   } catch (e: unknown) {
     const env = serializeError(e);

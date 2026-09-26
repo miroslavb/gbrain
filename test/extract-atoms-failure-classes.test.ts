@@ -16,11 +16,11 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import {
-  runPhaseExtractAtoms,
   discoverExtractablePages,
   parseAtomsOutcome,
   MAX_DETERMINISTIC_FAILURES,
 } from '../src/core/cycle/extract-atoms.ts';
+import { runPhaseWithStoredPageFixtures as runPhaseExtractAtoms } from './helpers/extract-atoms-page-fixtures.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import type { ChatResult, ChatOpts } from '../src/core/ai/gateway.ts';
 import type { AtomSemanticValidator } from '../src/core/cycle/atom-safety.ts';
@@ -74,6 +74,14 @@ async function frontmatterOf(slug: string): Promise<Record<string, unknown>> {
   const fm = rows[0]?.frontmatter;
   if (fm == null) return {};
   return typeof fm === 'string' ? JSON.parse(fm) : fm;
+}
+
+async function stateOf(slug: string) {
+  const [row] = await engine.executeRaw<{ fail_count: number; content_hash: string; tombstoned: boolean }>(
+    `SELECT scan.* FROM extract_atoms_page_state scan JOIN pages p ON p.id=scan.page_id
+      JOIN sources s ON s.id=p.source_id AND s.incarnation=scan.source_incarnation
+      WHERE p.source_id='default' AND p.slug=$1 AND scan.content_hash=p.content_hash`, [slug]);
+  return row;
 }
 
 describe('parseAtomsOutcome — typed parse (gbrain#4148)', () => {
@@ -130,8 +138,11 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     expect(result.details.pages_processed).toBe(0);
     const fm = await frontmatterOf('note/m1');
     expect(fm.atoms_scan_hash).toBeUndefined(); // the pre-fix bug: this was stamped
-    expect(Number(fm.atoms_fail_count)).toBe(1);
-    expect(fm.atoms_fail_hash).toBe(HASH_A);
+    expect(fm.atoms_fail_count).toBeUndefined();
+    expect(fm.atoms_fail_hash).toBeUndefined();
+    expect((await stateOf('note/m1'))?.fail_count).toBe(1);
+    expect((await stateOf('note/m1'))?.content_hash).toBe(HASH_A);
+    expect((await stateOf('note/m1'))?.tombstoned).toBe(false);
   });
 
   test(`tombstones only after ${MAX_DETERMINISTIC_FAILURES} consecutive same-content malformed failures`, async () => {
@@ -146,14 +157,18 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
       const r = await runPhaseExtractAtoms(engine, opts);
       expect(r.details.tombstoned_for_failures).toEqual([]);
       const fm = await frontmatterOf('note/m2');
-      expect(Number(fm.atoms_fail_count)).toBe(i);
+      expect((await stateOf('note/m2'))?.fail_count).toBe(i);
+      expect((await stateOf('note/m2'))?.tombstoned).toBe(false);
+      expect(fm.atoms_fail_count).toBeUndefined();
       expect(fm.atoms_scan_hash).toBeUndefined();
     }
     const final = await runPhaseExtractAtoms(engine, opts);
     expect(final.details.tombstoned_for_failures).toEqual(['note/m2']);
     const fm = await frontmatterOf('note/m2');
-    expect(Number(fm.atoms_fail_count)).toBe(MAX_DETERMINISTIC_FAILURES);
-    expect(fm.atoms_scan_hash).toBe(HASH_A); // backlog floor clears
+    expect((await stateOf('note/m2'))?.fail_count).toBe(MAX_DETERMINISTIC_FAILURES);
+    expect((await stateOf('note/m2'))?.content_hash).toBe(HASH_A);
+    expect((await stateOf('note/m2'))?.tombstoned).toBe(true);
+    expect(fm.atoms_scan_hash).toBeUndefined();
   });
 
   test('a content edit resets the failure streak (count is hash-keyed)', async () => {
@@ -166,11 +181,13 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     });
     await runPhaseExtractAtoms(engine, mk(HASH_A));
     await runPhaseExtractAtoms(engine, mk(HASH_A));
-    expect(Number((await frontmatterOf('note/m3')).atoms_fail_count)).toBe(2);
+    expect((await stateOf('note/m3'))?.fail_count).toBe(2);
     await runPhaseExtractAtoms(engine, mk('b'.repeat(16))); // edited content
     const fm = await frontmatterOf('note/m3');
-    expect(Number(fm.atoms_fail_count)).toBe(1);
-    expect(fm.atoms_fail_hash).toBe('b'.repeat(16));
+    expect((await stateOf('note/m3'))?.fail_count).toBe(1);
+    expect((await stateOf('note/m3'))?.content_hash).toBe('b'.repeat(16));
+    expect(fm.atoms_fail_count).toBeUndefined();
+    expect(fm.atoms_fail_hash).toBeUndefined();
   });
 
   test('transient provider errors are retryable: no count, no tombstone', async () => {
@@ -186,6 +203,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const fm = await frontmatterOf('note/t1');
     expect(fm.atoms_fail_count).toBeUndefined();
     expect(fm.atoms_scan_hash).toBeUndefined();
+    expect(await stateOf('note/t1')).toBeUndefined();
   });
 
   test(`all-quality-rejected batches tombstone only after ${MAX_DETERMINISTIC_FAILURES} same-content attempts`, async () => {
@@ -213,18 +231,24 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     for (let i = 1; i < MAX_DETERMINISTIC_FAILURES; i++) {
       const result = await runPhaseExtractAtoms(engine, opts);
       expect(result.details.tombstoned_for_quality_rejections).toEqual([]);
+      expect(result.details.rejected_by_reason).toEqual({ semantic_atomicity: 1 });
+      // Fork v0.58: the bounded counter lives in extract_atoms_page_state, not
+      // frontmatter — a frontmatter write would unseal the source page.
       const fm = await frontmatterOf('note/q1');
-      expect(Number(fm.atoms_reject_count)).toBe(i);
-      expect(fm.atoms_reject_hash).toBe(HASH_A);
-      expect(fm.atoms_reject_last_reasons).toEqual({ semantic_atomicity: 1 });
+      expect(fm.atoms_reject_count).toBeUndefined();
       expect(fm.atoms_scan_hash).toBeUndefined();
+      expect((await stateOf('note/q1'))?.fail_count).toBe(i);
+      expect((await stateOf('note/q1'))?.content_hash).toBe(HASH_A);
+      expect((await stateOf('note/q1'))?.tombstoned).toBe(false);
     }
 
     const final = await runPhaseExtractAtoms(engine, opts);
     expect(final.details.tombstoned_for_quality_rejections).toEqual(['note/q1']);
     const fm = await frontmatterOf('note/q1');
-    expect(Number(fm.atoms_reject_count)).toBe(MAX_DETERMINISTIC_FAILURES);
-    expect(fm.atoms_scan_hash).toBe(HASH_A);
+    expect(fm.atoms_reject_count).toBeUndefined();
+    expect(fm.atoms_scan_hash).toBeUndefined();
+    expect((await stateOf('note/q1'))?.fail_count).toBe(MAX_DETERMINISTIC_FAILURES);
+    expect((await stateOf('note/q1'))?.tombstoned).toBe(true);
   });
 
   test('semantic-validator operational failures never consume the quality retry allowance', async () => {
@@ -240,6 +264,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const fm = await frontmatterOf('note/q2');
     expect(fm.atoms_reject_count).toBeUndefined();
     expect(fm.atoms_scan_hash).toBeUndefined();
+    expect(await stateOf('note/q2')).toBeUndefined();
   });
 });
 
@@ -276,6 +301,7 @@ describe('runPhaseExtractAtoms — global-error halt (#3044)', () => {
       const fm = await frontmatterOf(slug);
       expect(fm.atoms_fail_count).toBeUndefined();
       expect(fm.atoms_scan_hash).toBeUndefined();
+      expect(await stateOf(slug)).toBeUndefined();
     }
   });
 
@@ -298,6 +324,7 @@ describe('runPhaseExtractAtoms — global-error halt (#3044)', () => {
     expect(failures[2].error).toContain('3 consecutive rate_limit errors');
     for (const slug of ['note/r1', 'note/r2', 'note/r3', 'note/r4']) {
       expect((await frontmatterOf(slug)).atoms_fail_count).toBeUndefined();
+      expect(await stateOf(slug)).toBeUndefined();
     }
   });
 
@@ -436,7 +463,14 @@ describe('runPhaseExtractAtoms — completion receipt (gbrain#4148)', () => {
     const atomPage = await engine.getPage(atoms[0].slug, { sourceId: 'default' });
     expect(atomPage).not.toBeNull();
     expect(atomPage!.content_hash).toBe(contentHash(atomPage!));
-    expect((await frontmatterOf('note/ok1')).atoms_scan_hash).toBe(HASH_A);
+    expect((await stateOf('note/ok1'))?.content_hash).toBe(HASH_A);
+    expect((await stateOf('note/ok1'))?.tombstoned).toBe(true);
+    expect((await frontmatterOf('note/ok1')).atoms_scan_hash).toBeUndefined();    // v0.51+ revisions: the receipt flip must not unseal the atom's text
+    // projection, or the completed atom drops out of search.
+    const [sealState] = await engine.executeRaw<{ sealed: boolean | null }>(
+      `SELECT (text_projection_revision = knowledge_revision) AS sealed FROM pages
+        WHERE source_id = 'default' AND slug = $1`, [atoms[0].slug]);
+    expect(sealState?.sealed).toBe(true);
   });
 
   test('a pending (partial-persist) atom row does NOT mark the source page done for discovery', async () => {

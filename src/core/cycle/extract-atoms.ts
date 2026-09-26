@@ -85,6 +85,10 @@ import {
 import { resolveTierDefault } from '../model-config.ts';
 import { finalizeAtomCompletionReceipt } from './atom-completion-receipt.ts';
 import { atomProcessingWriter } from './atom-processing.ts';
+import { managedAtomSession, readAtomOrigin, resumeManagedAtoms, publishManagedAtoms, MANAGED_ATOM_DISCOVERY_SQL, type AtomOrigin } from '../persistence/atom-maintenance.ts';
+import { OperationError } from '../ops/contract.ts';
+import type { WriteReceipt } from '../persistence/types.ts';
+import { AtomPageStateError, writeAtomPageState, readAtomPageIdentity, type AtomPageInput } from './extract-atoms-page-state.ts';
 
 const DEFAULT_BUDGET_USD = 0.3;
 // Fork's DEFAULT_EXTRACT_ATOMS_MODEL is intentionally gone: upstream #3813
@@ -195,6 +199,12 @@ const MIN_PAGE_CHARS_FOR_EXTRACTION = 500;
 const RAW_SOURCE_HOLDER_EXCLUSION_SQL =
   `AND NOT (p.type = 'source' AND COALESCE(p.frontmatter ? 'raw', false))`;
 
+const PAGE_SCAN_STATE_EXCLUSION_SQL = `AND NOT EXISTS (
+  SELECT 1 FROM extract_atoms_page_state scan
+  WHERE scan.source_incarnation=(SELECT s.incarnation FROM sources s WHERE s.id=p.source_id)
+    AND scan.page_id=p.id AND scan.content_hash=p.content_hash AND scan.tombstoned
+)`;
+
 /**
  * Pure allowlist policy: the legacy floor UNION the pack's `extractable: true`
  * types, MINUS synthesis outputs. Exported for unit tests; keep I/O-free.
@@ -228,6 +238,7 @@ async function resolveExtractableTypes(): Promise<string[]> {
 }
 
 export interface ExtractAtomsOpts {
+  _managedRetry?: { requestId: string; retryId: string };
   brainDir?: string;
   sourceId?: string;
   dryRun?: boolean;
@@ -382,12 +393,6 @@ prefer a label you already used over coining a near-synonym.
 
 Output ONLY the JSON array, no prose.`;
 
-interface DiscoveredPage {
-  slug: string;
-  content: string;
-  contentHash: string;
-}
-
 /**
  * v0.41.2.1 (D2) — single-SQL discovery + idempotency filter for brain
  * pages. Discovers extractable pages whose content_hash has no
@@ -416,11 +421,13 @@ export async function discoverExtractablePages(
   sourceId: string,
   affectedSlugs?: string[],
   limit: number = PAGE_DISCOVERY_BUDGET,
-): Promise<DiscoveredPage[]> {
+): Promise<AtomPageInput[]> {
   const optInPolicySql = await resolveAtomOptInPolicySql(engine);
   const hasFilter = Array.isArray(affectedSlugs) && affectedSlugs.length > 0;
   const sql = `
-    SELECT p.slug,
+    SELECT p.id, p.knowledge_revision,
+           (SELECT s.incarnation FROM sources s WHERE s.id=p.source_id) AS source_incarnation,
+           p.slug,
            p.compiled_truth,
            p.content_hash
     FROM pages p
@@ -433,7 +440,8 @@ export async function discoverExtractablePages(
       ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
       ${optInPolicySql}
       AND length(COALESCE(p.compiled_truth, '')) >= $3
-      AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
+      ${MANAGED_ATOM_DISCOVERY_SQL}
+      ${PAGE_SCAN_STATE_EXCLUSION_SQL}
       ${hasFilter ? "AND p.slug = ANY($5::text[])" : ''}
       AND NOT EXISTS (
         SELECT 1
@@ -441,6 +449,7 @@ export async function discoverExtractablePages(
         WHERE atom.type = 'atom'
           AND atom.source_id = $1
           AND atom.frontmatter->>'source_hash' = substring(p.content_hash from 1 for 16)
+          AND COALESCE(atom.frontmatter->>'managed_extraction', '') <> 'true'
           AND atom.deleted_at IS NULL
       )
     ORDER BY p.updated_at DESC
@@ -456,6 +465,9 @@ export async function discoverExtractablePages(
 
   try {
     const rows = await engine.executeRaw<{
+      id: number;
+      knowledge_revision: string;
+      source_incarnation: string;
       slug: string;
       compiled_truth: string;
       content_hash: string;
@@ -464,6 +476,7 @@ export async function discoverExtractablePages(
       slug: r.slug,
       content: r.compiled_truth,
       contentHash: r.content_hash,
+      identity: { pageId: r.id, sourceIncarnation: r.source_incarnation, revision: r.knowledge_revision },
     }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -509,11 +522,13 @@ export async function countExtractAtomsBacklog(
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
            ${optInPolicySql}
            AND length(COALESCE(p.compiled_truth, '')) >= $3
-           AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
+           ${MANAGED_ATOM_DISCOVERY_SQL}
+           ${PAGE_SCAN_STATE_EXCLUSION_SQL}
            AND NOT EXISTS (
              SELECT 1 FROM pages atom
              WHERE atom.type = 'atom' AND atom.source_id = $1
                AND atom.frontmatter->>'source_hash' = substring(p.content_hash from 1 for 16)
+               AND COALESCE(atom.frontmatter->>'managed_extraction', '') <> 'true'
                AND atom.deleted_at IS NULL
            )`
       : `SELECT COUNT(*) AS cnt FROM pages p
@@ -525,11 +540,13 @@ export async function countExtractAtomsBacklog(
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
            ${optInPolicySql}
            AND length(COALESCE(p.compiled_truth, '')) >= $2
-           AND COALESCE(p.frontmatter->>'atoms_scan_hash', '') <> substring(p.content_hash from 1 for 16)
+           ${MANAGED_ATOM_DISCOVERY_SQL}
+           ${PAGE_SCAN_STATE_EXCLUSION_SQL}
            AND NOT EXISTS (
              SELECT 1 FROM pages atom
              WHERE atom.type = 'atom' AND atom.source_id = p.source_id
                AND atom.frontmatter->>'source_hash' = substring(p.content_hash from 1 for 16)
+               AND COALESCE(atom.frontmatter->>'managed_extraction', '') <> 'true'
                AND atom.deleted_at IS NULL
            )`;
     const extractableTypes = await resolveExtractableTypes();
@@ -587,6 +604,7 @@ export async function atomsExistingForHashes(
         WHERE type = 'atom'
           AND source_id = $1
           AND deleted_at IS NULL
+          AND COALESCE(frontmatter->>'managed_extraction', '') <> 'true'
           AND frontmatter->>'source_hash' = ANY($2::text[])`,
       [sourceId, contentHash16s],
     );
@@ -664,6 +682,8 @@ export async function runPhaseExtractAtoms(
 ): Promise<PhaseResult> {
   const sourceId = opts.sourceId ?? 'default';
   const chat = opts._chat ?? gatewayChat;
+  const managed = await managedAtomSession(engine, sourceId, opts._managedRetry);
+  const writeRequests: WriteReceipt[] = [];
 
   // 1a. Get transcripts (test seam OR production discovery).
   //     v0.41.2.1: config loader switched to loadConfigWithEngine() so the
@@ -709,9 +729,11 @@ export async function runPhaseExtractAtoms(
   // 1b. Get pages (test seam OR production discovery).
   //     _pages === undefined triggers discovery; _pages: [] suppresses it
   //     deliberately (transcript-only regression tests).
-  let pages: Array<{ slug: string; content: string; contentHash: string }>;
+  let pages: AtomPageInput[];
   if (opts._pages !== undefined) {
-    pages = opts._pages;
+    pages = await Promise.all(opts._pages.map(async page => ({
+      ...page, identity: await readAtomPageIdentity(engine, sourceId, page),
+    })));
   } else {
     pages = await discoverExtractablePages(
       engine,
@@ -766,7 +788,7 @@ export async function runPhaseExtractAtoms(
   //    forever while atoms keep getting extracted from transcripts.
   type WorkItem =
     | { kind: 'transcript'; filePath: string; content: string; contentHash: string }
-    | { kind: 'page'; slug: string; content: string; contentHash: string };
+    | ({ kind: 'page' } & AtomPageInput);
 
   const seenHashes = new Set<string>();
   const transcriptItems: WorkItem[] = [];
@@ -1023,76 +1045,49 @@ export async function runPhaseExtractAtoms(
   // say are "retryable, never counted" — see that regex's doc comment.
   let hardFailureCount = 0;
 
-  /** Stamp the zero-yield/complete tombstone (hash-keyed; edits re-eligibilize). */
-  async function stampAtomsScanHash(item: { slug: string; contentHash: string }): Promise<void> {
-    try {
-      await engine.executeRaw(
-        `UPDATE pages
-            SET frontmatter = frontmatter || jsonb_build_object('atoms_scan_hash', $1::text)
-          WHERE source_id = $2 AND slug = $3 AND deleted_at IS NULL`,
-        [item.contentHash.slice(0, 16), sourceId, item.slug],
-      );
-    } catch { /* fail-soft: page stays rediscoverable */ }
+  async function stampAtomsScanHash(item: AtomPageInput): Promise<void> {
+    await writeAtomPageState(engine, sourceId, item, 'complete');
   }
 
   /**
    * Durable per-item failure count, keyed to the CURRENT content hash so a
    * content edit resets the streak. Returns the new consecutive count, or
-   * null for transcripts / on write failure (never blocks the phase).
+   * null for transcripts / managed brains / on write failure (never blocks
+   * the phase).
+   *
+   * Fork note (v0.58 merge): the page counter now lives in upstream's
+   * `extract_atoms_page_state` table (fork migration 171, backfilled from the
+   * legacy `atoms_fail_*` frontmatter) instead of frontmatter, so recording a
+   * failure no longer rewrites the page's DB metadata. Transcripts keep the
+   * fork's no-tombstone semantics.
    */
-  async function recordPageFailureCount(item: { kind: string; slug?: string; contentHash: string }): Promise<number | null> {
-    if (item.kind !== 'page' || !item.slug || opts.dryRun) return null;
+  async function recordPageFailureCount(item: WorkItem): Promise<number | null> {
+    if (item.kind !== 'page' || !item.slug || opts.dryRun || managed) return null;
     try {
-      const rows = await engine.executeRaw<{ cnt: number | string }>(
-        `UPDATE pages
-            SET frontmatter = frontmatter
-              || jsonb_build_object('atoms_fail_hash', $1::text)
-              || jsonb_build_object('atoms_fail_count',
-                   CASE WHEN COALESCE(frontmatter->>'atoms_fail_hash', '') = $1::text
-                        THEN COALESCE((frontmatter->>'atoms_fail_count')::int, 0) + 1
-                        ELSE 1 END)
-          WHERE source_id = $2 AND slug = $3 AND deleted_at IS NULL
-          RETURNING (frontmatter->>'atoms_fail_count')::int AS cnt`,
-        [item.contentHash.slice(0, 16), sourceId, item.slug],
-      );
-      const cnt = rows[0]?.cnt;
-      return cnt == null ? null : Number(cnt);
-    } catch {
+      return await writeAtomPageState(engine, sourceId, item, 'failure');
+    } catch (err) {
+      const error = err instanceof AtomPageStateError ? err.message : new AtomPageStateError('storage').message;
+      console.error(`[extract_atoms] ${item.slug}: ${error}`);
       return null;
     }
   }
 
   /**
    * Count a completed extraction whose candidates all failed deterministic or
-   * semantic QUALITY gates. This is deliberately separate from malformed
-   * output and provider/validator operational failures: quality rejects get
-   * bounded retries on unchanged content, while operational failures remain
-   * retryable. Only stable aggregate reason codes are persisted.
+   * semantic QUALITY gates. This is deliberately separate from provider /
+   * validator operational failures, which are never charged and stay
+   * retryable. Quality rejects get bounded retries on unchanged content.
+   *
+   * Fork note (v0.58 merge): the counter moved from `atoms_reject_*`
+   * frontmatter into the hash-keyed `extract_atoms_page_state.fail_count`
+   * shared with malformed output. Since v0.51 any raw frontmatter UPDATE
+   * advances `knowledge_revision` and unseals the page's text projection,
+   * which hides the SOURCE page from search until it is re-imported — a scan
+   * counter must never do that. The per-reason detail stays in the phase
+   * result (`rejected_by_reason`) and the extract receipt.
    */
-  async function recordPageQualityRejectionCount(
-    item: { kind: string; slug?: string; contentHash: string },
-    reasons: Record<string, number>,
-  ): Promise<number | null> {
-    if (item.kind !== 'page' || !item.slug || opts.dryRun) return null;
-    try {
-      const rows = await engine.executeRaw<{ cnt: number | string }>(
-        `UPDATE pages
-            SET frontmatter = frontmatter
-              || jsonb_build_object('atoms_reject_hash', $1::text)
-              || jsonb_build_object('atoms_reject_count',
-                   CASE WHEN COALESCE(frontmatter->>'atoms_reject_hash', '') = $1::text
-                        THEN COALESCE((frontmatter->>'atoms_reject_count')::int, 0) + 1
-                        ELSE 1 END)
-              || jsonb_build_object('atoms_reject_last_reasons', $4::text::jsonb)
-          WHERE source_id = $2 AND slug = $3 AND deleted_at IS NULL
-          RETURNING (frontmatter->>'atoms_reject_count')::int AS cnt`,
-        [item.contentHash.slice(0, 16), sourceId, item.slug, JSON.stringify(reasons)],
-      );
-      const cnt = rows[0]?.cnt;
-      return cnt == null ? null : Number(cnt);
-    } catch {
-      return null;
-    }
+  async function recordPageQualityRejectionCount(item: WorkItem): Promise<number | null> {
+    return recordPageFailureCount(item);
   }
 
   await withBudgetTracker(budgetTracker, async () => {
@@ -1111,6 +1106,11 @@ export async function runPhaseExtractAtoms(
     const itemRejectedByReason: Record<string, number> = {};
     let itemGateOperationalFailure = false;
     try {
+      const origin: AtomOrigin | null = managed ? await readAtomOrigin(engine, managed, item) : null;
+      if (!opts.dryRun && managed && origin && await resumeManagedAtoms(engine, managed, origin)) {
+        duplicatesSkipped++;
+        continue;
+      }
       const result = await chat({
         model: activeExtractModel,
         system: EXTRACT_PROMPT,
@@ -1149,6 +1149,7 @@ export async function runPhaseExtractAtoms(
       if (!parseOutcome.ok) {
         malformedOutputs++;
         hardFailureCount++;
+        if (!opts.dryRun && managed && origin) writeRequests.push(...await publishManagedAtoms(engine, managed, origin, [], parseOutcome.reason));
         const failCount = await recordPageFailureCount(item);
         failures.push({
           source: originLabel,
@@ -1181,8 +1182,9 @@ export async function runPhaseExtractAtoms(
         // Only stamped after a SUCCESSFUL chat call — LLM failures take the
         // catch path below and stay retryable, and malformed output is
         // counted above (gbrain#4148), never stamped as success.
-        if (!opts.dryRun && item.kind === 'page') {
-          await stampAtomsScanHash(item);
+        if (!opts.dryRun) {
+          if (managed && origin) writeRequests.push(...await publishManagedAtoms(engine, managed, origin, []));
+          else if (item.kind === 'page') await stampAtomsScanHash(item);
         }
         if (item.kind === 'transcript') transcriptsProcessed++;
         else pagesProcessed++;
@@ -1265,7 +1267,7 @@ export async function runPhaseExtractAtoms(
           !opts.dryRun &&
           item.kind === 'page'
         ) {
-          const rejectCount = await recordPageQualityRejectionCount(item, itemRejectedByReason);
+          const rejectCount = await recordPageQualityRejectionCount(item);
           if (rejectCount != null && rejectCount >= MAX_DETERMINISTIC_FAILURES) {
             await stampAtomsScanHash(item);
             tombstonedForQualityRejections.push(item.slug);
@@ -1289,6 +1291,7 @@ export async function runPhaseExtractAtoms(
         // deterministic slugs upsert instead of duplicating.
         const hash16 = item.contentHash.slice(0, 16);
         const importedSlugs: string[] = [];
+        const managedAtoms: Array<{ slug: string; content: string; links: LinkBatchInput[] }> = [];
         // #3961: provenance edges source-page → atom, accumulated during the
         // atom loop and flushed AFTER the completion-receipt flip so a
         // partially-failed item never banks edges for atoms whose receipt
@@ -1319,6 +1322,7 @@ export async function runPhaseExtractAtoms(
               ...originFrontmatter,
               // Provisional until the whole item's atoms persist (see above).
               source_hash: `pending:${hash16}`,
+              ...(origin ? { visibility: origin.visibility, managed_extraction: true } : {}),
               ...(atom.source_quote && { source_quote: atom.source_quote }),
               ...(atom.lesson && { lesson: atom.lesson }),
               ...(atom.concepts && atom.concepts.length > 0 && { concepts: atom.concepts }),
@@ -1331,10 +1335,11 @@ export async function runPhaseExtractAtoms(
             '',
             { type: 'atom', title: atom.title, tags: [] },
           );
-          await importFromContent(engine, slug, md, {
-            sourceId,
-            noEmbed: !isAvailable('embedding'),
-          });
+          if (managed) managedAtoms.push({ slug, content: md, links: [] });
+          else await importFromContent(engine, slug, md, {
+              sourceId,
+              noEmbed: !isAvailable('embedding'),
+            });
           importedSlugs.push(slug);
           if (item.kind === 'page') {
             provenanceLinks.push({
@@ -1345,18 +1350,46 @@ export async function runPhaseExtractAtoms(
               to_source_id: sourceId,
             });
           }
-          totalAtomsExtracted++;
+          if (!managed) totalAtomsExtracted++;
         }
+        if (managed && origin) {
+          // Managed brains publish atoms, provenance edges and the completion
+          // marker through the canonical writer in one durable request.
+          for (const atom of managedAtoms) atom.links = provenanceLinks.filter(link => link.to_slug === atom.slug);
+          writeRequests.push(...await publishManagedAtoms(engine, managed, origin, managedAtoms));
+          totalAtomsExtracted += managedAtoms.length;
+          atomsPublished = managedAtoms.length;
+        } else {
         // Completion receipt: flip provisional → real in one statement, then
         // stamp the source page. A crash between flip and stamp degrades to
         // the legacy atom-rows-mean-done semantics — safe, not lossy.
+        // v0.51+ page revisions: the receipt flip rewrites frontmatter, which
+        // advances knowledge_revision and unseals the text projection — the
+        // freshly imported atoms would silently drop out of search. The flip
+        // changes only `source_hash`, which no chunk depends on, so re-seal
+        // exactly the atoms that were sealed immediately before the flip.
+        const sealedBeforeFlip = (await engine.executeRaw<{ slug: string }>(
+          `SELECT slug FROM pages
+            WHERE source_id = $1 AND type = 'atom' AND slug = ANY($2::text[]) AND deleted_at IS NULL
+              AND (text_projection_revision = knowledge_revision) IS TRUE`,
+          [sourceId, importedSlugs],
+        )).map(row => row.slug);
         await finalizeAtomCompletionReceipt(engine, sourceId, hash16, importedSlugs);
         atomsPublished = importedSlugs.length;
+        if (sealedBeforeFlip.length > 0) {
+          await engine.executeRaw(
+            `UPDATE pages SET text_projection_revision = knowledge_revision
+              WHERE source_id = $1 AND type = 'atom' AND slug = ANY($2::text[]) AND deleted_at IS NULL
+                AND frontmatter->>'source_hash' = $3 AND text_projection_revision IS NULL`,
+            [sourceId, sealedBeforeFlip, hash16],
+          );
+        }
         // #3961: bank the provenance edges so `gbrain backlinks <source-page>`
         // and the graph surface atom lineage. ON CONFLICT-deduped by the
         // batch write, so the deterministic-slug re-run path upserts instead
         // of duplicating. Best-effort: a link failure must not fail the item
         // (the receipt already flipped — atoms are safe) but it logs loudly.
+        // (Fork keeps this order; upstream #4733's links-before-flip is not adopted.)
         if (provenanceLinks.length > 0) {
           try {
             await engine.addLinksBatch(provenanceLinks, { auditSite: 'cycle.extract_atoms.provenance' }); // gbrain-allow-direct-insert: atom-provenance edges derived from the extraction itself (no markdown body to reconcile from)
@@ -1370,6 +1403,7 @@ export async function runPhaseExtractAtoms(
         if (item.kind === 'page') {
           await stampAtomsScanHash(item);
         }
+        }
       } else {
         totalAtomsExtracted += acceptedAtoms.length; // count for dry-run reporting
       }
@@ -1380,6 +1414,7 @@ export async function runPhaseExtractAtoms(
       // Reporter rate-limits to ~1 line/sec; safe to tick every iter.
       opts.progress?.tick(1, `${totalAtomsExtracted} atoms / ${duplicatesSkipped} skipped`);
     } catch (err) {
+      if (err instanceof OperationError && err.writeRequest) writeRequests.push(err.writeRequest);
       if (err instanceof BudgetExhausted) {
         budgetExhausted = true;
         if (item.kind === 'transcript') transcriptsSkipped++;
@@ -1428,7 +1463,7 @@ export async function runPhaseExtractAtoms(
   // v0.42 Wave B2: write extract receipt + rollup row when the phase
   // actually extracted atoms. Both are best-effort per F-OUT-19 —
   // audit-trail / search-visibility surfaces don't block the phase result.
-  if (!opts.dryRun && (totalAtomsExtracted > 0 || candidatesCount > 0)) {
+  if (!opts.dryRun && !managed && (totalAtomsExtracted > 0 || candidatesCount > 0)) {
     // receiptSlug keeps the first 8 chars, so entropy must be front-loaded.
     const runId = `${randomUUID().replace(/-/g, '').slice(0, 8)}-atoms-${Date.now().toString(36)}-${sourceId.slice(0, 4)}`;
     const receiptModel = [...validatorActualModels][0] ?? [...extractionActualModels][0];
@@ -1502,6 +1537,7 @@ export async function runPhaseExtractAtoms(
       pages_skipped_budget: pagesSkipped,
       duplicates_skipped: duplicatesSkipped,
       failures,
+      ...(managed ? { write_requests: writeRequests } : {}),
       ...(abortedGlobalError ? { aborted_global_error: abortedGlobalError } : {}),
       malformed_outputs: malformedOutputs,
       tombstoned_for_failures: tombstonedForFailures,

@@ -11,11 +11,12 @@
  * dispatch markers — `case 'X':` labels AND every `if (command === 'X' …)`
  * head, plain or compound (see segmentDispatchBlocks) — collect every
  * `import('./commands/Y.ts')` inside each block, then scan the
- * case-block text (with `//` and `/* *\/` comments stripped — prose next to a
- * marker is not consumption; see stripComments) plus each imported module
- * (plus one level of that module's ./relative same-directory imports) for
- * `--flag` string literals — including
- * help text, which deliberately over-includes: accepting a flag the handler
+ * case-block text plus each imported module (plus one level of that module's
+ * ./relative same-directory imports) for `--flag` string literals. `//` and
+ * `/* *\/` comments are stripped at EVERY depth before the scan (prose is not
+ * consumption; see stripComments) — a helper's doc comment must not legalise a
+ * flag for a command that merely imports one function from it. String
+ * literals include help text, which deliberately over-includes: accepting a flag the handler
  * ignores is the pre-#2185 status quo for that flag, while missing a real
  * flag would break working invocations on upgrade.
  *
@@ -46,6 +47,8 @@ const EXTRA_FLAGS: Record<string, string[]> = {
   embed: ['--pace', '--pace-max-concurrency'],
   // sync shares the same pace surface via env/config plus CLI passthrough.
   sync: ['--pace', '--pace-max-concurrency'],
+  // Deferred persistence routing reaches runForget in recall.ts two levels deep.
+  forget: ['--reason', '--request-id'],
 };
 
 /**
@@ -57,6 +60,7 @@ const EXTRA_FLAGS: Record<string, string[]> = {
  */
 const EXCLUDED_MODULES = [
   'thin-client-routing.ts',
+  'persistence-delegate.ts',
   // Git plumbing carries argv literals such as `--show-toplevel`; commands
   // importing the helper do not consume those as their own CLI flags. The
   // sync command still scans this peeled module explicitly via
@@ -127,6 +131,10 @@ function facadeExpansion(p: string): string[] {
     return out;
   };
   if (rel === 'src/core/operations.ts') return collect(join(ROOT, 'src/core/ops'));
+  if (rel === 'src/commands/mcp.ts') return [
+    join(ROOT, 'src/commands/mcp-admin.ts'),
+    join(ROOT, 'src/commands/mcp-admin-http.ts'),
+  ];
   if (rel === 'src/commands/doctor.ts') return collect(join(ROOT, 'src/commands/doctor'));
   if (rel === 'src/commands/skillpack.ts') return collect(join(ROOT, 'src/commands/skillpack'));
   // connectors is a peeled command dir (index.ts dispatches to auth/sync/status);
@@ -342,10 +350,17 @@ export function buildFlagRegistry(): Record<string, string[]> {
       const surface = [modPath, ...facadeExpansion(modPath)];
       for (const sfPath of surface) {
         const sfSrc = readSrc(sfPath);
-        depthZeroText += sfSrc;
-        for (const f of flagsInText(sfSrc)) { flags.add(f); depthZero.add(f); }
+        // Comments are prose at every depth, not just in the dispatch block:
+        // a helper's doc comment ("Used by --fresh + after manual reset" in
+        // backfill-base.ts) handed reindex-search-vector a --fresh it never
+        // parses the moment the command imported one function from it.
+        // Consumed flags are always string literals, so stripping can only
+        // remove phantoms.
+        const sfCode = stripComments(sfSrc);
+        depthZeroText += sfCode;
+        for (const f of flagsInText(sfCode)) { flags.add(f); depthZero.add(f); }
         for (const dep of relativeImports(sfSrc, dirname(sfPath))) {
-          for (const f of flagsInText(readSrc(dep))) flags.add(f);
+          for (const f of flagsInText(stripComments(readSrc(dep)))) flags.add(f);
         }
       }
     }

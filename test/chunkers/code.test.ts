@@ -10,7 +10,7 @@ import { describe, test, expect } from 'bun:test';
 import { chunkCodeText, detectCodeLanguage, CHUNKER_VERSION } from '../../src/core/chunkers/code.ts';
 
 describe('CHUNKER_VERSION', () => {
-  test('declaration-preserving large-node split bumped to 7', () => {
+  test('declaration-preserving large-node split and #5082 Bash grammar refresh bumped to 7', () => {
     expect(CHUNKER_VERSION).toBe(7);
   });
 });
