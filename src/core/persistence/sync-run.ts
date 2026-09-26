@@ -182,12 +182,15 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
   // direct library callers) inherits the source's validated strategy before
   // the cursor key is derived, so a delegated code source never syncs as
   // markdown and a pinned run resumes under the same identity.
+  // The accepted remote payload is validated as the caller sent it; the
+  // server-derived strategy is not a caller option upgrade.
+  const callerOpts = opts;
   opts = { ...opts, strategy: await resolveSyncStrategy(engine, opts.strategy, opts.sourceId) };
   if (opts.sourceId && !currentCompanyBrainSync(opts.sourceId) && await getCompanyBrainProfile(engine, opts.sourceId)) {
     return (await import('../company-brain/runtime.ts')).performCompanyBrainSync(engine, opts);
   }
   assertPersistenceAccepting(engine);
-  validateManagedSyncOptions(opts);
+  validateManagedSyncOptions(callerOpts);
   const context = await resolveManagedSyncContext(engine, opts);
   const authority = await managedSyncAuthority(engine, context.sourceId, context.incarnation, opts.repoPath ?? context.root);
   const company = currentCompanyBrainSync(context.sourceId);
