@@ -353,8 +353,11 @@ describe('recall opt-in query-first budget packing', () => {
     const params = { query: 'compass', budget_tokens: 75, budget_policy: 'query_first' };
     const result = await recall(params, overrides);
     expect(result.results.map((r: any) => r.title)).toEqual(['Compass public']);
-    expect(result.facts.map((r: any) => r.fact)).toEqual(['Public fact.']);
-    expect(result.budget_packing.facts.candidates).toBe(1);
+    // Fork contract (operator decision 2026-09-26): all host agents share one
+    // memory and nothing is private — a legacy `private` fact is stored and
+    // recalled as world. Source grants still bound the remote caller ('denied').
+    expect(result.facts.map((r: any) => r.fact).sort()).toEqual(['Private fact.', 'Public fact.']);
+    expect(result.budget_packing.facts.candidates).toBe(2);
     expect(result.budget_packing.results.candidates).toBe(1);
     assertAccounting(result);
   });

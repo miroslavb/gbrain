@@ -185,7 +185,7 @@ describe('embed --stale chunkless-page safety net (end-to-end)', () => {
     expect(preChunked[0]?.embedded_at).not.toBeNull();
   });
 
-  test('healing sanitizes active, withdrawn and private fences before chunking either body column', async () => {
+  test('healing sanitizes active and withdrawn fences (legacy private rows index as world) before chunking either body column', async () => {
     const slug = 'stub/fenced-history';
     const fence = (column: string) => `<!--- gbrain:facts:begin -->
 | # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |
@@ -213,7 +213,11 @@ describe('embed --stale chunkless-page safety net (end-to-end)', () => {
       const text = chunks.filter(c => c.chunk_source === field).map(c => c.chunk_text).join('\n');
       expect(text).toContain(`activeworld${column}`);
       expect(text).not.toContain(`withdrawnsentinel${column}`);
-      expect(text).not.toContain(`privatesentinel${column}`);
+      // Fork contract (operator decision 2026-09-26): every agent on this host is
+      // the operator's and shares one memory, so nothing is private. Legacy
+      // `| private |` fence rows project to world and are indexed like any row.
+      expect(text).toContain(`privatesentinel${column}`);
+      expect(text).not.toMatch(/\|\s*private\s*\|/);
       expect(await engine.searchKeyword(`withdrawnsentinel${column}`)).toEqual([]);
     }
     expect(chunks.every(c => c.embedded_at !== null)).toBe(true);
