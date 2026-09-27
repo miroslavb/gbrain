@@ -11,7 +11,11 @@
  * computeFactsDelta() compares the previous body with the new one at sentence
  * granularity (a single markdown bullet can hold a whole project history, so
  * line granularity is not enough) and returns only the sentences that did not
- * exist before, with the nearest heading and the line's lead-in as context.
+ * exist before, plus the header row of a table that gained rows (column names
+ * give the new row its meaning). Section headings and the unchanged lead-in of
+ * an edited line are NOT sent: the extractor treats every line it gets as
+ * source text and turned them into facts of their own, duplicating what the
+ * page already said; the job still carries the page slug and title.
  * Fact and takes fences are ignored on both sides: their rows are facts
  * already and re-extracting them can only produce duplicates.
  *
@@ -35,8 +39,6 @@ export interface FactsDelta {
 export const MIN_DELTA_CHARS = 30;
 /** Above this share of new units the write is a rewrite: extract the full body. */
 export const FULL_REWRITE_RATIO = 0.6;
-/** Lead-in context copied from a changed line whose first sentence is not new. */
-const LEAD_IN_CHARS = 160;
 
 function stripRegion(body: string, begin: string, end: string): string {
   let out = body;
@@ -76,8 +78,6 @@ export function computeFactsDelta(previous: string | null | undefined, next: str
   }
 
   const out: string[] = [];
-  let heading: string | null = null;
-  let emittedHeading: string | null = null;
   let tableHeader: string | null = null;
   let emittedTableHeader: string | null = null;
   let totalUnits = 0;
@@ -86,7 +86,7 @@ export function computeFactsDelta(previous: string | null | undefined, next: str
   for (const raw of nextBody.split('\n')) {
     const line = raw.trim();
     if (!line) { tableHeader = null; continue; }
-    if (line.startsWith('#')) { heading = line; tableHeader = null; continue; }
+    if (line.startsWith('#')) { tableHeader = null; continue; }
     if (line.startsWith('|')) {
       if (tableHeader === null) { tableHeader = line; continue; }
       if (/^\|[\s:|-]+\|?$/.test(line)) continue; // separator row
@@ -99,13 +99,8 @@ export function computeFactsDelta(previous: string | null | undefined, next: str
     if (fresh.length === 0) continue;
     newUnits += fresh.length;
     newChars += fresh.reduce((n, u) => n + u.length, 0);
-    if (heading && heading !== emittedHeading) { out.push('', heading); emittedHeading = heading; }
     if (line.startsWith('|') && tableHeader && tableHeader !== emittedTableHeader) {
       out.push(tableHeader); emittedTableHeader = tableHeader;
-    }
-    const lead = units[0];
-    if (!line.startsWith('|') && units.length > 1 && !fresh.includes(lead)) {
-      out.push(`(context) ${lead.length > LEAD_IN_CHARS ? lead.slice(0, LEAD_IN_CHARS) + '…' : lead}`);
     }
     out.push(fresh.join(' '));
   }
