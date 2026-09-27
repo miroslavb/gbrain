@@ -439,6 +439,7 @@ export function configureGateway(config: AIGatewayConfig): void {
     // designed to SKIP validation when the dim is unknown rather than fabricate
     // one).
     embedding_dimensions: config.embedding_dimensions,
+    embedding_query_prefix: config.embedding_query_prefix,
     embedding_multimodal_model: config.embedding_multimodal_model,
     embedding_image_ocr_model: config.embedding_image_ocr_model,
     expansion_model: config.expansion_model ?? DEFAULT_EXPANSION_MODEL,
@@ -1568,7 +1569,11 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
   const resolveTarget = opts?.embeddingModel ?? getEmbeddingModel();
   const tracker = __budgetStore.getStore() ?? null;
   const { model, recipe, modelId } = await resolveEmbeddingProvider(resolveTarget);
-  const truncated = texts.map(t => truncateUtf8(t ?? '', MAX_CHARS));
+  // Fork patch 2026-09-27: query-side instruction for the configured model only
+  // (a per-column model override keeps its own, unprefixed input).
+  const queryPrefix = opts?.inputType === 'query' && resolveTarget === getEmbeddingModel()
+    ? (cfg.embedding_query_prefix ?? '') : '';
+  const truncated = texts.map(t => truncateUtf8(queryPrefix + (t ?? ''), MAX_CHARS));
 
   // Reserve up front for the worst-case batch token count. Embeddings have
   // no output rate, so maxOutputTokens=0. record() at the end uses the

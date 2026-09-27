@@ -452,6 +452,12 @@ export interface AIGatewayConfig {
   /** Target embedding dims. Gateway asserts returned embeddings match this. */
   embedding_dimensions?: number;
   /**
+   * Fork patch 2026-09-27: instruction prepended to QUERY-side embedding
+   * inputs only (inputType 'query'), for instruction-tuned embedders such as
+   * Giga-Embeddings ("Instruct: ...\nQuery: "). Documents stay unprefixed.
+   */
+  embedding_query_prefix?: string;
+  /**
    * Separate model for multimodal embeddings (e.g. "voyage:voyage-multimodal-3").
    * When set, embedMultimodal() routes to this model instead of embedding_model.
    * Allows brains using OpenAI for text to use Voyage for image embeddings.
