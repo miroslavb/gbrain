@@ -99,7 +99,8 @@ describe('runFactsPipeline (extract_facts MCP op path) — response shape stabil
     const rows = await engine.executeRaw<{context:string;entity_slug:string|null}>(
       'SELECT context,entity_slug FROM facts WHERE id=$1',r.fact_ids);
     expect(rows[0].context).toBe('meetings/quality-origin');
-    expect(rows[0].entity_slug).toBeNull();
+    // Fork 2026-09-27: a page-sourced fact without an entity belongs to its origin page.
+    expect(rows[0].entity_slug).toBe('meetings/quality-origin');
   });
   test('returns {inserted, duplicate, superseded, fact_ids} on successful extraction', async () => {
     chatStub([

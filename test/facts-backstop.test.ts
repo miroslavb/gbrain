@@ -319,36 +319,34 @@ describe('runFactsBackstop — stub guard routing (v0.34.5)', () => {
       //   2. fuzzy match → miss (no title contains noresolvable)
       //   3. prefix expansion → miss (no people/noresolvable-* rows)
       //   4. slugify fallback → 'noresolvable' (bare)
-      // The bare slug then trips the stub guard in writeFactsToFence,
-      // which returns stubGuardBlocked: true, and backstop routes the
-      // fact to engine.insertFact (DB-only).
+      // Since 2026-09-27 the page-sourced backstop attributes a fallback
+      // slug to the origin page, so it never reaches the stub guard as a
+      // phantom entity (the turn-text path still routes it DB-only).
       chatStub([
         { fact: 'said hello at the meeting', kind: 'event', notability: 'high', entity: 'noresolvable' },
       ]);
 
-      const r = await runFactsBackstop(meetingPage(), makeCtx({ mode: 'inline' }));
+      const origin = meetingPage();
+      const r = await runFactsBackstop(origin, makeCtx({ mode: 'inline' }));
 
       expect(r.mode).toBe('inline');
       if (r.mode === 'inline') {
-        // The fact MUST be persisted via the DB-only fallback, not dropped.
+        // The fact MUST be persisted, not dropped.
         expect(r.inserted).toBe(1);
         expect(r.fact_ids.length).toBe(1);
 
         // No phantom file at the brain root (this is the whole point of the guard).
         expect(existsSync(join(brainDir, 'noresolvable.md'))).toBe(false);
 
-        // The fact is in the DB with the bare entity_slug. Query directly to
-        // confirm — the routing is the contract under test.
+        // Fork 2026-09-27: the page-sourced fact is attributed to its origin
+        // page instead of the page-less bare slug.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rows = await (engine as any).db.query(
-          `SELECT entity_slug, fact, source_markdown_slug FROM facts WHERE id = $1`,
+          `SELECT entity_slug, fact FROM facts WHERE id = $1`,
           [r.fact_ids[0]],
         );
-        expect(rows.rows[0].entity_slug).toBe('noresolvable');
+        expect(rows.rows[0].entity_slug).toBe(origin.slug);
         expect(rows.rows[0].fact).toBe('said hello at the meeting');
-        // source_markdown_slug is the fence-tracking column; under DB-only
-        // fallback it stays null (no .md file backs the row).
-        expect(rows.rows[0].source_markdown_slug).toBeNull();
       }
     } finally {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -377,6 +375,12 @@ describe('runFactsBackstop — sync.write_through opt-out', () => {
       await engine.setConfig('sync.write_through', 'false');
       _resetWriteThroughCacheForTest();
 
+      // A live entity page keeps the fact fence-eligible (a page-less slug
+      // would be attributed to the origin page since 2026-09-27).
+      await engine.putPage('people/flag-test', {
+        type: 'person', title: 'Flag Test', compiled_truth: '# Flag Test',
+        frontmatter: { type: 'person', title: 'Flag Test', slug: 'people/flag-test' },
+      }, { sourceId: 'default' });
       chatStub([
         { fact: 'joined widget-co as cto', kind: 'event', notability: 'high', entity: 'people/flag-test' },
       ]);

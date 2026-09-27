@@ -579,6 +579,7 @@ async function runPipelineBodyInner(
   const { resolveEntitySlugWithSource, AmbiguousEntityAliasError } = await import('../entities/resolve.ts');
   const { cosineSimilarity } = await import('./classify.ts');
   const { writeFactsToFence, lookupSourceLocalPath } = await import('./fence-write.ts');
+  const { knownFactsForPage } = await import('./known-facts.ts');
 
   if (abortSignal?.aborted) {
     return { inserted: 0, duplicate: 0, superseded: 0, fact_ids: [], entity_slugs: [] };
@@ -597,10 +598,16 @@ async function runPipelineBodyInner(
     : filter === 'medium-and-up'
       ? { allowed: ['high', 'medium'] as const, invalid: 'drop' as const }
       : undefined;
+  // Fork 2026-09-27: page-sourced runs tell the extractor what is already
+  // recorded, so a page edit describing a just-remembered fact adds nothing.
+  const knownFacts = input.pageSlug
+    ? await knownFactsForPage(ctx.engine, ctx.sourceId, input.pageSlug, input.turnText)
+    : undefined;
   const outcome = await extractFactsFromTurnWithOutcome({
     turnText: input.turnText,
     sessionId: ctx.sessionId,
     entityHints: ctx.entityHints,
+    knownFacts,
     source: ctx.source,
     isDreamGenerated: input.isDreamGenerated,
     engine: ctx.engine,
@@ -668,6 +675,12 @@ async function runPipelineBodyInner(
       // Preserve the claim with its source, without guessing its subject or
       // retrying/dropping an entire mixed-entity page indefinitely.
       console.warn('[facts] ambiguous entity alias: held without entity attribution; source review required');
+    }
+    // Fork 2026-09-27: a page-sourced claim whose subject has no page (unresolved,
+    // ambiguous or only slugified) belongs to the page it was extracted from,
+    // not to a page-less slug in the DB-only keyspace.
+    if (input.pageSlug && (resolved === null || resolved.source === 'fallback_slugify')) {
+      resolved = { slug: input.pageSlug, source: 'exact_page' as const };
     }
     const resolvedSlug = resolved?.slug ?? null;
     const resolutionSource = resolved?.source ?? null;
