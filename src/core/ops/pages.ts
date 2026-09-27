@@ -444,6 +444,8 @@ const put_page: Operation = {
       // Pack load failed; fall through to legacy inferType behavior.
       activePack = undefined;
     }
+    // Fork patch 2026-09-27: pre-write body, so the facts backstop extracts only new sentences.
+    const previousCompiledTruth = await (await import('../facts/delta.ts')).readPriorBody(ctx.engine, slug, ctx.sourceId ?? 'default');
     const result = await importFromContent(ctx.engine, slug, p.content as string, {
       noEmbed,
       // v0.42 (#1699): untrusted callers can't smuggle gate-owned frontmatter
@@ -723,6 +725,7 @@ const put_page: Operation = {
           type: result.parsedPage!.type,
           compiled_truth: result.parsedPage!.compiled_truth,
           frontmatter: result.parsedPage!.frontmatter,
+          previous_compiled_truth: previousCompiledTruth,
         },
         {
           engine: ctx.engine,

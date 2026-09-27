@@ -2536,6 +2536,7 @@ export async function registerBuiltinHandlers(
         type: page.type,
         compiled_truth: page.compiled_truth,
         frontmatter: (page.frontmatter ?? {}) as Record<string, unknown>,
+        ...(typeof job.data.extract_text === 'string' ? { extract_text: job.data.extract_text } : {}), // fork 2026-09-27: write-time delta
       },
       {
         engine,

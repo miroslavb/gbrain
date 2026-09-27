@@ -90,6 +90,13 @@ export async function resolveEntitySlug(
     if (fuzzy) return fuzzy;
   }
 
+  // 3.5. Fork patch 2026-09-27: exact entity-directory match before minting a
+  //      page-less slug. "plutosky-websdr" or a wrong-directory
+  //      "projects/ren5000" used to fall through to slugify and land facts on
+  //      entities with no page; an unambiguous `<dir>/<last-segment>` page wins.
+  const dirExact = await tryUnambiguousDirExact(engine, source_id, trimmed);
+  if (dirExact) return dirExact;
+
   // 4. Fallback: deterministic slugify.
   return fallbackSlugify(trimmed);
 }
@@ -224,6 +231,10 @@ export async function resolveEntitySlugWithSource(
     const fuzzy = await tryFuzzyMatch(engine, source_id, trimmed);
     if (fuzzy) return { slug: fuzzy, source: 'fuzzy_match' };
   }
+
+  // Fork patch 2026-09-27: mirror step 3.5 of resolveEntitySlug.
+  const dirExact = await tryUnambiguousDirExact(engine, source_id, trimmed);
+  if (dirExact) return { slug: dirExact, source: 'exact_page' };
 
   return { slug: fallbackSlugify(trimmed), source: 'fallback_slugify' };
 }
@@ -407,6 +418,40 @@ function looksLikeSlug(s: string): boolean {
   if (/\s/.test(s)) return false;
   if (s !== s.toLowerCase()) return false;
   return /^[a-z0-9/_-]+$/.test(s);
+}
+
+/**
+ * Fork patch 2026-09-27: `<dir>/<token>` exact lookup across the entity
+ * directories for a slug-shaped input whose own form has no page. `token` is
+ * the last path segment of a one- or two-segment input. Returns a slug only
+ * when exactly one candidate page exists (never the input itself).
+ */
+async function tryUnambiguousDirExact(
+  engine: BrainEngine,
+  source_id: string,
+  raw: string,
+): Promise<string | null> {
+  const segments = fallbackSlugify(raw).split('/').filter(Boolean);
+  if (segments.length === 0 || segments.length > 2) return null;
+  const token = segments[segments.length - 1];
+  if (!token) return null;
+  const input = segments.join('/');
+  const candidates = PREFIX_EXPANSION_DIRS.map((dir) => `${dir}/${token}`).filter((c) => c !== input);
+  try {
+    const rows = await engine.executeRaw<{ slug: string }>(
+      `SELECT slug FROM pages WHERE source_id = $1 AND slug = ANY($2::text[]) AND deleted_at IS NULL`,
+      [source_id, candidates],
+    );
+    const found = new Set(rows.map((r) => r.slug));
+    // A bare token shared across directories (`hosts/kiwi` next to
+    // `people/kiwi-example`) stays ambiguous: prefix candidates count too.
+    if (isBareName(raw)) {
+      for (const c of await findPrefixCandidates(engine, source_id, token)) found.add(c.slug);
+    }
+    return found.size === 1 ? [...found][0] : null;
+  } catch {
+    return null;
+  }
 }
 
 async function tryExactSlug(

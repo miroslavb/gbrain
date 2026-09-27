@@ -125,6 +125,19 @@ interface ParsedPageInput {
   type: PageType;
   compiled_truth: string;
   frontmatter: Record<string, unknown>;
+  /**
+   * Fork patch 2026-09-27 (delta extraction). Body before this write:
+   * undefined = unknown (legacy: extract the whole page), null = new page
+   * (whole page), string = extract only sentences that were not in it.
+   */
+  previous_compiled_truth?: string | null;
+  /**
+   * Fork patch 2026-09-27: precomputed extraction text (a durable
+   * facts-absorb job carries the delta computed at write time). When set,
+   * eligibility still runs on compiled_truth, but only this text is sent to
+   * the extractor and no new delta is computed.
+   */
+  extract_text?: string;
 }
 
 /**
@@ -274,6 +287,24 @@ export async function runFactsBackstop(
       : { mode: 'inline', inserted: 0, duplicate: 0, superseded: 0, fact_ids: [], skipped };
   }
 
+  // Fork patch 2026-09-27: extract only new content. A write whose sentences
+  // all existed before (or differ cosmetically) enqueues nothing.
+  let extractText = parsedPage.extract_text;
+  if (extractText === undefined && parsedPage.previous_compiled_truth !== undefined) {
+    const { computeFactsDelta } = await import('./delta.ts');
+    const delta = computeFactsDelta(parsedPage.previous_compiled_truth, parsedPage.compiled_truth);
+    if (delta.mode === 'none') {
+      const skipped = 'eligibility_failed:no_new_content' as const;
+      return mode === 'queue'
+        ? { mode: 'queue', enqueued: false, queueDepth: 0, skipped }
+        : { mode: 'inline', inserted: 0, duplicate: 0, superseded: 0, fact_ids: [], skipped };
+    }
+    if (delta.mode === 'delta') extractText = delta.text;
+  }
+  const pipelinePage: ParsedPageInput = extractText !== undefined
+    ? { ...parsedPage, compiled_truth: extractText }
+    : parsedPage;
+
   // --- Extraction availability gate (engine-aware, EXECUTION-process only) ---
   // Resolves the ACTUAL extraction model (facts.extraction_model /
   // models.default / tier config / GBRAIN_MODEL / key-aware tier default) and
@@ -318,7 +349,7 @@ export async function runFactsBackstop(
         const { MinionQueue } = await import('../minions/queue.ts');
         const { createHash } = await import('node:crypto');
         const contentHash = createHash('sha256')
-          .update(parsedPage.compiled_truth)
+          .update(pipelinePage.compiled_truth)
           .digest('hex')
           .slice(0, 16);
         const minions = new MinionQueue(ctx.engine);
@@ -334,6 +365,9 @@ export async function runFactsBackstop(
             notabilityFilter: ctx.notabilityFilter ?? 'all',
             visibility: 'world',
             ...(ctx.model ? { model: ctx.model } : {}),
+            // Fork patch 2026-09-27: the worker extracts this delta, not the
+            // page as it looks when the job runs.
+            ...(extractText !== undefined ? { extract_text: extractText } : {}),
           },
           {
             queue: 'default',
@@ -373,7 +407,7 @@ export async function runFactsBackstop(
       // increments only). Now they land in ingest_log so doctor +
       // dashboard surface failure modes per source.
       try {
-        await runPipeline(parsedPage, ctx, signal);
+        await runPipeline(pipelinePage, ctx, signal);
       } catch (err) {
         const { writeFactsAbsorbFailure } = await import('./absorb-log.ts');
         await writeFactsAbsorbFailure(ctx.engine, parsedPage.slug, err, ctx.sourceId);
@@ -409,7 +443,7 @@ export async function runFactsBackstop(
   if (!inlineModel) {
     return { mode: 'inline', inserted: 0, duplicate: 0, superseded: 0, fact_ids: [], skipped: 'extraction_unavailable' };
   }
-  const r = await runPipeline(parsedPage, { ...ctx, model: inlineModel }, ctx.abortSignal);
+  const r = await runPipeline(pipelinePage, { ...ctx, model: inlineModel }, ctx.abortSignal);
   return { mode: 'inline', ...r };
 }
 

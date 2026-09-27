@@ -3914,12 +3914,15 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
         // catch on the v0.40 plan review.
         const page = await engine.getPage(slug, { sourceId: factsSourceId });
         if (!page) continue;
+        // Fork patch 2026-09-27: delta against the body this import just snapshotted.
+        const previousCompiledTruth = await (await import('../core/facts/delta.ts')).readLastSnapshotBody(engine, slug, factsSourceId);
         await runFactsBackstop(
           {
             slug,
             type: page.type,
             compiled_truth: page.compiled_truth ?? '',
             frontmatter: page.frontmatter ?? {},
+            previous_compiled_truth: previousCompiledTruth,
           },
           {
             engine,
