@@ -94,6 +94,41 @@ function falseStampPageWhere(colId: string): string {
 }
 
 /**
+ * Fork patch 2026-09-27: NULL-vector chunks on soft-deleted pages. The stale
+ * selectors exclude deleted pages (the embed path cannot load them), while
+ * getHealth().missing_embeddings deliberately stays raw (chunks occupy storage
+ * until purge, #1305). Migration verify subtracts these so a deleted page's
+ * residue neither blocks completion nor hides a real live miss.
+ */
+export async function countDeletedPageNullChunks(
+  engine: Pick<BrainEngine, 'executeRaw'>,
+): Promise<number> {
+  const colId = await activeColId(engine);
+  const rows = await engine.executeRaw<{ n: number }>(
+    `SELECT count(*)::int AS n FROM content_chunks c
+       JOIN pages p ON p.id = c.page_id
+      WHERE c.${colId} IS NULL
+        AND p.deleted_at IS NOT NULL
+        AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')`,
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/** Raw health NULL count minus the deleted-page residue; a probe failure keeps the raw count as the blocker input. */
+export async function splitDeletedPageNull(
+  engine: Pick<BrainEngine, 'executeRaw'>,
+  rawMissing: number,
+): Promise<{ deletedNull: number; liveMissing: number }> {
+  let deletedNull = 0;
+  try {
+    deletedNull = await countDeletedPageNullChunks(engine);
+  } catch {
+    // Report-only census.
+  }
+  return { deletedNull, liveMissing: Math.max(0, rawMissing - deletedNull) };
+}
+
+/**
  * #4305 count side (plan / verify / --status honesty). Counts the falsely
  * stamped pages plus EVERY embedded chunk on them — invalidation is
  * page-level, so that is the true re-embed workload.

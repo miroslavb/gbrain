@@ -7,6 +7,7 @@ import { readContentChunksEmbeddingDim } from './embedding-dim-check.ts';
 import {
   invalidateStaleSignatureEmbeddingsGuarded,
   countFalseStampedChunks,
+  splitDeletedPageNull,
   clearFalseStampedSignatures,
 } from './embedding-invalidation.ts';
 import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defaults.ts';
@@ -925,6 +926,8 @@ export interface MigrationVerify {
      *  blocking would wedge completion forever), but a "complete" verdict
      *  must never silently hide them. */
     embed_skip_null_chunks: number;
+    /** Fork 2026-09-27: NULL chunks on soft-deleted pages — reported, never a blocker (restore re-stales them). */
+    deleted_page_null_chunks: number;
     marker: 'none' | 'same_target' | 'different_target' | 'corrupt';
     file_plane_ok: boolean;
   };
@@ -998,8 +1001,9 @@ export async function verifyMigrationComplete(
   } catch {
     // Health probe failure: report-only conjunct, don't block on it.
   }
-  if (missing > 0 && staleWide === 0) {
-    blockers.push(`${missing} chunk(s) have NULL vectors outside the stale predicate`);
+  const { deletedNull, liveMissing } = await splitDeletedPageNull(engine, missing);
+  if (liveMissing > 0 && staleWide === 0) {
+    blockers.push(`${liveMissing} chunk(s) have NULL vectors outside the stale predicate`);
   }
 
   // Contentful pages with zero chunk rows: the embed drain heals these, so a
@@ -1062,6 +1066,7 @@ export async function verifyMigrationComplete(
       missing_embeddings: missing,
       chunkless_pages: chunkless,
       embed_skip_null_chunks: embedSkipNull,
+      deleted_page_null_chunks: deletedNull,
       marker: markerState,
       file_plane_ok: filePlaneOk,
     },

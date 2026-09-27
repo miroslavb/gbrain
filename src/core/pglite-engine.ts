@@ -3363,6 +3363,9 @@ export class PGLiteEngine implements BrainEngine {
       conds.push(`${staleColRef} IS NULL`);
     }
     conds.push(`NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')`);
+    // Fork patch 2026-09-27: soft-deleted pages are never embedded (the embed path cannot load them),
+    // so counting them kept `migrate embeddings` incomplete forever; a restored page is stale again.
+    conds.push('p.deleted_at IS NULL');
     if (opts?.sourceId !== undefined) {
       params.push(opts.sourceId);
       conds.push(`p.source_id = $${params.length}`);
@@ -3510,6 +3513,7 @@ export class PGLiteEngine implements BrainEngine {
              JOIN pages p ON p.id = cc.page_id
             WHERE cc.${staleColId} IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+              AND p.deleted_at IS NULL
             ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
             LIMIT $1`,
           [limit],
@@ -3521,6 +3525,7 @@ export class PGLiteEngine implements BrainEngine {
              JOIN pages p ON p.id = cc.page_id
             WHERE cc.${staleColId} IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+              AND p.deleted_at IS NULL
               AND (
                 p.updated_at < $1::timestamptz
                 OR (p.updated_at = $1::timestamptz AND p.id > $2)
@@ -3541,6 +3546,7 @@ export class PGLiteEngine implements BrainEngine {
           WHERE cc.${staleColId} IS NULL
             AND p.source_id = $1
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+            AND p.deleted_at IS NULL
           ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
           LIMIT $2`,
         [opts.sourceId, limit],
@@ -3553,6 +3559,7 @@ export class PGLiteEngine implements BrainEngine {
           WHERE cc.${staleColId} IS NULL
             AND p.source_id = $1
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+            AND p.deleted_at IS NULL
             AND (
               p.updated_at < $2::timestamptz
               OR (p.updated_at = $2::timestamptz AND p.id > $3)
@@ -3577,6 +3584,7 @@ export class PGLiteEngine implements BrainEngine {
            JOIN pages p ON p.id = cc.page_id
           WHERE cc.${staleColId} IS NULL
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+            AND p.deleted_at IS NULL
             AND (cc.page_id, cc.chunk_index) > ($1, $2)
           ORDER BY cc.page_id, cc.chunk_index
           LIMIT $3`,
@@ -3592,6 +3600,7 @@ export class PGLiteEngine implements BrainEngine {
         WHERE cc.${staleColId} IS NULL
           AND p.source_id = $1
           AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+          AND p.deleted_at IS NULL
           AND (cc.page_id, cc.chunk_index) > ($2, $3)
         ORDER BY cc.page_id, cc.chunk_index
         LIMIT $4`,

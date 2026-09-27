@@ -2559,6 +2559,9 @@ export class PostgresEngine implements BrainEngine {
       conds.push(`${staleColRef} IS NULL`);
     }
     conds.push(`NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')`);
+    // Fork patch 2026-09-27: soft-deleted pages are never embedded (the embed path cannot load them),
+    // so counting them kept `migrate embeddings` incomplete forever; a restored page is stale again.
+    conds.push('p.deleted_at IS NULL');
     if (opts?.sourceId !== undefined) {
       params.push(opts.sourceId);
       conds.push(`p.source_id = $${params.length}`);
@@ -2713,6 +2716,7 @@ export class PostgresEngine implements BrainEngine {
             JOIN pages p ON p.id = cc.page_id
             WHERE cc.${tx.unsafe(staleColId)} IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+              AND p.deleted_at IS NULL
             ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
             LIMIT ${limit}
           ` : await tx`
@@ -2723,6 +2727,7 @@ export class PostgresEngine implements BrainEngine {
             JOIN pages p ON p.id = cc.page_id
             WHERE cc.${tx.unsafe(staleColId)} IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+              AND p.deleted_at IS NULL
               AND (
                 p.updated_at < ${afterUpdated}::timestamptz
                 OR (p.updated_at = ${afterUpdated}::timestamptz AND p.id > ${afterPid})
@@ -2742,6 +2747,7 @@ export class PostgresEngine implements BrainEngine {
           WHERE cc.${tx.unsafe(staleColId)} IS NULL
             AND p.source_id = ${opts.sourceId}
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+            AND p.deleted_at IS NULL
           ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
           LIMIT ${limit}
         ` : await tx`
@@ -2753,6 +2759,7 @@ export class PostgresEngine implements BrainEngine {
           WHERE cc.${tx.unsafe(staleColId)} IS NULL
             AND p.source_id = ${opts.sourceId}
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+            AND p.deleted_at IS NULL
             AND (
               p.updated_at < ${afterUpdated}::timestamptz
               OR (p.updated_at = ${afterUpdated}::timestamptz AND p.id > ${afterPid})
@@ -2772,6 +2779,7 @@ export class PostgresEngine implements BrainEngine {
           JOIN pages p ON p.id = cc.page_id
           WHERE cc.${tx.unsafe(staleColId)} IS NULL
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+            AND p.deleted_at IS NULL
             AND (cc.page_id, cc.chunk_index) > (${afterPid}, ${afterIdx})
           ORDER BY cc.page_id, cc.chunk_index
           LIMIT ${limit}
@@ -2786,6 +2794,7 @@ export class PostgresEngine implements BrainEngine {
         WHERE cc.${tx.unsafe(staleColId)} IS NULL
           AND p.source_id = ${opts.sourceId}
           AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
+          AND p.deleted_at IS NULL
           AND (cc.page_id, cc.chunk_index) > (${afterPid}, ${afterIdx})
         ORDER BY cc.page_id, cc.chunk_index
         LIMIT ${limit}
