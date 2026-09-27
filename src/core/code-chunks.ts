@@ -6,9 +6,18 @@ import { sanitizeRemoteBody } from './remote-body.ts';
 import { isEmbedSkipped } from './embed-skip.ts';
 import { isQuarantined } from './quarantine.ts';
 
+export function isFiniteLexicalSymbols(frontmatter: Record<string, unknown> | null | undefined): boolean {
+  const marker = frontmatter?.embed_skip;
+  return !!marker && typeof marker === 'object' && (marker as { reason?: unknown }).reason === 'finite_lexical_symbols';
+}
+
 export async function prepareCodeChunks(page: { compiled_truth: string; frontmatter?: Record<string, unknown> | null }, path: string) {
   const content = sanitizeRemoteBody(page.compiled_truth);
-  const prepared = isEmbedSkipped(page.frontmatter) || isQuarantined(page.frontmatter)
+  // Fork 2026-09-27: the host code index marks its finite lexical-symbol pages
+  // embed_skip (reason 'finite_lexical_symbols') so their chunks stay vector-free;
+  // keyword search and code_def/code_refs still need those chunks.
+  const lexicalOnly = isFiniteLexicalSymbols(page.frontmatter);
+  const prepared = (isEmbedSkipped(page.frontmatter) && !lexicalOnly) || isQuarantined(page.frontmatter)
     ? { chunks: [], edges: [] } : await chunkCodeTextFull(content, path);
   const chunks: ChunkInput[] = prepared.chunks.map((c, i) => ({
     chunk_index: i, chunk_text: c.text, chunk_source: 'compiled_truth',
