@@ -189,6 +189,11 @@ export interface ExtractInput {
   sessionId?: string | null;
   /** Existing canonical entity slugs the agent already resolved (D4 hint). */
   entityHints?: string[];
+  /**
+   * Fork 2026-09-27: facts already recorded for the page this turn came from
+   * (see known-facts.ts). The extractor is told to skip claims they state.
+   */
+  knownFacts?: string[];
   /** Source identifier for provenance — e.g. 'mcp:put_page' or 'mcp:extract_facts'. */
   source: string;
   /**
@@ -477,6 +482,24 @@ export class FactsExtractionError extends Error {
 }
 
 /** Strict extraction contract for callers that persist completion authority. */
+/**
+ * Fork 2026-09-27: the `<known_facts>` block. Recorded facts are sanitized like
+ * the turn (they may quote injected text) and cannot close either wrapper.
+ */
+export function knownFactsBlock(known: string[] | undefined): string {
+  const lines: string[] = [];
+  for (const raw of known ?? []) {
+    let line = raw;
+    for (const p of INJECTION_PATTERNS) line = line.replace(p.rx, p.replacement);
+    line = line.replace(/<\s*\/?\s*(?:known_facts|turn)\s*>/gi, '').replace(/\s+/g, ' ').trim();
+    if (line) lines.push(`- ${line}`);
+  }
+  if (!lines.length) return '';
+  return `\n\n<known_facts>\n${lines.join('\n')}\n</known_facts>\n` +
+    'These facts are already recorded. Skip every claim that restates, paraphrases, translates, summarizes or is part of a known fact; ' +
+    'extract only information the known facts do not state. Return an empty facts list when nothing new remains.';
+}
+
 export async function extractFactsFromTurnWithOutcome(
   input: ExtractInput,
 ): Promise<ExtractFactsOutcome> {
@@ -527,7 +550,7 @@ export async function extractFactsFromTurnWithOutcome(
     input.entityHints && input.entityHints.length
       ? ` Known entity slugs the user already mentioned: ${input.entityHints.slice(0, ENTITY_HINTS_CAP).join(', ')}.`
       : ''
-  }`;
+  }${knownFactsBlock(input.knownFacts)}`;
   let result: ChatResult;
   // The cap the last call was actually sent at. When the truncation retry
   // escalates to maxTokens*2, the malformed-output retry below must re-send
