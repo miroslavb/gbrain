@@ -2554,6 +2554,12 @@ export async function registerBuiltinHandlers(
         type: page.type,
         compiled_truth: page.compiled_truth,
         frontmatter: (page.frontmatter ?? {}) as Record<string, unknown>,
+        // Fork patch 2026-09-27: extract only new sentences. A sync job carries its write-time delta; a
+        // persistence put_page job is pinned to its revision by readFactsBackstopJobPage, so the latest
+        // page_versions snapshot is exactly the body before this write.
+        ...(typeof job.data.extract_text === 'string'
+          ? { extract_text: job.data.extract_text }
+          : { previous_compiled_truth: await (await import('../core/facts/delta.ts')).readLastSnapshotBody(engine, page.slug, sourceId) }),
       },
       {
         engine, config: await loadConfigWithEngine(engine, loadConfig() ?? { engine: engine.kind }) ?? { engine: engine.kind },
