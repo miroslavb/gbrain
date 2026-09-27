@@ -87,13 +87,14 @@ describe('computeFactsDelta', () => {
     expect(computeFactsDelta(OLD, fenceOnly).mode).toBe('none');
   });
 
-  test('one sentence appended to a long bullet yields only that sentence plus heading and lead-in', () => {
+  test('one sentence appended to a long bullet yields only that sentence, without heading or lead-in', () => {
     const next = OLD.replace('Rollback file kept.', 'Rollback file kept. Since 2026-09-26 the station runs image v13 with native decoders.');
     const d = computeFactsDelta(OLD, next);
     expect(d.mode).toBe('delta');
-    expect(d.text).toContain('Since 2026-09-26 the station runs image v13 with native decoders.');
-    expect(d.text).toContain('## Receivers');
-    expect(d.text).toContain('(context) - **Station beta**');
+    expect(d.text).toBe('Since 2026-09-26 the station runs image v13 with native decoders.');
+    // Headings and unchanged lead-ins were extracted as facts of their own (2026-09-27).
+    expect(d.text).not.toContain('## Receivers');
+    expect(d.text).not.toContain('Station beta');
     expect(d.text).not.toContain('Decoders run only while someone listens');
     expect(d.text).not.toContain('old fence row');
     expect(d.newUnits).toBe(1);
