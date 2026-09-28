@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { candidateColumn, candidateVector, seedVectorCandidateCorpus, verifyVectorCapabilityRetry } from '../helpers/vector-candidate-corpus.ts';
+import { candidateColumn, candidateVector, clearSelectiveCandidateLanguage, markSelectiveCandidateLanguage, seedVectorCandidateCorpus, selectiveCandidateLanguage, verifyVectorCapabilityRetry } from '../helpers/vector-candidate-corpus.ts';
 
 describe('PGLite filtered ANN candidate safety', () => {
   let engine: PGLiteEngine;
@@ -40,11 +40,13 @@ describe('PGLite filtered ANN candidate safety', () => {
     const capability = engine as unknown as { vectorIterativeScan?: Promise<boolean> };
     const previous = capability.vectorIterativeScan;
     capability.vectorIterativeScan = Promise.resolve(false);
+    // One chunk per allowed page (~1% of chunks): the ef_search window, even at its 1000 cap, cannot fill 75.
+    await markSelectiveCandidateLanguage(engine);
     await engine.executeRaw('SET enable_seqscan = off');
     await engine.executeRaw('SET enable_sort = off');
     try {
       const events: Array<{ reason?: string; exactFallback?: boolean }> = [];
-      const hits = await engine.searchVector(candidateVector, { limit: 75, sourceId: 'ann-allowed', excludePrivate: true, embeddingColumn: candidateColumn, onVectorPoolMeta: meta => events.push(meta) });
+      const hits = await engine.searchVector(candidateVector, { limit: 75, sourceId: 'ann-allowed', excludePrivate: true, language: selectiveCandidateLanguage, embeddingColumn: candidateColumn, onVectorPoolMeta: meta => events.push(meta) });
       expect(hits.length).toBeLessThan(75);
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ reason: 'iterative_scan_unavailable', exactFallback: false });
@@ -52,6 +54,7 @@ describe('PGLite filtered ANN candidate safety', () => {
       capability.vectorIterativeScan = previous;
       await engine.executeRaw('RESET enable_seqscan');
       await engine.executeRaw('RESET enable_sort');
+      await clearSelectiveCandidateLanguage(engine);
     }
   }, 60_000);
 

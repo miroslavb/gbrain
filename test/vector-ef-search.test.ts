@@ -26,6 +26,7 @@ import {
   hnswEfSearchFor,
   HNSW_EF_SEARCH_DEFAULT,
   HNSW_EF_SEARCH_MAX,
+  HNSW_EF_SEARCH_MULTIPLIER,
 } from '../src/core/vector-index.ts';
 import {
   SEARCH_LIMIT,
@@ -37,15 +38,22 @@ import {
 describe('hnswEfSearchFor', () => {
   test('floors at the pgvector default', () => {
     expect(hnswEfSearchFor(0)).toBe(HNSW_EF_SEARCH_DEFAULT);
-    expect(hnswEfSearchFor(39)).toBe(HNSW_EF_SEARCH_DEFAULT);
+    expect(hnswEfSearchFor(9)).toBe(HNSW_EF_SEARCH_DEFAULT);
   });
 
-  test('tracks the candidate request past the default', () => {
-    expect(hnswEfSearchFor(100)).toBe(100);
-    expect(hnswEfSearchFor(500)).toBe(500); // limit=100 → innerLimit 500
+  test('scans a multiple of the candidate request (fork 2026-09-28: recall)', () => {
+    expect(HNSW_EF_SEARCH_MULTIPLIER).toBe(4);
+    expect(hnswEfSearchFor(39)).toBe(156);
+    expect(hnswEfSearchFor(100)).toBe(400); // default innerLimit
+    expect(hnswEfSearchFor(250)).toBe(HNSW_EF_SEARCH_MAX);
+  });
+
+  test('never scans fewer than the candidate request', () => {
+    for (const n of [1, 40, 100, 249, 250, 500, 1000]) expect(hnswEfSearchFor(n)).toBeGreaterThanOrEqual(Math.min(n, HNSW_EF_SEARCH_MAX));
   });
 
   test('caps at the GUC maximum', () => {
+    expect(hnswEfSearchFor(500)).toBe(HNSW_EF_SEARCH_MAX); // limit=100 → innerLimit 500
     expect(hnswEfSearchFor(5000)).toBe(HNSW_EF_SEARCH_MAX);
   });
 });

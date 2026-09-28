@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PostgresEngine } from '../../src/core/postgres-engine.ts';
 import { hasDatabase, setupDB, teardownDB } from './helpers.ts';
-import { candidateColumn, candidateVector, seedVectorCandidateCorpus, verifyVectorCapabilityRetry } from '../helpers/vector-candidate-corpus.ts';
+import { candidateColumn, candidateVector, clearSelectiveCandidateLanguage, markSelectiveCandidateLanguage, seedVectorCandidateCorpus, selectiveCandidateLanguage, verifyVectorCapabilityRetry } from '../helpers/vector-candidate-corpus.ts';
 import type { SearchOpts } from '../../src/core/types.ts';
 
 (hasDatabase() ? describe : describe.skip)('Postgres filtered ANN candidate safety', () => {
@@ -87,11 +87,13 @@ import type { SearchOpts } from '../../src/core/types.ts';
     const previous = capability.vectorIterativeScan;
     const start = statements.length;
     capability.vectorIterativeScan = Promise.resolve(false);
+    // One chunk per allowed page (~1% of chunks): the ef_search window, even at its 1000 cap, cannot fill 75.
+    await markSelectiveCandidateLanguage(engine);
     await engine.executeRaw('SET enable_seqscan = off');
     await engine.executeRaw('SET enable_sort = off');
     try {
       const events: unknown[] = [];
-      const hits = await engine.searchVector(candidateVector, { ...opts, onVectorPoolMeta: meta => events.push(meta) });
+      const hits = await engine.searchVector(candidateVector, { ...opts, language: selectiveCandidateLanguage, onVectorPoolMeta: meta => events.push(meta) });
       expect(hits).toHaveLength(75);
       expect(hits.every(hit => hit.source_id === 'ann-allowed' && Number(hit.slug.split('-').at(-1)) % 100 !== 1)).toBe(true);
       expect(events).toEqual([]);
@@ -103,6 +105,7 @@ import type { SearchOpts } from '../../src/core/types.ts';
       capability.vectorIterativeScan = previous;
       await engine.executeRaw('RESET enable_seqscan');
       await engine.executeRaw('RESET enable_sort');
+      await clearSelectiveCandidateLanguage(engine);
     }
   }, 60_000);
 
@@ -165,13 +168,14 @@ import type { SearchOpts } from '../../src/core/types.ts';
     const capability = engine as unknown as { vectorIterativeScan?: Promise<boolean> };
     const previous = capability.vectorIterativeScan;
     capability.vectorIterativeScan = Promise.resolve(false);
+    await markSelectiveCandidateLanguage(engine);
     await engine.executeRaw('SET enable_seqscan = off');
     await engine.executeRaw('SET enable_sort = off');
     delayExact = true;
     try {
       const events: Array<{ reason?: string; exactFallback?: boolean }> = [];
       const start = performance.now();
-      const hits = await engine.searchVector(candidateVector, { ...opts, onVectorPoolMeta: meta => events.push(meta) });
+      const hits = await engine.searchVector(candidateVector, { ...opts, language: selectiveCandidateLanguage, onVectorPoolMeta: meta => events.push(meta) });
       expect(performance.now() - start).toBeLessThan(15_000);
       expect(hits.length).toBeGreaterThan(0);
       expect(hits.length).toBeLessThan(75);
@@ -183,6 +187,7 @@ import type { SearchOpts } from '../../src/core/types.ts';
       capability.vectorIterativeScan = previous;
       await engine.executeRaw('RESET enable_seqscan');
       await engine.executeRaw('RESET enable_sort');
+      await clearSelectiveCandidateLanguage(engine);
     }
   }, 30_000);
 });

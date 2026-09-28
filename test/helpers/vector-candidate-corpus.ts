@@ -29,6 +29,20 @@ export async function seedVectorCandidateCorpus(engine: BrainEngine): Promise<vo
   await refreshProjectionStatistics(engine);
 }
 
+/** Marks chunk 0 of every allowed page (~1% of the fixture) so a filtered ANN scan underfills at any ef_search. */
+export const selectiveCandidateLanguage = 'selective-fixture';
+
+export async function markSelectiveCandidateLanguage(engine: BrainEngine): Promise<void> {
+  await engine.executeRaw(`UPDATE content_chunks cc SET language = '${selectiveCandidateLanguage}' FROM pages p
+    WHERE cc.page_id = p.id AND cc.chunk_index = 0 AND p.source_id = 'ann-allowed'`);
+  await engine.executeRaw('ANALYZE content_chunks');
+}
+
+export async function clearSelectiveCandidateLanguage(engine: BrainEngine): Promise<void> {
+  await engine.executeRaw(`UPDATE content_chunks SET language = 'typescript' WHERE language = '${selectiveCandidateLanguage}'`);
+  await engine.executeRaw('ANALYZE content_chunks');
+}
+
 export async function verifyVectorCapabilityRetry(engine: BrainEngine): Promise<void> {
   const original = engine.executeRaw;
   const capability = engine as unknown as { vectorIterativeScan?: Promise<boolean> };
