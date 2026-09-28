@@ -59,9 +59,17 @@ export const HNSW_EF_SEARCH_MAX = 1000;
  * pool silently truncates at ~40 and everything downstream (per-page
  * collapse, RRF fusion, rerankers) operates on a fraction of the pool it
  * was designed for. Shared helper keeps postgres + pglite in lockstep.
+ *
+ * Fork 2026-09-28: the scan list is HNSW_EF_SEARCH_MULTIPLIER times the
+ * candidate request. With ef_search equal to the request, the filtered
+ * production query returned on average 69% of the exact top-100 (minimum
+ * 21%) over the 63 retrieval-gate questions and lost the gold page for 4 of
+ * 55; at 4x it lost 1, for about 6 ms more per vector scan (3.8 -> 10.1 ms).
  */
+export const HNSW_EF_SEARCH_MULTIPLIER = 4;
+
 export function hnswEfSearchFor(candidateLimit: number): number {
-  const wanted = Math.ceil(candidateLimit);
+  const wanted = Math.ceil(candidateLimit * HNSW_EF_SEARCH_MULTIPLIER);
   return Math.min(Math.max(wanted, HNSW_EF_SEARCH_DEFAULT), HNSW_EF_SEARCH_MAX);
 }
 
