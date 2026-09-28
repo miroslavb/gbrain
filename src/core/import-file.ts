@@ -38,6 +38,7 @@ import { buildEmbedSkipMarker, EMBED_SKIP_KEY } from './embed-skip.ts';
 import {
   QUARANTINE_KEY,
   CONTENT_FLAG_KEY,
+  dropOversizedGateMarkers,
   buildQuarantineMarker,
   buildContentFlagMarker,
 } from './quarantine.ts';
@@ -347,6 +348,7 @@ export async function importFromContent(
     delete parsed.frontmatter[ATOMS_SCAN_HASH_KEY];
   }
 
+  dropOversizedGateMarkers(parsed.frontmatter); // fork: the gate below re-derives oversize markers
   // Vendor-neutral guardrail seam (observe-only, fail-open). Runs AFTER
   // parseMarkdown and the size guard, BEFORE content-sanity, hash compute,
   // chunking, embedding, and DB write — so a registered guardrail sees the

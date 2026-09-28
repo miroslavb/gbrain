@@ -151,3 +151,21 @@ export function getContentFlag(
 export function hasContentFlag(frontmatter: Record<string, unknown> | null | undefined): boolean {
   return getContentFlag(frontmatter) !== null;
 }
+
+/**
+ * Fork 2026-09-28: drops the gate-owned `oversized` embed_skip / content_flag
+ * markers so the content-sanity gate re-derives them from the current body
+ * and bytes_block. Trusted imports otherwise carry the old marker forward and
+ * `quarantine clear` keeps embed_skip, so a page that shrank (or a brain whose
+ * bytes_block was raised) stayed out of search. Markers with any other reason
+ * (e.g. embed_skip `finite_lexical_symbols`, content_flag `markup_heavy`) stay.
+ */
+export function dropOversizedGateMarkers(frontmatter: Record<string, unknown> | null | undefined): void {
+  if (!frontmatter) return;
+  for (const key of ['embed_skip', CONTENT_FLAG_KEY]) {
+    const marker = frontmatter[key];
+    if (marker && typeof marker === 'object' && (marker as Record<string, unknown>).reason === 'oversized') {
+      delete frontmatter[key];
+    }
+  }
+}
