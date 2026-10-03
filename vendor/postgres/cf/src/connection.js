@@ -565,6 +565,9 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
     }
 
     query = results = errorResponse = null
+    // Errors/cancellation can arrive after DataRow without CommandComplete.
+    // A new result must start at index zero, even on that partial-row path.
+    rows = 0
     result = new Result()
     connectTimer.cancel()
 

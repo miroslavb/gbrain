@@ -2312,6 +2312,11 @@ Atom output parsing and exact-quote grounding live in extract-atoms-output.ts;
 extract-atoms.ts re-exports its existing public parser API. Empty-scan health
 publication and input clipping are named helpers. Preserve the existing module
 and function ceilings when changing this phase.
+Partial SQL errors or cancellation can follow delivered DataRow messages without
+CommandComplete. All vendored PostgreSQL runtimes reset the result row index at
+ReadyForQuery; otherwise later reads contain leading holes and falsely reject
+valid source/writer authorization. Real PostgreSQL tests cover SQL error and
+partial-row cancellation on the same backend for ESM and CJS imports.
 
 ---
 

@@ -12,7 +12,7 @@ follow it. The map below is generated from the AST (`scripts/generate-wave-1-mov
 [`wave-1-moves.json`](wave-1-moves.json). Where a contribution goes today is in
 [CONTRIBUTING.md, "Where does my change go?"](../../CONTRIBUTING.md#where-does-my-change-go).
 
-Base `92e06c6c2cc3`, head `27ddcb1c1602`.
+Base `92e06c6c2cc3`, head `b75dea62671d`.
 
 ## Landing window
 
@@ -631,8 +631,27 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `ATOM_TYPES` | moved | module-private | `src/core/cycle/extract-atoms-schema.ts:ATOM_TYPES` |
+| `AtomsParseOutcome` | moved | `src/core/cycle/extract-atoms.ts:AtomsParseOutcome` | `src/core/cycle/extract-atoms-output.ts:AtomsParseOutcome` |
+| `COMPOUND_CLAIM_JOIN_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:COMPOUND_CLAIM_JOIN_RE` |
+| `CONCEPT_LABEL_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:CONCEPT_LABEL_RE` |
+| `CONTEXTLESS_GENERIC_SUBJECT_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:CONTEXTLESS_GENERIC_SUBJECT_RE` |
+| `CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE` |
+| `DEICTIC_START_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:DEICTIC_START_RE` |
 | `ExtractAtomsOpts` | extracted | `src/core/cycle/extract-atoms.ts:ExtractAtomsOpts` | `src/core/persistence/atom-maintenance.ts:readAtomOrigin` |
-| `runPhaseExtractAtoms` | extracted | `src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms` | `src/core/persistence/atom-maintenance.ts:readAtomOrigin` |
+| `ExtractedAtom` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:ExtractedAtom` |
+| `INLINE_ENUMERATION_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:INLINE_ENUMERATION_RE` |
+| `MAX_GROUNDED_BODY_CHARS` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:MAX_GROUNDED_BODY_CHARS` |
+| `MIN_PAGE_CHARS_FOR_EXTRACTION` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:MIN_PAGE_CHARS_FOR_EXTRACTION` |
+| `RU_CONTEXTLESS_GENERIC_SUBJECT_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:RU_CONTEXTLESS_GENERIC_SUBJECT_RE` |
+| `RU_DEICTIC_OR_VAGUE_START_RE` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:RU_DEICTIC_OR_VAGUE_START_RE` |
+| `atomsFromParsedArray` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:atomsFromParsedArray` |
+| `isSelfContainedAtomicEvidence` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:isSelfContainedAtomicEvidence` |
+| `isSingleAtomicSentence` | moved | module-private | `src/core/cycle/extract-atoms-output.ts:isSingleAtomicSentence` |
+| `parseAtomsOutcome` | moved | `src/core/cycle/extract-atoms.ts:parseAtomsOutcome` | `src/core/cycle/extract-atoms-output.ts:parseAtomsOutcome` |
+| `parseAtomsOutcomeInner` | split | module-private | `src/core/cycle/extract-atoms-output.ts:atomsFromParsedArray`<br>`src/core/cycle/extract-atoms-output.ts:parseArrayAtOffset`<br>`src/core/cycle/extract-atoms-output.ts:parseAtomsOutcomeInner` |
+| `parseAtomsResponse` | moved | `src/core/cycle/extract-atoms.ts:parseAtomsResponse` | `src/core/cycle/extract-atoms-output.ts:parseAtomsResponse` |
+| `resolveExtractAtomsBudgetPricingPolicy` | extracted | `src/core/cycle/extract-atoms.ts:resolveExtractAtomsBudgetPricingPolicy` | `src/core/embedding-migration-budget.ts:authorizeMigrationBudget` |
+| `runPhaseExtractAtoms` | extracted | `src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms` | `src/core/cycle/extract-atoms.ts:emptyAtomScanResult`<br>`src/core/persistence/atom-maintenance.ts:readAtomOrigin` |
 
 ### `src/core/cycle/extract-takes.ts`
 
@@ -1629,6 +1648,7 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/diarize/payload-fitter.ts:fitBatch`
 - `src/core/diarize/payload-fitter.ts:fitSummarize`
 - `src/core/diarize/payload-fitter.ts:summarizeCluster`
+- `src/core/embed-stale-facts.ts:resolveCast`
 - `src/core/embedding-dim-check.ts:_resetFactsDimCheckCacheForTest`
 - `src/core/enrichment/budget.ts:BudgetError.constructor`
 - `src/core/enrichment/budget.ts:BudgetErrorCode`

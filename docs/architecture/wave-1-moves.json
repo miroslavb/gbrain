@@ -1,7 +1,7 @@
 {
   "generatedBy": "scripts/generate-wave-1-moves.ts",
   "base": "92e06c6c2cc3",
-  "head": "27ddcb1c1602",
+  "head": "b75dea62671d",
   "landing": {
     "integrationOwner": "the wave-1 PR author (ports upstream fixes into moved code until merge)",
     "freezeStart": "when the wave-1 PR is marked ready for review",
@@ -2180,6 +2180,60 @@
       ]
     },
     {
+      "old": "src/core/cycle/extract-atoms.ts:AtomsParseOutcome",
+      "kind": "moved",
+      "facade": "src/core/cycle/extract-atoms.ts:AtomsParseOutcome",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:AtomsParseOutcome"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:COMPOUND_CLAIM_JOIN_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:COMPOUND_CLAIM_JOIN_RE"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:CONCEPT_LABEL_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:CONCEPT_LABEL_RE"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:CONTEXTLESS_GENERIC_SUBJECT_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:CONTEXTLESS_GENERIC_SUBJECT_RE"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:DEICTIC_START_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:DEICTIC_START_RE"
+      ]
+    },
+    {
       "old": "src/core/cycle/extract-atoms.ts:ExtractAtomsOpts",
       "kind": "extracted",
       "facade": "src/core/cycle/extract-atoms.ts:ExtractAtomsOpts",
@@ -2189,11 +2243,131 @@
       ]
     },
     {
+      "old": "src/core/cycle/extract-atoms.ts:ExtractedAtom",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:ExtractedAtom"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:INLINE_ENUMERATION_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:INLINE_ENUMERATION_RE"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:MAX_GROUNDED_BODY_CHARS",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:MAX_GROUNDED_BODY_CHARS"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:MIN_PAGE_CHARS_FOR_EXTRACTION",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:MIN_PAGE_CHARS_FOR_EXTRACTION"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:RU_CONTEXTLESS_GENERIC_SUBJECT_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:RU_CONTEXTLESS_GENERIC_SUBJECT_RE"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:RU_DEICTIC_OR_VAGUE_START_RE",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:RU_DEICTIC_OR_VAGUE_START_RE"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:atomsFromParsedArray",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:atomsFromParsedArray"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:isSelfContainedAtomicEvidence",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:isSelfContainedAtomicEvidence"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:isSingleAtomicSentence",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:isSingleAtomicSentence"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:parseAtomsOutcome",
+      "kind": "moved",
+      "facade": "src/core/cycle/extract-atoms.ts:parseAtomsOutcome",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:parseAtomsOutcome"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:parseAtomsOutcomeInner",
+      "kind": "split",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:atomsFromParsedArray",
+        "src/core/cycle/extract-atoms-output.ts:parseArrayAtOffset",
+        "src/core/cycle/extract-atoms-output.ts:parseAtomsOutcomeInner"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:parseAtomsResponse",
+      "kind": "moved",
+      "facade": "src/core/cycle/extract-atoms.ts:parseAtomsResponse",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/extract-atoms-output.ts:parseAtomsResponse"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:resolveExtractAtomsBudgetPricingPolicy",
+      "kind": "extracted",
+      "facade": "src/core/cycle/extract-atoms.ts:resolveExtractAtomsBudgetPricingPolicy",
+      "wasExported": true,
+      "new": [
+        "src/core/embedding-migration-budget.ts:authorizeMigrationBudget"
+      ]
+    },
+    {
       "old": "src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms",
       "kind": "extracted",
       "facade": "src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms",
       "wasExported": true,
       "new": [
+        "src/core/cycle/extract-atoms.ts:emptyAtomScanResult",
         "src/core/persistence/atom-maintenance.ts:readAtomOrigin"
       ]
     },
@@ -6670,6 +6844,7 @@
     "src/core/diarize/payload-fitter.ts:fitBatch",
     "src/core/diarize/payload-fitter.ts:fitSummarize",
     "src/core/diarize/payload-fitter.ts:summarizeCluster",
+    "src/core/embed-stale-facts.ts:resolveCast",
     "src/core/embedding-dim-check.ts:_resetFactsDimCheckCacheForTest",
     "src/core/enrichment/budget.ts:BudgetError.constructor",
     "src/core/enrichment/budget.ts:BudgetErrorCode",

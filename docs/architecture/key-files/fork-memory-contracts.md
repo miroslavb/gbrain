@@ -36,7 +36,7 @@ metadata reads before lookup; its callers in `src/core/ops/facts.ts` and
   retaining explicit narrowing and source isolation. Regression coverage:
   `test/sync-source-strategy.serial.test.ts` (real disposable Git/PGLite) and
   `test/sync-strategy-selection.test.ts` (boundary/precedence controls).
-- `src/core/cycle/atom-safety.ts` + `src/core/cycle/extract-atoms.ts` — pre-write atom safety and shared phase budget policy. The extractor and semantic-validator routes are priced together, including operator `pricing.overrides`; a cap is enforced only when both routes are priceable. `BudgetExhausted` remains a typed phase stop instead of being rewritten as a semantic rejection. Before the semantic batch, exact-quote atoms fail closed on multilingual compound joins, spaced slashes, parenthetical/list enumerations, and vague/deictic fragments; the semantic rubric treats the body itself (not a reparative title) as the standalone claim surface. Pinned by `test/cycle/atom-safety.test.ts` and `test/extract-atoms-unpriced-model.test.ts`.
+- `src/core/cycle/atom-safety.ts` + `src/core/cycle/extract-atoms.ts` — pre-write atom safety and shared phase budget policy. Extractor, semantic-validator and embedding routes must all have known prices, including operator `pricing.overrides`, before the first chargeable request; unknown prices fail closed and never remove the shared cap. Parsing and exact-quote helpers live in `extract-atoms-output.ts`. `BudgetExhausted` remains a typed phase stop instead of being rewritten as a semantic rejection. Before the semantic batch, exact-quote atoms fail closed on multilingual compound joins, spaced slashes, parenthetical/list enumerations, and vague/deictic fragments; the semantic rubric treats the body itself (not a reparative title) as the standalone claim surface. Pinned by `test/cycle/atom-safety.test.ts` and `test/extract-atoms-unpriced-model.test.ts`.
 - `src/core/cycle/atom-processing.ts` — opt-in, epoch-fenced aggregate processing ledger in one config row. Counts only real page dispatches/attempts and terminal successes (including empty or quality-rejected results), failures and completed atom publications; transcripts are excluded. The operator initializes the epoch; no helper enables extraction. Atomic increments serialize writers, and an old epoch cannot overwrite a reset. No source text or page coordinates are stored. A failed observation write fails the phase instead of silently certifying incomplete counters.
 - `src/core/facts/page-projection.ts` — source-scoped body-only page projection inside fact transactions; keeps the last indexed content_hash unchanged so sync still rechunks. `file-rollback.ts` compensates only the writer’s own atomic rename on a DB failure. `FactBatchInsertOpts.pageProjection` shares the fact insert transaction in both engines. Fence supersession uses durable row coordinates and atomically retires the old DB row.
 - `src/core/timeline-write-through.ts` — Locked canonical timeline insertion; projects the parsed final file timeline so trailing fact/take fences retain identical placement in the file and page API. Tests: `test/timeline-write-through.test.ts` and the both-engine `test/helpers/fact-page-contract.ts` timeline-tail case.
@@ -144,3 +144,14 @@ on schema157 and old code until separate operator approval.
 - Structural golden changes reflect fork migration IDs/tables, source-aware SQL,
   world-only API descriptors and bounded maintenance flags. Retrieval gold and
   quality thresholds are unchanged. Restored upstream tests stay in the suite.
+
+### PostgreSQL partial-result recovery
+
+All three vendored PostgreSQL driver builds reset their row index at
+`ReadyForQuery`. A server error or cancellation after `DataRow` can skip
+`CommandComplete`; keeping the old index made the next result sparse and
+produced false source/writer authorization failures. The guard itself is
+unchanged. Real PostgreSQL tests exercise errors and cancellation after partial
+rows through ESM and CJS imports and require a dense successor result on the
+same backend connection. Reproduction before the fix and readback after it are
+retained in the stage receipts.
