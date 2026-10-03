@@ -693,3 +693,8 @@ state before publication; retire its fence and index atomically, and preserve
 receipt replay after restart. Never turn an unknown replacement into an ordinary
 append. Structural doctor goldens normalize only the known clean/dirty Git drift
 success messages; probe failures remain visible. Retrieval gold is unchanged.
+
+<!-- isolated-upgrade-fixture-parity-20261003 -->
+The PostgreSQL federated-link fixture sets `facts.default_visibility=private`,
+matching its PGLite twin when testing legacy private-page exclusion. Source
+grants and archived/non-federated exclusions remain asserted independently.

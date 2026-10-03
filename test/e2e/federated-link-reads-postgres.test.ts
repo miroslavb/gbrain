@@ -25,6 +25,9 @@ const describePg = hasDatabase() ? describe : describe.skip;
 describePg('#5827 federated link reads — Postgres', () => {
   beforeAll(async () => {
     await setupDB();
+    // Match the PGLite twin's legacy-private fixture posture explicitly;
+    // this host's default world-only policy intentionally includes that page.
+    await getEngine().setConfig('facts.default_visibility', 'private');
     await seedFederatedLinkFixture(getEngine());
   }, 90_000);
 
@@ -75,6 +78,23 @@ describePg('#5827 federated link reads — Postgres', () => {
     const auth = { token: '', clientId: 'client-a', scopes: ['read'], sourceId: 'wiki', allowedSources: ['wiki'] } as AuthInfo;
     const opts: DispatchOpts = { remote: true, transport: 'http', sourceId: 'wiki', auth, localFederatedSourceIds: [...FEDERATED_SET] };
     expect((await call(opts, 'get_backlinks', { slug: 'companies/acme-example' })).body).toEqual([]);
+  });
+
+  test('world-only page posture includes legacy private pages without widening source grants', async () => {
+    const engine = getEngine();
+    await engine.setConfig('facts.default_visibility', 'world');
+    try {
+      expect(edgeKeys((await call(await noGrantOpts(), 'get_backlinks', { slug: 'companies/acme-example' })).body)).toEqual([
+        'people/alice-example(business)->companies/acme-example(business)',
+        'people/secret-example(business)->companies/acme-example(business)',
+      ]);
+      const auth = { token: '', clientId: 'client-a', scopes: ['read'], sourceId: 'wiki', allowedSources: ['wiki'] } as AuthInfo;
+      const opts: DispatchOpts = { remote: true, transport: 'http', sourceId: 'wiki', auth, localFederatedSourceIds: [...FEDERATED_SET] };
+      expect((await call(opts, 'get_backlinks', { slug: 'companies/acme-example' })).body).toEqual([]);
+      expect((await call(await noGrantOpts(), 'get_backlinks', { slug: 'companies/priv-only-co', source_id: 'priv' })).body.error).toBe('permission_denied');
+    } finally {
+      await engine.setConfig('facts.default_visibility', 'private');
+    }
   });
 
   test('trusted local unqualified backlinks merge one scalar read per federated source; graph nodes carry source ids', async () => {
