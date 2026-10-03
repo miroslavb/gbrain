@@ -36,7 +36,7 @@ import type { ChunkInput } from '../src/core/types.ts';
 /** Offline embed stub so inline-proceed paths (posture tokenmax) don't network. */
 function stubOfflineEmbed(): void {
   __setEmbedTransportForTests(async ({ values }: any) => ({
-    embeddings: values.map(() => new Array(1536).fill(0)),
+    embeddings: values.map(() => new Array(1536).fill(0.001)),
     usage: { tokens: 0 },
   }) as any);
 }
@@ -70,6 +70,7 @@ beforeEach(async () => {
     embedding_dimensions: 1536,
     env: { OPENAI_API_KEY: 'sk-test-costgate' },
   });
+  stubOfflineEmbed();
   repoPath = mkdtempSync(join(tmpdir(), 'gbrain-costgate-'));
   execSync('git init', { cwd: repoPath, stdio: 'pipe' });
   execSync('git config user.email "t@t.com"', { cwd: repoPath, stdio: 'pipe' });

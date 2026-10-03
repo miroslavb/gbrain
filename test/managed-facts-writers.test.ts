@@ -51,8 +51,19 @@ const usage = { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache
 beforeAll(async () => {
   configureGateway({ chat_model: 'anthropic:claude-sonnet-4-6', embedding_model: 'openai:text-embedding-3-large', embedding_dimensions: 1536,
     env: { ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-test' } });
-  __setChatTransportForTests(async (): Promise<ChatResult> => ({ text: chatReply, blocks: [], stopReason: 'end', usage,
-    model: 'anthropic:claude-sonnet-4-6', providerId: 'anthropic' }));
+  __setChatTransportForTests(async (opts): Promise<ChatResult> => {
+    let text = chatReply;
+    if (String(opts.system).includes('mandatory quality validator for conversation-derived')) {
+      const payload = JSON.parse(String(opts.messages[0]?.content));
+      text = JSON.stringify({ decisions: payload.candidates.map((candidate: { id: string }) => ({
+        id: candidate.id, action: 'accept', fully_supported: true, exactly_one_proposition: true,
+        self_contained: true, correct_entity_attribution: true, no_hidden_causation: true,
+        no_overgeneralization: true, no_sensitive_content: true,
+      })) });
+    }
+    return { text, blocks: [], stopReason: 'end', usage,
+      model: 'anthropic:claude-sonnet-4-6', providerId: 'anthropic' };
+  });
   __setEmbedTransportForTests((async ({ values }: { values: string[] }) => ({ embeddings: values.map(() => Array(1536).fill(0.01)) })) as never);
   if (backends.includes('pglite')) {
     const engine = new PGLiteEngine();

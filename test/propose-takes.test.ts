@@ -1149,9 +1149,9 @@ describe('pricing.overrides reach the base-phase meter (#4312)', () => {
         const pages = [buildPage({ slug: 'wiki/override', body: 'an operator rate should price the gate' })];
         const { engine, captured } = buildMockEngine({ pages });
         (engine as unknown as { getConfig: (k: string) => Promise<string | null> }).getConfig =
-          async (k: string) => (k === 'pricing.overrides' ? overrides : null);
+          async (k: string) => (k === 'pricing.overrides' ? overrides : k === 'cycle.propose_takes.enabled' ? 'true' : null);
         const extractor: ProposeTakesExtractor = async () => [
-          { claim_text: 'an operator rate should price the gate', kind: 'take', holder: 'brain', weight: 0.5 },
+          { claim_text: 'an operator rate should price the gate', evidence_span: 'an operator rate should price the gate', kind: 'take', holder: 'brain', weight: 0.5 },
         ];
         const result = await runPhaseProposeTakes(buildCtx(engine), { extractor, budgetUsd: 0.000001 });
         return { result, inserted: captured.some(c => c.sql.includes('INSERT INTO take_proposals')) };

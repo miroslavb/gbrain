@@ -1,9 +1,8 @@
 /**
- * Fork contract: the one-time `protocol_activation` projection rebuild (fork
- * migration 161, upstream 153) keeps title-mode contextual vectors of
- * identical chunks. buildContextualPrefix is unchanged since v0.50, so those
- * vectors were produced by the same wrapper; discarding them would force a
- * brain-wide re-embed. Ordinary rebuilds still discard contextual vectors.
+ * v0.60 port decision: unproven legacy contextual vectors are invalidated even
+ * during protocol activation. Raw-text hashes do not prove the title prefix
+ * supplied to the embedder. The required stage rebuild/re-embed replaces the
+ * retired fork shortcut; no input hash may be manufactured to reuse a vector.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -15,7 +14,7 @@ const sourceId = 'fork-contextual-activation';
 const vector = new Float32Array(1536); vector[0] = 0.5; vector[2] = -0.125;
 const vectorText = `[${Array.from(vector).join(',')}]`;
 
-describe('fork contextual vector preservation on protocol activation', () => {
+describe('fork contextual vector provenance on protocol activation', () => {
   let engine: PGLiteEngine;
   beforeAll(async () => {
     engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema();
@@ -38,7 +37,7 @@ describe('fork contextual vector preservation on protocol activation', () => {
   const vectors = (pageId: number) => engine.executeRaw<{ embedding: string | null }>(
     'SELECT embedding FROM content_chunks WHERE page_id=$1 ORDER BY chunk_index', [pageId]);
 
-  test('activation keeps identical title-mode vectors; an ordinary rebuild does not', async () => {
+  test('activation and ordinary rebuild both clear unproven title-mode vectors', async () => {
     const kept = await seed('kept-page');
     const activation = MIGRATIONS.find(m => m.name === 'verified_text_projection_activation')!;
     expect(activation.version).toBe(161);
@@ -46,7 +45,7 @@ describe('fork contextual vector preservation on protocol activation', () => {
     expect(await rebuildPendingPageProjections(engine, 100)).toEqual({ rebuilt: 1, superseded: 0 });
     const afterActivation = await vectors(kept);
     expect(afterActivation.length).toBeGreaterThan(0);
-    for (const row of afterActivation) expect(row.embedding).toBe(vectorText);
+    for (const row of afterActivation) expect(row.embedding).toBeNull();
 
     // A non-activation rebuild of the same contextual page must re-embed.
     await engine.executeRaw(`UPDATE pages SET text_projection_revision=NULL WHERE id=$1`, [kept]);

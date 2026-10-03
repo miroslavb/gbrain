@@ -17,7 +17,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import { __thinkAdapter } from '../src/core/think/index.ts';
-import { resetGateway } from '../src/core/ai/gateway.ts';
+import { resetGateway, __unconfigureGatewayForTests } from '../src/core/ai/gateway.ts';
 import { AIConfigError } from '../src/core/ai/errors.ts';
 import { withEnv, emptyHome } from './helpers/with-env.ts';
 
@@ -131,10 +131,10 @@ describe('think gateway adapter — #1698 slash form + explicit-model fork', () 
   });
 
   test('create-callback fork: explicit rethrows AIConfigError; non-explicit returns the sentinel', async () => {
-    await withEnv({ ANTHROPIC_API_KEY: 'sk-test-fake' }, async () => {
+    await withEnv({ ANTHROPIC_API_KEY: 'sk-test-fake', GBRAIN_HOME: emptyHome() }, async () => {
       // Build valid clients (key present → probe ok) but leave the gateway UNCONFIGURED
       // so gateway.chat() throws AIConfigError (requireConfig) at create() time.
-      resetGateway();
+      __unconfigureGatewayForTests();
       const params: any = {
         model: 'anthropic:claude-sonnet-4-6',
         max_tokens: 16,

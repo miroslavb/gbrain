@@ -21,7 +21,14 @@ beforeAll(async () => {
   await engine.connect({});
   await engine.initSchema();
   configureGateway(GATEWAY);
-  __setChatTransportForTests(async () => {
+  __setChatTransportForTests(async opts => {
+    if (String(opts.system).includes('mandatory quality validator for conversation-derived')) {
+      const payload = JSON.parse(String(opts.messages[0]?.content));
+      return { text: JSON.stringify({ decisions: payload.candidates.map((c: { id: string }) => ({
+        id: c.id, action: 'accept', fully_supported: true, exactly_one_proposition: true, self_contained: true,
+        correct_entity_attribution: true, no_hidden_causation: true, no_overgeneralization: true, no_sensitive_content: true,
+      })) }), blocks: [], stopReason: 'end', usage: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'stub', providerId: 'stub' };
+    }
     calls++;
     if (onChat) await onChat();
     active++;

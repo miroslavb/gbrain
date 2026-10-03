@@ -148,7 +148,7 @@ const PARAM_FACTORY: Record<string, Record<string, unknown>> = {
   search: { query: 'WORLDSWEEP' },
   query: { query: 'WORLDSWEEP' },
   assemble_evidence: { hits: [{ source_id: 'default', slug: WORLD_FENCE_SLUG, chunk_id: 0 }], return_unit: 'page' },
-  recall: { entity: WORLD_PAGE_SLUG },
+  recall: { entity: WORLD_PAGE_SLUG, source_id: 'default' },
   entity: { name: WORLD_PAGE_SLUG },
   synthesize: { entity: WORLD_PAGE_SLUG },
   delta: { since: SINCE_EPOCH },
@@ -767,14 +767,25 @@ describe('world-only convergence and independent access boundaries', () => {
     expect(JSON.stringify(scalar)).not.toContain(WORLD.src2Page);
   });
 
-  it('same-slug facts honor grants while legacy labels remain readable', async () => {
+  it('same-slug facts require disambiguation while explicit sources honor grants and legacy labels', async () => {
+    const ambiguous = await sweepCall('recall', { entity: WORLD_PAGE_SLUG }, 'federated');
+    expect(ambiguous.isError ?? false).toBe(false);
+    const wire = JSON.parse((ambiguous.content[0] as { text: string }).text);
+    expect(wire.facts).toEqual([]);
+    expect(wire.ambiguous_entity.candidates).toEqual(expect.arrayContaining([
+      { source_id: 'default', entity_slug: WORLD_PAGE_SLUG },
+      { source_id: SRC2, entity_slug: WORLD_PAGE_SLUG },
+    ]));
     for (const shape of ['scalar', 'federated'] as const) {
-      const res = await sweepCall('recall', { entity: WORLD_PAGE_SLUG }, shape);
+      const res = await sweepCall('recall', { entity: WORLD_PAGE_SLUG, source_id: 'default' }, shape);
       expect(res.isError ?? false).toBe(false);
       const text = JSON.stringify(res);
       expect(text).toContain(LEGACY.fact);
-      expect(text.includes(LEGACY.src2Fact)).toBe(shape === 'federated');
+      expect(text).not.toContain(LEGACY.src2Fact);
       assertNoForbiddenSentinel('recall', text);
+      const other = await sweepCall('recall', { entity: WORLD_PAGE_SLUG, source_id: SRC2 }, shape);
+      expect(JSON.stringify(other).includes(LEGACY.src2Fact)).toBe(shape === 'federated');
+      assertNoForbiddenSentinel('recall', JSON.stringify(other));
     }
     const control = await operationsByName['recall'].handler(localCtx(DENIED_SOURCE), { entity: WORLD_PAGE_SLUG });
     expect(JSON.stringify(control)).toContain(DENIED.fact);

@@ -21,7 +21,6 @@ import {
   scaffold,
   scanMigrations,
 } from '../../scripts/build-schema-migrations.ts';
-import { baseMigrations } from '../../scripts/check-schema-migration-order.ts';
 import { MIGRATIONS } from '../../src/core/migrate.ts';
 
 const REPO = resolve(import.meta.dir, '..', '..');
@@ -153,11 +152,25 @@ describe('generator diagnostics (FAIL/Why/Fix/See)', () => {
 
 describe('out-of-order landing check', () => {
   test('reads the base ref versions (pre-W3 base parses migrate.ts literals)', () => {
-    const r = spawnSync('git', ['rev-parse', '--verify', '-q', 'origin/master^{commit}'], { cwd: REPO });
-    if (r.status !== 0) return; // no origin/master in this checkout; the CI verify job fetches it
-    const base = baseMigrations('origin/master');
-    expect(base.size).toBeGreaterThan(150);
-    expect(base.get(2)).toBe('slugify_existing_pages');
+    // Do not assume the operator's origin/master tracks the upstream generation.
+    const root = mkdtempSync(join(tmpdir(), 'gbrain-pre-w3-migrations-')); dirs.push(root);
+    mkdirSync(join(root, 'src/core'), { recursive: true });
+    writeFileSync(join(root, 'src/core/migrate.ts'), `const MIGRATIONS = [
+      { version: 1, name: 'initial_schema', up: async () => {} },
+      { version: 2, name: 'slugify_existing_pages', up: async () => {} },
+      { version: 151, name: 'late_literal', up: async () => {} },
+    ];`);
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', args, { cwd: root, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } });
+      expect(result.status).toBe(0);
+    };
+    git('init', '-q'); git('add', 'src/core/migrate.ts');
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'pre-W3 literals');
+    const script = `import { baseMigrations } from ${JSON.stringify(join(REPO, 'scripts/check-schema-migration-order.ts'))}; console.log(JSON.stringify([...baseMigrations('HEAD')]));`;
+    const probe = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, GBRAIN_GUARD_ROOT: root } });
+    expect(probe.status).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual([[1,'initial_schema'], [2,'slugify_existing_pages'], [151,'late_literal']]);
+
   });
 
   test('a new migration numbered at or below the base latest fails; above passes; a reused version fails', () => {

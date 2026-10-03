@@ -142,7 +142,7 @@
         "audience_reasons": [
           "no shared declaration; 0 non-automation client(s) active in 30d"
         ],
-        "backstop_visibility": "private",
+        "backstop_visibility": "world",
         "counters_note": "local, append-only, loss-tolerant observability over the last 7d — never a source of truth",
         "instruction_visibility": "world",
         "mode": "off",
@@ -191,7 +191,7 @@
     {
       "details": {
         "kinds": [],
-        "schema_version": 1
+        "schema_version": 2
       },
       "message": "no extractions in last 7 days",
       "name": "extract_health",

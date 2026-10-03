@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -668,11 +668,37 @@ test('candidate-origin fanout stops at a bounded verification limit rather than 
     await tx.executeRaw('UPDATE pages SET source_uri=$3 WHERE source_id=$1 AND slug=$2', [f.id, f.slug, uri]);
     await tx.executeRaw(`INSERT INTO pages(source_id,slug,type,title,compiled_truth,frontmatter,source_path,source_uri)
       SELECT $1,'other/candidate-'||n,'note','Independent origin','Independent candidate '||n,'{}'::jsonb,'other/candidate-'||n||'.md',$2
-      FROM generate_series(1,101) n`, [f.id, uri]);
+      FROM generate_series(1,10001) n`, [f.id, uri]);
   }));
   await local(engine, f.registration, async () => {
     await expect(runReconcilePreview(engine, { source_id: f.id, slug: f.slug })).rejects.toMatchObject({
       code: 'source_changed', message: 'Too many candidate page origins to verify this exact file safely.' });
     expect(await engine.executeRaw('SELECT id FROM persistence_requests WHERE source_id=$1', [f.id])).toHaveLength(0);
+  });
+}), 120_000);
+
+
+test('repeated filenames across more than one candidate batch remain writable; a late directory alias refuses', async () => isolated(async engine => {
+  const f = await fixture(engine);
+  await engine.transaction(tx => withCoordinatedWrite(tx, [f.id], async () => {
+    await tx.executeRaw(`INSERT INTO pages(source_id,slug,type,title,compiled_truth,frontmatter,source_path)
+      SELECT $1,'independent/'||n||'/example','note','Independent','Separate file','{}'::jsonb,'independent/'||n||'/example.md'
+      FROM generate_series(1,105) n`, [f.id]);
+  }));
+  for (let n = 1; n <= 105; n++) {
+    const dir = join(f.root, 'independent', String(n)); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'example.md'), `Independent file ${n}`);
+  }
+  await local(engine, f.registration, async () => {
+    expect((await runReconcilePreview(engine, { source_id: f.id, slug: f.slug })).status).toBe('ready');
+    // A symlinked parent within the source can alias a later candidate to the target.
+    const alias = join(f.root, 'independent', '106');
+    symlinkSync(join(f.root, 'notes'), alias, 'dir');
+    await engine.transaction(tx => withCoordinatedWrite(tx, [f.id], async () => {
+      await tx.putPage('independent/106/example', { type: 'note', title: 'Alias', compiled_truth: 'Collision',
+        frontmatter: {}, source_path: 'independent/106/example.md' }, { sourceId: f.id });
+    }));
+    await expect(runReconcilePreview(engine, { source_id: f.id, slug: f.slug })).rejects.toMatchObject({
+      code: 'source_changed', message: 'Several pages claim the recorded canonical file.' });
   });
 }), 120_000);

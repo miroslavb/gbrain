@@ -12,7 +12,7 @@
  * Run: bun test test/e2e/dream-synthesize-pglite.test.ts
  */
 
-import { describe, expect, afterEach } from 'bun:test';
+import { describe, expect, afterEach, spyOn } from 'bun:test';
 import { keylessDreamTest as test } from '../helpers/keyless-dream-test.ts';
 import { __setChatTransportForTests, resetGateway } from '../../src/core/ai/gateway.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
@@ -218,13 +218,18 @@ describe('E2E synthesize — no API key skip path', () => {
 
   test('3A: a time-boxed cold pass labels deferred files "not yet triaged" in the headline', async () => {
     const rig = await setupRig();
+    let restoreCache: (() => void) | undefined;
     try {
       await rig.engine.setConfig('dream.synthesize.enabled', 'true');
       await rig.engine.setConfig('dream.synthesize.session_corpus_dir', rig.corpusDir);
-      // A 1ms budget + 25 uncached files: the budget check runs after each
-      // per-file cache lookup, and 25 PGLite roundtrips take well over 1ms,
-      // so at least the tail of the corpus is guaranteed to defer (exact
-      // count depends on wall-clock — assert >= 1, not equality).
+      // Exercise the real time budget with a bounded slow cache read, independent
+      // of machine speed. The other files remain uncached and must be deferred.
+      const readVerdict = rig.engine.getDreamVerdict.bind(rig.engine);
+      const cacheRead = spyOn(rig.engine, 'getDreamVerdict').mockImplementation(async (...args) => {
+        await Bun.sleep(5);
+        return readVerdict(...args);
+      });
+      restoreCache = () => cacheRead.mockRestore();
       await rig.engine.setConfig('dream.triage.max_ms', '1');
       for (let i = 0; i < 25; i++) {
         writeFileSync(
@@ -245,6 +250,7 @@ describe('E2E synthesize — no API key skip path', () => {
         expect(result.summary).toContain('dream retriage');
       });
     } finally {
+      restoreCache?.();
       await rig.cleanup();
     }
   }, 30_000);

@@ -1,7 +1,7 @@
 {
   "generatedBy": "scripts/generate-wave-1-moves.ts",
-  "base": "f8d1e3936d90",
-  "head": "43a9e6b10075",
+  "base": "92e06c6c2cc3",
+  "head": "27ddcb1c1602",
   "landing": {
     "integrationOwner": "the wave-1 PR author (ports upstream fixes into moved code until merge)",
     "freezeStart": "when the wave-1 PR is marked ready for review",
@@ -43,6 +43,25 @@
       "wasExported": true,
       "new": [
         "src/cli/command-table.ts:THIN_CLIENT_REFUSED_COMMANDS"
+      ]
+    },
+    {
+      "old": "src/cli.ts:applyThinClientSourceScope",
+      "kind": "extracted",
+      "facade": "src/cli.ts:applyThinClientSourceScope",
+      "wasExported": true,
+      "new": [
+        "src/cli/source-scope.ts:assertSingleSourceScopeFlag"
+      ]
+    },
+    {
+      "old": "src/cli.ts:formatResult",
+      "kind": "extracted",
+      "facade": "src/cli.ts:formatResult",
+      "wasExported": true,
+      "new": [
+        "src/cli/remember-format.ts:formatRememberResult",
+        "src/commands/persistence-admin.ts:runPersistenceAdminCli"
       ]
     },
     {
@@ -129,7 +148,6 @@
         "src/cli/commands/reinit-pglite.ts:run",
         "src/cli/commands/remote.ts:run",
         "src/cli/commands/repair-jsonb.ts:run",
-        "src/cli/commands/repair.ts:run",
         "src/cli/commands/report.ts:run",
         "src/cli/commands/resolvers.ts:run",
         "src/cli/commands/routing-eval.ts:run",
@@ -145,7 +163,17 @@
         "src/cli/commands/upgrade.ts:run",
         "src/cli/commands/waiting.ts:run",
         "src/cli/commands/watch.ts:run",
-        "src/cli/commands/whoknows.ts:run"
+        "src/cli/commands/whoknows.ts:run",
+        "src/commands/persistence-delegate.ts:runDeferredPersistenceCommand"
+      ]
+    },
+    {
+      "old": "src/cli.ts:isBooleanLiteral",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/op-flag-tokens.ts:isBooleanLiteral"
       ]
     },
     {
@@ -154,7 +182,98 @@
       "facade": "src/cli.ts:main",
       "wasExported": false,
       "new": [
-        "src/cli.ts:runSharedOperation"
+        "src/cli.ts:runSharedOperation",
+        "src/core/cli-preflight.ts:runCliPreflight"
+      ]
+    },
+    {
+      "old": "src/cli.ts:makeContext",
+      "kind": "extracted",
+      "facade": "src/cli.ts:makeContext",
+      "wasExported": true,
+      "new": [
+        "src/commands/serve-http-mcp.ts:callMcpTool"
+      ]
+    },
+    {
+      "old": "src/commands/apply-migrations.ts:runApplyMigrations",
+      "kind": "moved",
+      "facade": "src/commands/apply-migrations.ts:runApplyMigrations",
+      "wasExported": true,
+      "new": [
+        "src/commands/apply-migrations.ts:runLockedMigrations"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:crontabIndicatesAutopilotInstall",
+      "kind": "moved",
+      "facade": "src/commands/autopilot.ts:crontabIndicatesAutopilotInstall",
+      "wasExported": true,
+      "new": [
+        "src/commands/autopilot/jobs.ts:crontabIndicatesAutopilotInstall"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:detectInstalledTarget",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:detectInstalledJob"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:detectOpenClaw",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:detectOpenClaw"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:ephemeralStartScriptPath",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:legacyStartScriptPath"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:installCrontab",
+      "kind": "extracted",
+      "facade": "src/commands/autopilot.ts:installCrontab",
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:detectInstalledJob"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:installDaemon",
+      "kind": "extracted",
+      "facade": "src/commands/autopilot.ts:installDaemon",
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot-daemon.ts:runAutopilotDaemon"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:installEphemeralContainer",
+      "kind": "extracted",
+      "facade": "src/commands/autopilot.ts:installEphemeralContainer",
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:stripBootstrapLines"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:installSystemd",
+      "kind": "extracted",
+      "facade": "src/commands/autopilot.ts:installSystemd",
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:systemdUnitPath"
       ]
     },
     {
@@ -164,6 +283,15 @@
       "wasExported": false,
       "new": [
         "src/commands/jobs/shared.ts:parseFlag"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:plistPath",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:plistPath"
       ]
     },
     {
@@ -186,6 +314,58 @@
         "src/commands/autopilot-dispatch.ts:dispatchFreshnessSyncs",
         "src/commands/autopilot-probes.ts:runNightlyQualityProbeStep",
         "src/commands/autopilot-probes.ts:runParserProbeStep"
+      ]
+    },
+    {
+      "old": "src/commands/autopilot.ts:uninstallDaemon",
+      "kind": "extracted",
+      "facade": "src/commands/autopilot.ts:uninstallDaemon",
+      "wasExported": true,
+      "new": [
+        "src/commands/autopilot-daemon.ts:runAutopilotDaemon",
+        "src/commands/autopilot/jobs.ts:detectInstalledJob",
+        "src/commands/autopilot/jobs.ts:stripBootstrapLines"
+      ]
+    },
+    {
+      "old": "src/commands/backup.ts:runBackupCli",
+      "kind": "extracted",
+      "facade": "src/commands/backup.ts:runBackupCli",
+      "wasExported": true,
+      "new": [
+        "src/commands/persistence-delegate.ts:runDeferredPersistenceCommand"
+      ]
+    },
+    {
+      "old": "src/commands/call.ts:runCall",
+      "kind": "extracted",
+      "facade": "src/commands/call.ts:runCall",
+      "wasExported": true,
+      "new": [
+        "src/commands/persistence-admin.ts:runPersistenceAdminCli",
+        "src/commands/persistence-delegate.ts:reportPersistenceCliError",
+        "src/commands/serve-http-mcp.ts:callMcpTool",
+        "src/commands/sync/run.ts:resolveCliSyncSource"
+      ]
+    },
+    {
+      "old": "src/commands/config.ts:runConfig",
+      "kind": "extracted",
+      "facade": "src/commands/config.ts:runConfig",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/embedding-health.ts:runEmbeddingColumnRegistry",
+        "src/commands/sync/trigger.ts:runSyncTrigger",
+        "src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler"
+      ]
+    },
+    {
+      "old": "src/commands/doctor.ts:RemediationPlanShape",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/doctor/remediate.ts:RemediationPlanShape"
       ]
     },
     {
@@ -212,7 +392,6 @@
         "src/commands/doctor/checks/graph-health.ts:runGraphCoverage",
         "src/commands/doctor/checks/graph-health.ts:runOrphanRatio",
         "src/commands/doctor/checks/graph-health.ts:runStaleMentions",
-        "src/commands/doctor/checks/graph-health.ts:runTimelineHistory",
         "src/commands/doctor/checks/knowledge-health.ts:runContradictions",
         "src/commands/doctor/checks/knowledge-health.ts:runEffectiveDate",
         "src/commands/doctor/checks/knowledge-health.ts:runEvalCapture",
@@ -270,6 +449,24 @@
       ]
     },
     {
+      "old": "src/commands/doctor.ts:parseFloatFlag",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/doctor/remediate.ts:parseFloatFlag"
+      ]
+    },
+    {
+      "old": "src/commands/doctor.ts:parseIntFlag",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/doctor/remediate.ts:parseIntFlag"
+      ]
+    },
+    {
       "old": "src/commands/doctor.ts:pgbouncerPrepareCheck",
       "kind": "moved",
       "facade": null,
@@ -288,12 +485,341 @@
       ]
     },
     {
+      "old": "src/commands/doctor.ts:renderRemediationPlanLines",
+      "kind": "moved",
+      "facade": "src/commands/doctor.ts:renderRemediationPlanLines",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/remediate.ts:renderRemediationPlanLines"
+      ]
+    },
+    {
+      "old": "src/commands/doctor.ts:runRemediate",
+      "kind": "split",
+      "facade": "src/commands/doctor.ts:runRemediate",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/reindex.ts:run",
+        "src/commands/doctor/remediate.ts:remediationExitStatus",
+        "src/commands/doctor/remediate.ts:runRemediate"
+      ]
+    },
+    {
+      "old": "src/commands/doctor.ts:runRemediationPlan",
+      "kind": "moved",
+      "facade": "src/commands/doctor.ts:runRemediationPlan",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/remediate.ts:runRemediationPlan"
+      ]
+    },
+    {
       "old": "src/commands/doctor.ts:upgradeErrorResolved",
       "kind": "moved",
       "facade": "src/commands/doctor.ts:upgradeErrorResolved",
       "wasExported": true,
       "new": [
         "src/commands/doctor/checks/upgrade-health.ts:upgradeErrorResolved"
+      ]
+    },
+    {
+      "old": "src/commands/doctor/checks/calibration.ts:checkRerankerHealth",
+      "kind": "extracted",
+      "facade": "src/commands/doctor/checks/calibration.ts:checkRerankerHealth",
+      "wasExported": true,
+      "new": [
+        "src/core/import-contextual-mode.ts:resolveImportContextualMode"
+      ]
+    },
+    {
+      "old": "src/commands/doctor/checks/extraction-sync.ts:checkLinksExtractionLag",
+      "kind": "extracted",
+      "facade": "src/commands/doctor/checks/extraction-sync.ts:checkLinksExtractionLag",
+      "wasExported": true,
+      "new": [
+        "src/commands/sync/report.ts:maybeExtractionNudge"
+      ]
+    },
+    {
+      "old": "src/commands/doctor/checks/extraction-sync.ts:checkSyncFreshness",
+      "kind": "extracted",
+      "facade": "src/commands/doctor/checks/extraction-sync.ts:checkSyncFreshness",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/extraction-sync.ts:loadSyncFreshnessSources"
+      ]
+    },
+    {
+      "old": "src/commands/doctor/checks/graph-embedding.ts:checkProviderSunset",
+      "kind": "split",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider",
+        "src/core/import-contextual-mode.ts:resolveImportContextualMode"
+      ]
+    },
+    {
+      "old": "src/commands/doctor/checks/graph-embedding.ts:checkZeEmbeddingHealth",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan"
+      ]
+    },
+    {
+      "old": "src/commands/doctor/report-remote.ts:doctorReportRemote",
+      "kind": "extracted",
+      "facade": "src/commands/doctor/report-remote.ts:doctorReportRemote",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/embedding-health.ts:runEmbeddingEnvOverride",
+        "src/commands/doctor/checks/local-audits.ts:runDefaultSourcePath",
+        "src/commands/doctor/checks/local-runtime.ts:runMinionsMigration",
+        "src/commands/doctor/checks/queue-assets.ts:runQueueHealth",
+        "src/commands/doctor/checks/schema-health.ts:runPgvector",
+        "src/commands/doctor/checks/schema-health.ts:runSchemaVersion",
+        "src/commands/doctor/checks/sync-search.ts:runSearchMode",
+        "src/commands/doctor/checks/sync-search.ts:runSyncFreshness"
+      ]
+    },
+    {
+      "old": "src/commands/dream-retriage.ts:runDreamRetriage",
+      "kind": "extracted",
+      "facade": "src/commands/dream-retriage.ts:runDreamRetriage",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/synthesize-postprocess.ts:postprocessManagedSynthesis",
+        "src/core/cycle/triage-decide.ts:resolveTriageDecide"
+      ]
+    },
+    {
+      "old": "src/commands/dream.ts:runDrain",
+      "kind": "extracted",
+      "facade": "src/commands/dream.ts:runDrain",
+      "wasExported": false,
+      "new": [
+        "src/cli/commands/reindex.ts:run",
+        "src/commands/autopilot-dispatch.ts:dispatchAutoDrain",
+        "src/core/minions/handlers/extract-atoms-drain.ts:makeExtractAtomsDrainHandler"
+      ]
+    },
+    {
+      "old": "src/commands/embed.ts:embedAll",
+      "kind": "extracted",
+      "facade": "src/commands/embed.ts:embedAll",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/imports.ts:importOnePath"
+      ]
+    },
+    {
+      "old": "src/commands/embed.ts:embedAllStale",
+      "kind": "extracted",
+      "facade": "src/commands/embed.ts:embedAllStale",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/imports.ts:importOnePath"
+      ]
+    },
+    {
+      "old": "src/commands/embed.ts:healChunklessPages",
+      "kind": "extracted",
+      "facade": "src/commands/embed.ts:healChunklessPages",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/imports.ts:importOnePath"
+      ]
+    },
+    {
+      "old": "src/commands/eval-brainbench.ts:parseArgs",
+      "kind": "extracted",
+      "facade": "src/commands/eval-brainbench.ts:parseArgs",
+      "wasExported": false,
+      "new": [
+        "src/commands/facts.ts:parseRelinkArgs"
+      ]
+    },
+    {
+      "old": "src/commands/eval-longmemeval.ts:floorBreaches",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/eval/longmemeval/metrics.ts:floorBreaches"
+      ]
+    },
+    {
+      "old": "src/commands/eval-schema-authoring.ts:runEvalSchemaAuthoringCli",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/reindex.ts:run"
+      ]
+    },
+    {
+      "old": "src/commands/extract-conversation-facts.ts:runExtractConversationFacts",
+      "kind": "extracted",
+      "facade": "src/commands/extract-conversation-facts.ts:runExtractConversationFacts",
+      "wasExported": true,
+      "new": [
+        "src/commands/dream-reset-key.ts:runDreamResetKey"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:CandidateSourceResolution",
+      "kind": "moved",
+      "facade": "src/commands/extract.ts:CandidateSourceResolution",
+      "wasExported": true,
+      "new": [
+        "src/core/link-reconciliation.ts:CandidateSourceResolution"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:extractLinksFromDB",
+      "kind": "extracted",
+      "facade": "src/commands/extract.ts:extractLinksFromDB",
+      "wasExported": false,
+      "new": [
+        "src/core/link-reconciliation.ts:lookupRefsForSlugs"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:extractMarkdownLinks",
+      "kind": "moved",
+      "facade": "src/commands/extract.ts:extractMarkdownLinks",
+      "wasExported": true,
+      "new": [
+        "src/core/link-extraction.ts:extractMarkdownLinks"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:extractStaleFromDB",
+      "kind": "extracted",
+      "facade": "src/commands/extract.ts:extractStaleFromDB",
+      "wasExported": true,
+      "new": [
+        "src/core/link-reconciliation.ts:lookupRefsForSlugs"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:extractTimelineForSlugs",
+      "kind": "extracted",
+      "facade": "src/commands/extract.ts:extractTimelineForSlugs",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/links-maintenance.ts:extractManagedStaleLinks"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:extractTimelineFromDB",
+      "kind": "extracted",
+      "facade": "src/commands/extract.ts:extractTimelineFromDB",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/links-maintenance.ts:extractManagedStaleLinks"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:resolveCandidateSources",
+      "kind": "moved",
+      "facade": "src/commands/extract.ts:resolveCandidateSources",
+      "wasExported": true,
+      "new": [
+        "src/core/link-reconciliation.ts:resolveCandidateSources"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:resolveLinkFallbackDefault",
+      "kind": "moved",
+      "facade": "src/commands/extract.ts:resolveLinkFallbackDefault",
+      "wasExported": true,
+      "new": [
+        "src/core/link-reconciliation.ts:resolveLinkFallbackDefault"
+      ]
+    },
+    {
+      "old": "src/commands/extract.ts:runExtract",
+      "kind": "extracted",
+      "facade": "src/commands/extract.ts:runExtract",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/reindex.ts:run",
+        "src/core/minions/handlers/extract-ner.ts:makeExtractNerHandler",
+        "src/core/minions/handlers/extract-timeline-from-meetings.ts:makeExtractTimelineFromMeetingsHandler"
+      ]
+    },
+    {
+      "old": "src/commands/files.ts:uploadRaw",
+      "kind": "extracted",
+      "facade": "src/commands/files.ts:uploadRaw",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/run.ts:resolveCliSyncSource"
+      ]
+    },
+    {
+      "old": "src/commands/google-setup-tail.ts:runGoogleSetupTail",
+      "kind": "extracted",
+      "facade": "src/commands/google-setup-tail.ts:runGoogleSetupTail",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/waiting.ts:run"
+      ]
+    },
+    {
+      "old": "src/commands/harness-connect.ts:runHarnessConnect",
+      "kind": "extracted",
+      "facade": "src/commands/harness-connect.ts:runHarnessConnect",
+      "wasExported": true,
+      "new": [
+        "src/commands/mcp-expose.ts:parseExposeArgs"
+      ]
+    },
+    {
+      "old": "src/commands/hook.ts:hookUserPrompt",
+      "kind": "extracted",
+      "facade": "src/commands/hook.ts:hookUserPrompt",
+      "wasExported": false,
+      "new": [
+        "src/core/repair/google-file-modes.ts:googleFileModesRepair"
+      ]
+    },
+    {
+      "old": "src/commands/import.ts:runImport",
+      "kind": "extracted",
+      "facade": "src/commands/import.ts:runImport",
+      "wasExported": true,
+      "new": [
+        "src/commands/sync/finalize.ts:finalizeIncrementalSync",
+        "src/commands/sync/imports.ts:drainImports",
+        "src/commands/sync/imports.ts:resolveImportConcurrency",
+        "src/commands/sync/incremental.ts:readTypeWarningsEnabled",
+        "src/commands/sync/preflight.ts:computeFilteredDelta",
+        "src/commands/sync/preflight.ts:resolveSyncRepo",
+        "src/commands/sync/run.ts:resolveCliSyncSource",
+        "src/commands/sync/sync-run.ts:noteTypeWarning",
+        "src/core/persistence/sync-run.ts:performManagedSync"
+      ]
+    },
+    {
+      "old": "src/commands/init.ts:groupReadyByProvider",
+      "kind": "extracted",
+      "facade": "src/commands/init.ts:groupReadyByProvider",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/embedding-health.ts:runAlternativeProviders"
+      ]
+    },
+    {
+      "old": "src/commands/init.ts:resolveEmbeddingByEnv",
+      "kind": "extracted",
+      "facade": "src/commands/init.ts:resolveEmbeddingByEnv",
+      "wasExported": false,
+      "new": [
+        "src/commands/doctor/checks/embedding-health.ts:runAlternativeProviders"
       ]
     },
     {
@@ -464,7 +990,9 @@
         "src/core/minions/handlers/repair-jsonb.ts:repairJsonbHandler",
         "src/core/minions/handlers/sync-retry-failed.ts:makeSyncRetryFailedHandler",
         "src/core/minions/handlers/sync.ts:makeSyncHandler",
-        "src/core/minions/handlers/unify-types.ts:makeUnifyTypesHandler"
+        "src/core/minions/handlers/unify-types.ts:makeUnifyTypesHandler",
+        "src/core/persistence/purge-deleted.ts:purgeDeletedPagesCoordinated",
+        "src/core/skillopt/job.ts:runSkillOptJob"
       ]
     },
     {
@@ -502,7 +1030,6 @@
       "new": [
         "src/commands/jobs/authorize-legacy.ts:runJobsAuthorizeLegacy",
         "src/commands/jobs/cancel.ts:runJobsCancel",
-        "src/commands/jobs/child-readiness.ts:runJobsChildReadiness",
         "src/commands/jobs/delete.ts:runJobsDelete",
         "src/commands/jobs/get.ts:runJobsGet",
         "src/commands/jobs/list.ts:runJobsList",
@@ -518,6 +1045,152 @@
         "src/commands/jobs/watch.ts:runJobsWatch",
         "src/commands/jobs/work.ts:exitOnUnhealthy",
         "src/commands/jobs/work.ts:runJobsWork"
+      ]
+    },
+    {
+      "old": "src/commands/mcp-provision.ts:provisionHarnessGrant",
+      "kind": "extracted",
+      "facade": "src/commands/mcp-provision.ts:provisionHarnessGrant",
+      "wasExported": true,
+      "new": [
+        "src/core/harness/client-setup.ts:recoverClientSetup"
+      ]
+    },
+    {
+      "old": "src/commands/mcp.ts:parseMcpGrant",
+      "kind": "extracted",
+      "facade": "src/commands/mcp.ts:parseMcpGrant",
+      "wasExported": true,
+      "new": [
+        "src/commands/mcp-admin.ts:runMcpAdmin"
+      ]
+    },
+    {
+      "old": "src/commands/mcp.ts:runMcp",
+      "kind": "extracted",
+      "facade": "src/commands/mcp.ts:runMcp",
+      "wasExported": true,
+      "new": [
+        "src/commands/mcp-admin-http.ts:createMcpAdminHttp",
+        "src/commands/mcp-admin.ts:runMcpAdmin",
+        "src/commands/mcp-expose.ts:parseExposeArgs"
+      ]
+    },
+    {
+      "old": "src/commands/migrate-embeddings.ts:MigrateEmbeddingsFlags",
+      "kind": "moved",
+      "facade": "src/commands/migrate-embeddings.ts:MigrateEmbeddingsFlags",
+      "wasExported": true,
+      "new": [
+        "src/core/embedding-migration-cli.ts:MigrateEmbeddingsFlags"
+      ]
+    },
+    {
+      "old": "src/commands/migrate-embeddings.ts:parseMigrateEmbeddingsFlags",
+      "kind": "moved",
+      "facade": "src/commands/migrate-embeddings.ts:parseMigrateEmbeddingsFlags",
+      "wasExported": true,
+      "new": [
+        "src/core/embedding-migration-cli.ts:parseMigrateEmbeddingsFlags"
+      ]
+    },
+    {
+      "old": "src/commands/migrate-embeddings.ts:planMigrationFlow",
+      "kind": "extracted",
+      "facade": "src/commands/migrate-embeddings.ts:planMigrationFlow",
+      "wasExported": true,
+      "new": [
+        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan"
+      ]
+    },
+    {
+      "old": "src/commands/migrate-embeddings.ts:runMigrateEmbeddings",
+      "kind": "extracted",
+      "facade": "src/commands/migrate-embeddings.ts:runMigrateEmbeddings",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/projections.ts:run"
+      ]
+    },
+    {
+      "old": "src/commands/migrations/v0_11_0.ts:rewriteCronManifest",
+      "kind": "extracted",
+      "facade": "src/commands/migrations/v0_11_0.ts:rewriteCronManifest",
+      "wasExported": false,
+      "new": [
+        "src/commands/autopilot/jobs.ts:stripBootstrapLines"
+      ]
+    },
+    {
+      "old": "src/commands/migrations/v0_32_2.ts:phaseBFenceFacts",
+      "kind": "extracted",
+      "facade": "src/commands/migrations/v0_32_2.ts:phaseBFenceFacts",
+      "wasExported": false,
+      "new": [
+        "src/commands/migrations/v0_32_2.ts:fenceFactsResult"
+      ]
+    },
+    {
+      "old": "src/commands/migrations/v0_46_3.ts:orchestrator",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/migrations/v0_60_31.ts:orchestrator"
+      ]
+    },
+    {
+      "old": "src/commands/onboard.ts:renderPackUpgradeExplain",
+      "kind": "extracted",
+      "facade": "src/commands/onboard.ts:renderPackUpgradeExplain",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/handlers/unify-types.ts:makeUnifyTypesHandler"
+      ]
+    },
+    {
+      "old": "src/commands/pages.ts:runPurgeDeleted",
+      "kind": "extracted",
+      "facade": "src/commands/pages.ts:runPurgeDeleted",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/purge-deleted.ts:purgeDeletedPagesCoordinated"
+      ]
+    },
+    {
+      "old": "src/commands/reindex-code.ts:runReindexCodeCli",
+      "kind": "extracted",
+      "facade": "src/commands/reindex-code.ts:runReindexCodeCli",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/reindex.ts:run"
+      ]
+    },
+    {
+      "old": "src/commands/reindex-search-vector.ts:runReindexSearchVector",
+      "kind": "extracted",
+      "facade": "src/commands/reindex-search-vector.ts:runReindexSearchVector",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/reindex.ts:run"
+      ]
+    },
+    {
+      "old": "src/commands/reinit-pglite.ts:runReinitPglite",
+      "kind": "extracted",
+      "facade": "src/commands/reinit-pglite.ts:runReinitPglite",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/init.ts:run"
+      ]
+    },
+    {
+      "old": "src/commands/serve-http-grants.ts:mountAdminGrantDiscovery",
+      "kind": "extracted",
+      "facade": "src/commands/serve-http-grants.ts:mountAdminGrantDiscovery",
+      "wasExported": true,
+      "new": [
+        "src/commands/serve-http-clients.ts:mountAdminClients"
       ]
     },
     {
@@ -650,6 +1323,7 @@
         "src/commands/serve-http-admin-api.ts:mountAdminKeyApi",
         "src/commands/serve-http-admin-api.ts:mountAdminLogin",
         "src/commands/serve-http-admin-api.ts:mountAdminOverviewApi",
+        "src/commands/serve-http-grants.ts:mountAdminGrantEdits",
         "src/commands/serve-http-mcp.ts:callMcpTool",
         "src/commands/serve-http-mcp.ts:createMcpRequestServer",
         "src/commands/serve-http-mcp.ts:listMcpTools",
@@ -662,6 +1336,7 @@
         "src/commands/serve-http-metrics.ts:mountMetrics",
         "src/commands/serve-http-oauth.ts:mountOAuth",
         "src/commands/serve-http-oauth.ts:mountOwnerLoginLinks",
+        "src/commands/serve-http-registration.ts:mountAdminRegistration",
         "src/commands/serve-http-spa.ts:mountSpa",
         "src/commands/serve-http-webhooks.ts:createWebhookLimiters",
         "src/commands/serve-http-webhooks.ts:handleGitHubItemEvent",
@@ -681,6 +1356,43 @@
       "wasExported": true,
       "new": [
         "src/commands/serve-http-webhooks.ts:selectGitHubItemSources"
+      ]
+    },
+    {
+      "old": "src/commands/serve-http.ts:waitForHttpServerLifecycle",
+      "kind": "extracted",
+      "facade": "src/commands/serve-http.ts:waitForHttpServerLifecycle",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/ipc.ts:startPersistenceIpcServer"
+      ]
+    },
+    {
+      "old": "src/commands/serve.ts:installStdioLifecycle",
+      "kind": "extracted",
+      "facade": "src/commands/serve.ts:installStdioLifecycle",
+      "wasExported": false,
+      "new": [
+        "src/commands/jobs/work.ts:maybeRunWorkerStartupRecovery",
+        "src/commands/sync/sync-run.ts:maybeYield"
+      ]
+    },
+    {
+      "old": "src/commands/skillpack/harness.ts:parseHarnessArgs",
+      "kind": "extracted",
+      "facade": "src/commands/skillpack/harness.ts:parseHarnessArgs",
+      "wasExported": false,
+      "new": [
+        "src/eval/decide-eval-flags.ts:extractDecideEvalFlags"
+      ]
+    },
+    {
+      "old": "src/commands/sources.ts:runSources",
+      "kind": "extracted",
+      "facade": "src/commands/sources.ts:runSources",
+      "wasExported": true,
+      "new": [
+        "src/commands/sources-lifecycle.ts:runSourceLifecycleCli"
       ]
     },
     {
@@ -744,6 +1456,16 @@
       "wasExported": false,
       "new": [
         "src/commands/sync/checkpoint.ts:SYNC_YIELD_EVERY_DEFAULT"
+      ]
+    },
+    {
+      "old": "src/commands/sync.ts:SyncResult",
+      "kind": "extracted",
+      "facade": "src/commands/sync.ts:SyncResult",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/sync-discovery.ts:SyncDiscovery",
+        "src/core/persistence/sync-failures.ts:syncFailureJsonFields"
       ]
     },
     {
@@ -926,6 +1648,7 @@
       "facade": null,
       "wasExported": false,
       "new": [
+        "src/commands/sync/connector.ts:runConnectorSync",
         "src/commands/sync/deletes.ts:runDeletesPhase",
         "src/commands/sync/deletes.ts:sweepUnsyncableModified",
         "src/commands/sync/finalize.ts:applyBookmarkGate",
@@ -959,7 +1682,8 @@
         "src/commands/sync/renames.ts:runRenamesPhase",
         "src/commands/sync/sync-run.ts:maybeYield",
         "src/commands/sync/sync-run.ts:noteTypeWarning",
-        "src/commands/sync/sync-run.ts:partial"
+        "src/commands/sync/sync-run.ts:partial",
+        "src/core/minions/handlers/facts-absorb.ts:makeFactsAbsorbHandler"
       ]
     },
     {
@@ -1005,15 +1729,6 @@
       "wasExported": false,
       "new": [
         "src/commands/sync/checkpoint.ts:resolveSyncYieldEvery"
-      ]
-    },
-    {
-      "old": "src/commands/sync.ts:runConnectorSync",
-      "kind": "moved",
-      "facade": null,
-      "wasExported": false,
-      "new": [
-        "src/commands/sync/connector.ts:runConnectorSync"
       ]
     },
     {
@@ -1087,6 +1802,851 @@
       "wasExported": false,
       "new": [
         "src/commands/sync/rename-reconcile.ts:verifyOrRestoreClearedSentinels"
+      ]
+    },
+    {
+      "old": "src/commands/takes.ts:cmdExtract",
+      "kind": "extracted",
+      "facade": "src/commands/takes.ts:cmdExtract",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/handlers/extract-takes-from-pages.ts:makeExtractTakesFromPagesHandler"
+      ]
+    },
+    {
+      "old": "src/commands/takes.ts:cmdPropose",
+      "kind": "extracted",
+      "facade": "src/commands/takes.ts:cmdPropose",
+      "wasExported": false,
+      "new": [
+        "src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi"
+      ]
+    },
+    {
+      "old": "src/commands/takes.ts:cmdResolve",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi"
+      ]
+    },
+    {
+      "old": "src/commands/upgrade.ts:runPostUpgrade",
+      "kind": "extracted",
+      "facade": "src/commands/upgrade.ts:runPostUpgrade",
+      "wasExported": true,
+      "new": [
+        "src/cli/commands/apply-migrations.ts:run",
+        "src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider",
+        "src/core/import-contextual-mode.ts:resolveImportContextualMode"
+      ]
+    },
+    {
+      "old": "src/core/agent-install/setup.ts:ownFile",
+      "kind": "extracted",
+      "facade": "src/core/agent-install/setup.ts:ownFile",
+      "wasExported": false,
+      "new": [
+        "src/core/agent-install/setup.ts:ownedFileHash"
+      ]
+    },
+    {
+      "old": "src/core/agent-install/state.ts:AgentInstallReceipt",
+      "kind": "extracted",
+      "facade": "src/core/agent-install/state.ts:AgentInstallReceipt",
+      "wasExported": true,
+      "new": [
+        "src/core/shared-skills/adapter.ts:SharedSkillsLocalReceipt"
+      ]
+    },
+    {
+      "old": "src/core/ai/gateway.ts:DEFAULT_CHARS_PER_TOKEN",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/ai/embed-batch-plan.ts:DEFAULT_CHARS_PER_TOKEN"
+      ]
+    },
+    {
+      "old": "src/core/ai/gateway.ts:DEFAULT_SAFETY_FACTOR",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/ai/embed-batch-plan.ts:DEFAULT_SAFETY_FACTOR"
+      ]
+    },
+    {
+      "old": "src/core/ai/gateway.ts:NO_BATCH_CAP_SUB_BATCH_ITEMS",
+      "kind": "moved",
+      "facade": "src/core/ai/gateway.ts:NO_BATCH_CAP_SUB_BATCH_ITEMS",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/embed-batch-plan.ts:NO_BATCH_CAP_SUB_BATCH_ITEMS"
+      ]
+    },
+    {
+      "old": "src/core/ai/gateway.ts:capBatchItems",
+      "kind": "moved",
+      "facade": "src/core/ai/gateway.ts:capBatchItems",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/embed-batch-plan.ts:capBatchItems"
+      ]
+    },
+    {
+      "old": "src/core/ai/gateway.ts:embed",
+      "kind": "extracted",
+      "facade": "src/core/ai/gateway.ts:embed",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/embed-batch-plan.ts:planEmbedRequests"
+      ]
+    },
+    {
+      "old": "src/core/ai/gateway.ts:rerank",
+      "kind": "extracted",
+      "facade": "src/core/ai/gateway.ts:rerank",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/decide/rerank-adapter.ts:rerankViaDecide"
+      ]
+    },
+    {
+      "old": "src/core/ai/gateway.ts:splitByTokenBudget",
+      "kind": "moved",
+      "facade": "src/core/ai/gateway.ts:splitByTokenBudget",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/embed-batch-plan.ts:splitByTokenBudget"
+      ]
+    },
+    {
+      "old": "src/core/backup/quarantine.ts:quarantineRestoredExecution",
+      "kind": "extracted",
+      "facade": "src/core/backup/quarantine.ts:quarantineRestoredExecution",
+      "wasExported": true,
+      "new": [
+        "src/commands/serve-http-webhooks.ts:handleGitHubItemEvent"
+      ]
+    },
+    {
+      "old": "src/core/bootstrap/harness.ts:applyHarness",
+      "kind": "extracted",
+      "facade": "src/core/bootstrap/harness.ts:applyHarness",
+      "wasExported": true,
+      "new": [
+        "src/core/bootstrap/harness.ts:logAmbientPostureNotes"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:BudgetKind",
+      "kind": "moved",
+      "facade": "src/core/budget/budget-tracker.ts:BudgetKind",
+      "wasExported": true,
+      "new": [
+        "src/core/budget/reservation-cost.ts:BudgetKind"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:FREE_LOCAL_CHAT_PROVIDERS",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/budget/reservation-cost.ts:FREE_LOCAL_CHAT_PROVIDERS"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:FREE_LOCAL_EMBED_PROVIDERS",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/budget/reservation-cost.ts:FREE_LOCAL_EMBED_PROVIDERS"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:FREE_LOCAL_RERANK_PROVIDERS",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/budget/reservation-cost.ts:FREE_LOCAL_RERANK_PROVIDERS"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:PricingOverrides",
+      "kind": "moved",
+      "facade": "src/core/budget/budget-tracker.ts:PricingOverrides",
+      "wasExported": true,
+      "new": [
+        "src/core/budget/reservation-cost.ts:PricingOverrides"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:canonicalPricingKey",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/budget/reservation-cost.ts:canonicalPricingKey"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:costForUsage",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/budget/reservation-cost.ts:usageCostUsd"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:extractUsageFromError",
+      "kind": "split",
+      "facade": "src/core/budget/budget-tracker.ts:extractUsageFromError",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/budget-record.ts:failedCallUsage",
+        "src/core/budget/budget-tracker.ts:usageFromError"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:isModelPriceable",
+      "kind": "moved",
+      "facade": "src/core/budget/budget-tracker.ts:isModelPriceable",
+      "wasExported": true,
+      "new": [
+        "src/core/budget/reservation-cost.ts:isModelPriceable"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:lookupPricing",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/budget/reservation-cost.ts:lookupPricing"
+      ]
+    },
+    {
+      "old": "src/core/budget/budget-tracker.ts:overrideFor",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/budget/reservation-cost.ts:overrideFor"
+      ]
+    },
+    {
+      "old": "src/core/chunkers/token-estimate.ts:estimateTokens",
+      "kind": "extracted",
+      "facade": "src/core/chunkers/token-estimate.ts:estimateTokens",
+      "wasExported": true,
+      "new": [
+        "src/core/chunkers/token-estimate.ts:loadEncoder"
+      ]
+    },
+    {
+      "old": "src/core/config.ts:CWD_DOTENV_FILES",
+      "kind": "moved",
+      "facade": "src/core/config.ts:CWD_DOTENV_FILES",
+      "wasExported": false,
+      "new": [
+        "src/core/env-trust.ts:CWD_DOTENV_FILES"
+      ]
+    },
+    {
+      "old": "src/core/config.ts:dotenvValuesForKey",
+      "kind": "split",
+      "facade": "src/core/config.ts:dotenvValuesForKey",
+      "wasExported": true,
+      "new": [
+        "src/core/env-trust.ts:dotenvAssignments",
+        "src/core/env-trust.ts:dotenvValuesForKey"
+      ]
+    },
+    {
+      "old": "src/core/context/turn-context.ts:assembleTurnContext",
+      "kind": "extracted",
+      "facade": "src/core/context/turn-context.ts:assembleTurnContext",
+      "wasExported": true,
+      "new": [
+        "src/core/context/recall-needed.ts:RecallApplyContext"
+      ]
+    },
+    {
+      "old": "src/core/cycle.ts:anyAbortSignal",
+      "kind": "moved",
+      "facade": "src/core/cycle.ts:anyAbortSignal",
+      "wasExported": true,
+      "new": [
+        "src/core/abort-signals.ts:anyAbortSignal"
+      ]
+    },
+    {
+      "old": "src/core/cycle.ts:runCycle",
+      "kind": "extracted",
+      "facade": "src/core/cycle.ts:runCycle",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/phase-containment.ts:timeContainedPhase",
+        "src/core/persistence/atom-retry.ts:retryManagedAtomBatch"
+      ]
+    },
+    {
+      "old": "src/core/cycle.ts:runPhaseExtract",
+      "kind": "extracted",
+      "facade": "src/core/cycle.ts:runPhaseExtract",
+      "wasExported": false,
+      "new": [
+        "src/core/extract-frontmatter.ts:resolveIncludeFrontmatter"
+      ]
+    },
+    {
+      "old": "src/core/cycle.ts:runPhasePurge",
+      "kind": "extracted",
+      "facade": "src/core/cycle.ts:runPhasePurge",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/handlers/purge.ts:makePurgeHandler"
+      ]
+    },
+    {
+      "old": "src/core/cycle.ts:runPhaseSync",
+      "kind": "extracted",
+      "facade": "src/core/cycle.ts:runPhaseSync",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/run.ts:runSingleSourceSync",
+        "src/core/minions/handlers/sync.ts:makeSyncHandler"
+      ]
+    },
+    {
+      "old": "src/core/cycle.ts:timePhase",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/phase-containment.ts:timeContainedPhase"
+      ]
+    },
+    {
+      "old": "src/core/cycle/conversation-facts-backfill.ts:runPhaseConversationFactsBackfill",
+      "kind": "extracted",
+      "facade": "src/core/cycle/conversation-facts-backfill.ts:runPhaseConversationFactsBackfill",
+      "wasExported": true,
+      "new": [
+        "src/core/embedding-migration-budget.ts:authorizeMigrationBudget"
+      ]
+    },
+    {
+      "old": "src/core/cycle/drift.ts:defaultDriftJudge",
+      "kind": "extracted",
+      "facade": "src/core/cycle/drift.ts:defaultDriftJudge",
+      "wasExported": true,
+      "new": [
+        "src/core/facts/relink-model.ts:judgeBatch"
+      ]
+    },
+    {
+      "old": "src/core/cycle/drift.ts:runPhaseDrift",
+      "kind": "extracted",
+      "facade": "src/core/cycle/drift.ts:runPhaseDrift",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/takes-prepare.ts:normalizeTakesIntent"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms-drain.ts:runExtractAtomsDrainForSource",
+      "kind": "extracted",
+      "facade": "src/core/cycle/extract-atoms-drain.ts:runExtractAtomsDrainForSource",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/atom-retry.ts:retryManagedAtomBatch"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:ATOM_TYPES",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/extract-atoms-schema.ts:ATOM_TYPES"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:ExtractAtomsOpts",
+      "kind": "extracted",
+      "facade": "src/core/cycle/extract-atoms.ts:ExtractAtomsOpts",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/atom-maintenance.ts:readAtomOrigin"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms",
+      "kind": "extracted",
+      "facade": "src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/atom-maintenance.ts:readAtomOrigin"
+      ]
+    },
+    {
+      "old": "src/core/cycle/extract-takes.ts:extractTakesFromDb",
+      "kind": "extracted",
+      "facade": "src/core/cycle/extract-takes.ts:extractTakesFromDb",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/extract-takes.ts:reconcilePageTakes"
+      ]
+    },
+    {
+      "old": "src/core/cycle/patterns.ts:runPhasePatterns",
+      "kind": "extracted",
+      "facade": "src/core/cycle/patterns.ts:runPhasePatterns",
+      "wasExported": true,
+      "new": [
+        "src/commands/sync/finalize.ts:finalizeIncrementalSync"
+      ]
+    },
+    {
+      "old": "src/core/cycle/phantom-redirect.ts:tryRedirectPhantom",
+      "kind": "extracted",
+      "facade": "src/core/cycle/phantom-redirect.ts:tryRedirectPhantom",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/phantom-redirect-managed.ts:redirectManagedPhantom"
+      ]
+    },
+    {
+      "old": "src/core/cycle/phases/consolidate.ts:runPhaseConsolidate",
+      "kind": "extracted",
+      "facade": "src/core/cycle/phases/consolidate.ts:runPhaseConsolidate",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/decide/sweep.ts:conflictSweepTail"
+      ]
+    },
+    {
+      "old": "src/core/cycle/synthesize.ts:runPhaseSynthesizeInner",
+      "kind": "extracted",
+      "facade": "src/core/cycle/synthesize.ts:runPhaseSynthesizeInner",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/finalize.ts:finalizeIncrementalSync"
+      ]
+    },
+    {
+      "old": "src/core/cycle/synthesize.ts:runTriagePass",
+      "kind": "extracted",
+      "facade": "src/core/cycle/synthesize.ts:runTriagePass",
+      "wasExported": true,
+      "new": [
+        "src/core/cycle/triage-decide.ts:resolveTriageDecide"
+      ]
+    },
+    {
+      "old": "src/core/cycle/synthesize.ts:stampDreamProvenance",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/cycle/dream-provenance.ts:stampDreamProvenance"
+      ]
+    },
+    {
+      "old": "src/core/embed-stale.ts:embedStaleForSource",
+      "kind": "extracted",
+      "facade": "src/core/embed-stale.ts:embedStaleForSource",
+      "wasExported": true,
+      "new": [
+        "src/commands/sync/imports.ts:importOnePath"
+      ]
+    },
+    {
+      "old": "src/core/embedding-migration.ts:applyEmbeddingMigration",
+      "kind": "extracted",
+      "facade": "src/core/embedding-migration.ts:applyEmbeddingMigration",
+      "wasExported": true,
+      "new": [
+        "src/core/embedding-migration-budget.ts:authorizeMigrationBudget"
+      ]
+    },
+    {
+      "old": "src/core/embedding-migration.ts:readMigrationStatus",
+      "kind": "extracted",
+      "facade": "src/core/embedding-migration.ts:readMigrationStatus",
+      "wasExported": true,
+      "new": [
+        "src/core/embed-facts.ts:embedStaleFacts"
+      ]
+    },
+    {
+      "old": "src/core/embedding-migration.ts:resolveRerankerExposure",
+      "kind": "extracted",
+      "facade": "src/core/embedding-migration.ts:resolveRerankerExposure",
+      "wasExported": true,
+      "new": [
+        "src/core/import-contextual-mode.ts:resolveImportContextualMode"
+      ]
+    },
+    {
+      "old": "src/core/embedding.ts:embedQuery",
+      "kind": "moved",
+      "facade": "src/core/embedding.ts:embedQuery",
+      "wasExported": true,
+      "new": [
+        "src/core/ai/gateway.ts:embedQuery"
+      ]
+    },
+    {
+      "old": "src/core/engine.ts:BrainEngine",
+      "kind": "extracted",
+      "facade": "src/core/engine.ts:BrainEngine",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:StaleChunkOpts",
+        "src/core/engine-sql/chunks.ts:listChunklessPagesWithContent",
+        "src/core/engine-sql/chunks.ts:listStaleChunks",
+        "src/core/engine-sql/chunks.ts:setPageEmbeddingSignature",
+        "src/core/engine-sql/code-edges.ts:getCallersOf",
+        "src/core/engine-sql/code-edges.ts:getEdgesByChunk",
+        "src/core/engine-sql/links.ts:addLink",
+        "src/core/engine-sql/links.ts:listLinkSources",
+        "src/core/engine-sql/links.ts:removeLink",
+        "src/core/engine-sql/links.ts:removeLinksByPagesAndSource",
+        "src/core/engine-sql/links.ts:traversePathsDetailed",
+        "src/core/engine-sql/pages.ts:listAllPageRefs",
+        "src/core/engine-sql/pages.ts:listStalePagesForExtraction",
+        "src/core/engine-sql/pages.ts:markPagesExtractedBatch",
+        "src/core/engine-sql/pages.ts:purgeDeletedPages",
+        "src/core/engine-sql/pages.ts:refreshPageBody",
+        "src/core/engine-sql/pages.ts:resolveSlugWithAliasDetailed",
+        "src/core/engine-sql/pages.ts:revertToVersion",
+        "src/core/engine-sql/pages.ts:setPageAliases",
+        "src/core/engine-sql/pages.ts:updatePageContextualRetrievalState",
+        "src/core/engine-sql/sources.ts:listAllSources",
+        "src/core/engine-sql/takes.ts:loadContradictionsTrend",
+        "src/core/engine-sql/takes.ts:putContradictionCacheEntry",
+        "src/core/engine-sql/takes.ts:writeContradictionsRun",
+        "src/core/engine-sql/timeline.ts:addTimelineEntry",
+        "src/core/engine-sql/timeline.ts:getLastSeen",
+        "src/core/engine-sql/timeline.ts:getOnThisDay",
+        "src/core/engine-sql/timeline.ts:upsertEventProjection"
+      ]
+    },
+    {
+      "old": "src/core/enrichment/budget.ts:toNum",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/ai/decide/store.ts:toNum"
+      ]
+    },
+    {
+      "old": "src/core/extract-timeline-from-meetings.ts:AttendedEdgeRow",
+      "kind": "extracted",
+      "facade": "src/core/extract-timeline-from-meetings.ts:AttendedEdgeRow",
+      "wasExported": false,
+      "new": [
+        "src/core/engine-sql/links.ts:removeLinksByPagesAndSource"
+      ]
+    },
+    {
+      "old": "src/core/facts/backstop.ts:runFactsBackstop",
+      "kind": "extracted",
+      "facade": "src/core/facts/backstop.ts:runFactsBackstop",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/knowledge-health.ts:runFactsExtraction",
+        "src/core/minions/handlers/facts-absorb.ts:makeFactsAbsorbHandler"
+      ]
+    },
+    {
+      "old": "src/core/facts/backstop.ts:runPipelineBodyInner",
+      "kind": "extracted",
+      "facade": "src/core/facts/backstop.ts:runPipelineBodyInner",
+      "wasExported": false,
+      "new": [
+        "src/core/facts/subject-infer-write.ts:writesDatabaseOnly",
+        "src/core/persistence/facts-maintenance.ts:collectManagedFacts"
+      ]
+    },
+    {
+      "old": "src/core/facts/fence-write.ts:writeFactsToFence",
+      "kind": "extracted",
+      "facade": "src/core/facts/fence-write.ts:writeFactsToFence",
+      "wasExported": true,
+      "new": [
+        "src/core/facts/proposal-supersede.ts:PairFact"
+      ]
+    },
+    {
+      "old": "src/core/facts/withdrawal.ts:recordFactWithdrawalInTransaction",
+      "kind": "extracted",
+      "facade": "src/core/facts/withdrawal.ts:recordFactWithdrawalInTransaction",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/effect-retry.ts:retryEmbeddingEffect"
+      ]
+    },
+    {
+      "old": "src/core/facts/write-single.ts:writeSingleFact",
+      "kind": "extracted",
+      "facade": "src/core/facts/write-single.ts:writeSingleFact",
+      "wasExported": true,
+      "new": [
+        "src/core/facts/single-prepare.ts:assertFactNotWithdrawn",
+        "src/core/facts/subject-infer-write.ts:linkAllowed",
+        "src/core/persistence/memory-mutations.ts:submitRememberMutation"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:AppTokenProvider.cached",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/github-app-token.ts:AppTokenProvider.cached"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:AppTokenProvider.constructor",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/github-app-token.ts:AppTokenProvider.constructor"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:AppTokenProvider.getToken",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/github-app-token.ts:AppTokenProvider.getToken"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:AppTokenProvider.refresh",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/github-app-token.ts:AppTokenProvider.refresh"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:MintedInstallationToken",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/github-app-token.ts:MintedInstallationToken"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:b64url",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/github-app-token.ts:b64url"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:isValidRepoName",
+      "kind": "moved",
+      "facade": "src/core/github-source.ts:isValidRepoName",
+      "wasExported": true,
+      "new": [
+        "src/core/github-source-config.ts:isValidRepoName"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:mintAppInstallationToken",
+      "kind": "moved",
+      "facade": "src/core/github-source.ts:mintAppInstallationToken",
+      "wasExported": true,
+      "new": [
+        "src/core/github-app-token.ts:mintAppInstallationToken"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:parseGitHubSourceConfig",
+      "kind": "moved",
+      "facade": "src/core/github-source.ts:parseGitHubSourceConfig",
+      "wasExported": true,
+      "new": [
+        "src/core/github-source-config.ts:parseGitHubSourceConfig"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:runExtractAndEmbed",
+      "kind": "extracted",
+      "facade": "src/core/github-source.ts:runExtractAndEmbed",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/handlers/sync.ts:makeSyncHandler"
+      ]
+    },
+    {
+      "old": "src/core/github-source.ts:runGitHubSync",
+      "kind": "split",
+      "facade": "src/core/github-source.ts:runGitHubSync",
+      "wasExported": true,
+      "new": [
+        "src/core/github-source.ts:runGitHubSyncInner",
+        "src/core/google/google-source.ts:runGoogleSyncInner"
+      ]
+    },
+    {
+      "old": "src/core/google/google-source.ts:parseGoogleSourceConfig",
+      "kind": "moved",
+      "facade": "src/core/google/google-source.ts:parseGoogleSourceConfig",
+      "wasExported": true,
+      "new": [
+        "src/core/google/source-config.ts:parseGoogleSourceConfig"
+      ]
+    },
+    {
+      "old": "src/core/google/google-source.ts:runExtractAndEmbed",
+      "kind": "extracted",
+      "facade": "src/core/google/google-source.ts:runExtractAndEmbed",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/handlers/sync.ts:makeSyncHandler"
+      ]
+    },
+    {
+      "old": "src/core/google/google-source.ts:runGoogleSync",
+      "kind": "split",
+      "facade": "src/core/google/google-source.ts:runGoogleSync",
+      "wasExported": true,
+      "new": [
+        "src/core/github-source.ts:runGitHubSyncInner",
+        "src/core/google/google-source.ts:runGoogleSyncInner"
+      ]
+    },
+    {
+      "old": "src/core/google/loops-extract.ts:runLoopsExtract",
+      "kind": "extracted",
+      "facade": "src/core/google/loops-extract.ts:runLoopsExtract",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/memory-mutations.ts:submitRememberMutation"
+      ]
+    },
+    {
+      "old": "src/core/harness/install.ts:installHarnessConnection",
+      "kind": "extracted",
+      "facade": "src/core/harness/install.ts:installHarnessConnection",
+      "wasExported": true,
+      "new": [
+        "src/core/harness/status.ts:harnessSharedSkillsRoot"
+      ]
+    },
+    {
+      "old": "src/core/harness/install.ts:installThinClient",
+      "kind": "extracted",
+      "facade": "src/core/harness/install.ts:installThinClient",
+      "wasExported": false,
+      "new": [
+        "src/core/shared-skills/adapter.ts:SharedSkillsLocalReceipt",
+        "src/core/shared-skills/adapter.ts:createSharedSkillsAdapter",
+        "src/core/skillpack/shared-brain-bridge.ts:installSharedBrainBridge"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:FENCE_TAG_TO_PSEUDO_PATH",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/markdown-chunks.ts:FENCE_TAG_TO_PSEUDO_PATH"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:ImportResult",
+      "kind": "extracted",
+      "facade": "src/core/import-file.ts:ImportResult",
+      "wasExported": true,
+      "new": [
+        "src/commands/sync/sync-run.ts:noteTypeWarning"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:extractFencedChunks",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/markdown-chunks.ts:extractFencedChunks"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:fenceTagToPseudoPath",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/markdown-chunks.ts:fenceTagToPseudoPath"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:importCodeFile",
+      "kind": "extracted",
+      "facade": "src/core/import-file.ts:importCodeFile",
+      "wasExported": true,
+      "new": [
+        "src/core/code-chunks.ts:prepareCodeChunks"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:importFromContent",
+      "kind": "extracted",
+      "facade": "src/core/import-file.ts:importFromContent",
+      "wasExported": true,
+      "new": [
+        "src/core/import-contextual-mode.ts:resolveImportContextualMode",
+        "src/core/import-identity.ts:decideImportIdentity",
+        "src/core/markdown-chunks.ts:prepareMarkdownChunks",
+        "src/core/persistence/import-mutations.ts:importManagedFile"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:importFromFile",
+      "kind": "extracted",
+      "facade": "src/core/import-file.ts:importFromFile",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/import-mutations.ts:importManagedFile"
+      ]
+    },
+    {
+      "old": "src/core/import-file.ts:withImportTransaction",
+      "kind": "moved",
+      "facade": "src/core/import-file.ts:withImportTransaction",
+      "wasExported": true,
+      "new": [
+        "src/core/import-file.ts:applyImportTransaction"
+      ]
+    },
+    {
+      "old": "src/core/link-extraction.ts:extractPageLinks",
+      "kind": "extracted",
+      "facade": "src/core/link-extraction.ts:extractPageLinks",
+      "wasExported": true,
+      "new": [
+        "src/core/attendance-repair.ts:prepareOrigin"
       ]
     },
     {
@@ -1230,44 +2790,23 @@
         "src/core/schema-migrations/v138-timeline-dedup-md5-summary.ts:v138",
         "src/core/schema-migrations/v139-timeline-legacy-source-split-repair.ts:v139",
         "src/core/schema-migrations/v140-chat-usage-log.ts:v140",
-        "src/core/schema-migrations/v141-extract-rollup-expected-limit.ts:v141",
-        "src/core/schema-migrations/v142-takes-embedding-dimension-matches-config.ts:v142",
-        "src/core/schema-migrations/v143-dream-verdicts-ttl.ts:v143",
-        "src/core/schema-migrations/v144-open-loops.ts:v144",
-        "src/core/schema-migrations/v145-facts-kind-idea-alter.ts:v145",
-        "src/core/schema-migrations/v146-extract-atoms-transcript-state-table.ts:v146",
-        "src/core/schema-migrations/v147-oauth-client-capability-grants.ts:v147",
-        "src/core/schema-migrations/v148-durable-fact-withdrawals.ts:v148",
-        "src/core/schema-migrations/v149-minion-submission-authority.ts:v149",
-        "src/core/schema-migrations/v150-canonical-page-revisions-and-guards.ts:v150",
-        "src/core/schema-migrations/v151-durable-concurrent-persistence.ts:v151",
-        "src/core/schema-migrations/v152-unique-lock-acquisition-tokens.ts:v152",
-        "src/core/schema-migrations/v153-verified-text-projection-activation.ts:v153",
-        "src/core/schema-migrations/v154-preserve-sanitized-page-search-vectors.ts:v154",
-        "src/core/schema-migrations/v155-recoverable-postcommit-persistence-effects.ts:v155",
-        "src/core/schema-migrations/v156-managed-alias-and-source-checkpoint-guards.ts:v156",
-        "src/core/schema-migrations/v157-recoverable-source-topology.ts:v157",
-        "src/core/schema-migrations/v158-canonical-version-deletion-state.ts:v158",
-        "src/core/schema-migrations/v159-index-retained-publication-recovery.ts:v159",
-        "src/core/schema-migrations/v160-current-text-projection-planner-statistics.ts:v160",
-        "src/core/schema-migrations/v161-index-pending-text-projections.ts:v161",
-        "src/core/schema-migrations/v162-source-ingestion-receipts-with-policy.ts:v162",
-        "src/core/schema-migrations/v163-derived-atom-page-scan-state.ts:v163",
-        "src/core/schema-migrations/v164-shared-brain-skills-and-membership.ts:v164",
-        "src/core/schema-migrations/v165-index-database-only-pending-writes.ts:v165",
-        "src/core/schema-migrations/v166-fact-embedding-identity.ts:v166",
-        "src/core/schema-migrations/v167-facts-superseded-by-set-null.ts:v167",
-        "src/core/schema-migrations/v168-dream-synthesis-completions.ts:v168",
-        "src/core/schema-migrations/v169-fact-withdrawal-subject.ts:v169",
-        "src/core/schema-migrations/v170-index-parked-persistence-effects.ts:v170",
-        "src/core/schema-migrations/v171-content-chunks-embedding-input-hash.ts:v171",
-        "src/core/schema-migrations/v172-pages-safe-chunk-pending-index.ts:v172",
-        "src/core/schema-migrations/v173-minion-jobs-dead-subagent-finished-index.ts:v173",
-        "src/core/schema-migrations/v174-fact-withdrawal-normalized-fingerprint.ts:v174",
-        "src/core/schema-migrations/v175-tags-tag-source.ts:v175",
-        "src/core/schema-migrations/v176-connector-checkpoint-stable-identity.ts:v176",
-        "src/core/schema-migrations/v177-pages-database-only-reason.ts:v177",
-        "src/core/schema-migrations/v178-persistence-writer-version-stamps.ts:v178"
+        "src/core/schema-migrations/v141-links-identity-nulls-not-distinct-repair.ts:v141",
+        "src/core/schema-migrations/v142-grounded-take-proposal-receipts.ts:v142",
+        "src/core/schema-migrations/v143-take-proposal-rejection-reason-receipts.ts:v143",
+        "src/core/schema-migrations/v144-take-proposal-rejection-reason-jsonb-object.ts:v144",
+        "src/core/schema-migrations/v145-legacy-extract-receipt-raw-trace-exemptions.ts:v145",
+        "src/core/schema-migrations/v146-extract-health-current-state.ts:v146",
+        "src/core/schema-migrations/v147-world-only-host-visibility.ts:v147",
+        "src/core/schema-migrations/v148-extract-rollup-expected-limit.ts:v148",
+        "src/core/schema-migrations/v149-takes-embedding-dimension-matches-config.ts:v149",
+        "src/core/schema-migrations/v150-dream-verdicts-ttl.ts:v150",
+        "src/core/schema-migrations/v151-open-loops.ts:v151",
+        "src/core/schema-migrations/v152-world-only-host-visibility-convergence-guard.ts:v152",
+        "src/core/schema-migrations/v153-facts-kind-idea-alter.ts:v153",
+        "src/core/schema-migrations/v154-extract-atoms-transcript-state-table.ts:v154",
+        "src/core/schema-migrations/v155-oauth-client-capability-grants.ts:v155",
+        "src/core/schema-migrations/v156-durable-fact-withdrawals.ts:v156",
+        "src/core/schema-migrations/v157-minion-submission-authority.ts:v157"
       ]
     },
     {
@@ -1307,12 +2846,186 @@
       ]
     },
     {
-      "old": "src/core/pglite-engine.ts:PGLiteEngine._putPage",
+      "old": "src/core/minions/authorize-legacy.ts:snapshot",
+      "kind": "extracted",
+      "facade": "src/core/minions/authorize-legacy.ts:snapshot",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/legacy-selection.ts:assertNoActiveJobs"
+      ]
+    },
+    {
+      "old": "src/core/minions/child-job-runner.ts:runJobInChild",
       "kind": "moved",
-      "facade": null,
+      "facade": "src/core/minions/child-job-runner.ts:runJobInChild",
       "wasExported": true,
       "new": [
-        "src/core/engine-sql/pages.ts:putPage"
+        "src/core/minions/child-job-runner.ts:runJobChildProcess"
+      ]
+    },
+    {
+      "old": "src/core/minions/db-probe.ts:runDbProbe",
+      "kind": "moved",
+      "facade": "src/core/minions/db-probe.ts:runDbProbe",
+      "wasExported": true,
+      "new": [
+        "src/core/minions/db-probe.ts:probeLanes"
+      ]
+    },
+    {
+      "old": "src/core/minions/handlers/embed-backfill.ts:makeEmbedBackfillHandler",
+      "kind": "extracted",
+      "facade": "src/core/minions/handlers/embed-backfill.ts:makeEmbedBackfillHandler",
+      "wasExported": true,
+      "new": [
+        "src/core/embedding-migration-budget.ts:authorizeMigrationBudget"
+      ]
+    },
+    {
+      "old": "src/core/minions/queue.ts:MinionQueue.add",
+      "kind": "extracted",
+      "facade": "src/core/minions/queue.ts:MinionQueue.add",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/embedding-health.ts:runAlternativeProviders",
+        "src/core/minions/idempotency-coalesce.ts:insertOrCoalesce"
+      ]
+    },
+    {
+      "old": "src/core/minions/source-filesystem.ts:withSourceFilesystemLock",
+      "kind": "extracted",
+      "facade": "src/core/minions/source-filesystem.ts:withSourceFilesystemLock",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/sync-run.ts:performManagedSync"
+      ]
+    },
+    {
+      "old": "src/core/minions/submission-authority.ts:assertCurrentAgent",
+      "kind": "extracted",
+      "facade": "src/core/minions/submission-authority.ts:assertCurrentAgent",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/authority.ts:authorizeWrite"
+      ]
+    },
+    {
+      "old": "src/core/minions/submission-authority.ts:assertCurrentPrincipal",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/minions/submission-authority.ts:assertCurrentRemoteJobPrincipal"
+      ]
+    },
+    {
+      "old": "src/core/minions/worker.ts:MinionWorker.start",
+      "kind": "extracted",
+      "facade": "src/core/minions/worker.ts:MinionWorker.start",
+      "wasExported": true,
+      "new": [
+        "src/commands/jobs/work.ts:runJobsWork",
+        "src/core/minions/worker.ts:MinionWorker.probeDatabase"
+      ]
+    },
+    {
+      "old": "src/core/model-config.ts:enforceSubagentCapable",
+      "kind": "moved",
+      "facade": "src/core/model-config.ts:enforceSubagentCapable",
+      "wasExported": false,
+      "new": [
+        "src/core/model-config.ts:subagentGate"
+      ]
+    },
+    {
+      "old": "src/core/ops/insights.ts:find_contradictions",
+      "kind": "extracted",
+      "facade": "src/core/ops/insights.ts:find_contradictions",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/knowledge-health.ts:runContradictions"
+      ]
+    },
+    {
+      "old": "src/core/ops/jobs.ts:submit_job",
+      "kind": "extracted",
+      "facade": "src/core/ops/jobs.ts:submit_job",
+      "wasExported": false,
+      "new": [
+        "src/commands/jobs/submit.ts:runJobsSubmit"
+      ]
+    },
+    {
+      "old": "src/core/ops/pages.ts:autoLinkWrittenPage",
+      "kind": "extracted",
+      "facade": "src/core/ops/pages.ts:autoLinkWrittenPage",
+      "wasExported": true,
+      "new": [
+        "src/core/minions/handlers/facts-absorb.ts:makeFactsAbsorbHandler"
+      ]
+    },
+    {
+      "old": "src/core/ops/pages.ts:capture",
+      "kind": "moved",
+      "facade": "src/core/ops/pages.ts:capture",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/page-mutations.ts:submitPageMutation"
+      ]
+    },
+    {
+      "old": "src/core/ops/pages.ts:put_page",
+      "kind": "moved",
+      "facade": "src/core/ops/pages.ts:put_page",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/finalize.ts:backstopAffectedPageFacts"
+      ]
+    },
+    {
+      "old": "src/core/ops/pages.ts:stripPrivacyFencesForRemoteReader",
+      "kind": "extracted",
+      "facade": "src/core/ops/pages.ts:stripPrivacyFencesForRemoteReader",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/page-advisories.ts:preparePageAdvisories"
+      ]
+    },
+    {
+      "old": "src/core/ops/request-tools.ts:visibleOpsForCaller",
+      "kind": "extracted",
+      "facade": "src/core/ops/request-tools.ts:visibleOpsForCaller",
+      "wasExported": false,
+      "new": [
+        "src/core/shared-skills/tool-access.ts:sharedSkillToolAccess"
+      ]
+    },
+    {
+      "old": "src/core/ops/skillopt.ts:run_skillopt",
+      "kind": "extracted",
+      "facade": "src/core/ops/skillopt.ts:run_skillopt",
+      "wasExported": false,
+      "new": [
+        "src/core/shared-skills/optimizer.ts:authorize",
+        "src/core/skillopt/job.ts:runSkillOptJob"
+      ]
+    },
+    {
+      "old": "src/core/ops/skills-catalog.ts:get_status_snapshot",
+      "kind": "extracted",
+      "facade": "src/core/ops/skills-catalog.ts:get_status_snapshot",
+      "wasExported": false,
+      "new": [
+        "src/commands/sync/run.ts:SyncAllSourceRow"
+      ]
+    },
+    {
+      "old": "src/core/ops/takes.ts:takes_resolve",
+      "kind": "extracted",
+      "facade": "src/core/ops/takes.ts:takes_resolve",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/takes-prepare.ts:normalizeTakesIntent"
       ]
     },
     {
@@ -1416,6 +3129,15 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.connect",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.connect",
+      "wasExported": true,
+      "new": [
+        "src/core/pglite-engine.ts:PGLiteEngine._connectInternal"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.consolidateFact",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.consolidateFact",
@@ -1468,6 +3190,15 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:countUnconsolidatedFacts"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.createVersion",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.createVersion",
+      "wasExported": true,
+      "new": [
+        "src/core/page-state/versions.ts:createPageVersion"
       ]
     },
     {
@@ -1608,11 +3339,12 @@
     },
     {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getCalleesOf",
-      "kind": "moved",
+      "kind": "split",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getCalleesOf",
       "wasExported": true,
       "new": [
-        "src/core/engine-sql/code-edges.ts:getCalleesOf"
+        "src/core/engine-sql/code-edges.ts:getCalleesOf",
+        "src/core/engine-sql/code-edges.ts:getCallersOf"
       ]
     },
     {
@@ -1689,6 +3421,16 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getHealth",
+      "kind": "extracted",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getHealth",
+      "wasExported": true,
+      "new": [
+        "src/commands/doctor/checks/graph-health.ts:runGraphCoverage",
+        "src/core/engine-sql/links.ts:listLinkSources"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getLastSeen",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getLastSeen",
@@ -1726,6 +3468,15 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getRawData",
+      "kind": "extracted",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getRawData",
+      "wasExported": true,
+      "new": [
+        "src/core/page-state/snapshot.ts:readPageSnapshot"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getRecentSalience",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getRecentSalience",
@@ -1754,10 +3505,11 @@
     },
     {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getTags",
-      "kind": "moved",
+      "kind": "split",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getTags",
       "wasExported": true,
       "new": [
+        "src/core/engine-sql/links.ts:listLinkSources",
         "src/core/engine-sql/tags.ts:getTags"
       ]
     },
@@ -2124,6 +3876,24 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.searchKeyword",
+      "kind": "extracted",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchKeyword",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.searchKeywordChunks",
+      "kind": "extracted",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchKeywordChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.searchTakes",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchTakes",
@@ -2139,6 +3909,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:searchTakesVector"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.searchTitles",
+      "kind": "extracted",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchTitles",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.searchVector",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchVector",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
       ]
     },
     {
@@ -2337,7 +4125,7 @@
       "facade": null,
       "wasExported": true,
       "new": [
-        "src/core/engine-sql/code-edges.ts:getCalleesOf"
+        "src/core/engine-sql/code-edges.ts:getCallersOf"
       ]
     },
     {
@@ -2347,6 +4135,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/code-edges.ts:getCallersOf"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine/code-edges.ts:rowToCodeEdge",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/engine-sql/code-edges.ts:rowToCodeEdge"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine/facts.ts:FactRowSqlShape",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/engine-sql/facts.ts:FactRowSqlShape"
       ]
     },
     {
@@ -2755,15 +4561,6 @@
       ]
     },
     {
-      "old": "src/core/postgres-engine.ts:PostgresEngine._putPage",
-      "kind": "moved",
-      "facade": null,
-      "wasExported": true,
-      "new": [
-        "src/core/engine-sql/pages.ts:putPage"
-      ]
-    },
-    {
       "old": "src/core/postgres-engine.ts:PostgresEngine._upsertChunksOnce",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine._upsertChunksOnce",
@@ -2863,6 +4660,15 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.connect",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.connect",
+      "wasExported": true,
+      "new": [
+        "src/core/db.ts:connect"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.consolidateFact",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.consolidateFact",
@@ -2918,6 +4724,15 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.createVersion",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.createVersion",
+      "wasExported": true,
+      "new": [
+        "src/core/page-state/versions.ts:createPageVersion"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.deleteChunks",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.deleteChunks",
@@ -2960,6 +4775,15 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/pages.ts:deletePages"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.disconnect",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.disconnect",
+      "wasExported": true,
+      "new": [
+        "src/core/postgres-engine.ts:PostgresEngine.disconnectInternal"
       ]
     },
     {
@@ -3055,11 +4879,12 @@
     },
     {
       "old": "src/core/postgres-engine.ts:PostgresEngine.getCalleesOf",
-      "kind": "moved",
+      "kind": "split",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.getCalleesOf",
       "wasExported": true,
       "new": [
-        "src/core/engine-sql/code-edges.ts:getCalleesOf"
+        "src/core/engine-sql/code-edges.ts:getCalleesOf",
+        "src/core/engine-sql/code-edges.ts:getCallersOf"
       ]
     },
     {
@@ -3135,6 +4960,15 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getHealth",
+      "kind": "extracted",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getHealth",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:listLinkSources"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.getLastSeen",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.getLastSeen",
@@ -3200,10 +5034,11 @@
     },
     {
       "old": "src/core/postgres-engine.ts:PostgresEngine.getTags",
-      "kind": "moved",
+      "kind": "split",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.getTags",
       "wasExported": true,
       "new": [
+        "src/core/engine-sql/links.ts:listLinkSources",
         "src/core/engine-sql/tags.ts:getTags"
       ]
     },
@@ -3570,6 +5405,24 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.searchKeyword",
+      "kind": "extracted",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.searchKeyword",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.searchKeywordChunks",
+      "kind": "extracted",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.searchKeywordChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.searchTakes",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.searchTakes",
@@ -3585,6 +5438,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:searchTakesVector"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.searchTitles",
+      "kind": "extracted",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.searchTitles",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.searchVector",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.searchVector",
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
       ]
     },
     {
@@ -3751,6 +5622,15 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine/cjk-search.ts:CjkKeywordRunner",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/search/vector-settings.ts:withVectorSettings"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine/cjk-search.ts:searchKeywordCJK",
       "kind": "moved",
       "facade": null,
@@ -3783,7 +5663,7 @@
       "facade": null,
       "wasExported": true,
       "new": [
-        "src/core/engine-sql/code-edges.ts:getCalleesOf"
+        "src/core/engine-sql/code-edges.ts:getCallersOf"
       ]
     },
     {
@@ -4220,11 +6100,108 @@
       ]
     },
     {
+      "old": "src/core/process-cleanup.ts:runCleanupPass",
+      "kind": "moved",
+      "facade": "src/core/process-cleanup.ts:runCleanupPass",
+      "wasExported": false,
+      "new": [
+        "src/core/process-cleanup.ts:runCleanupCallbacks"
+      ]
+    },
+    {
+      "old": "src/core/remediation/context.ts:loadRecommendationContext",
+      "kind": "extracted",
+      "facade": "src/core/remediation/context.ts:loadRecommendationContext",
+      "wasExported": true,
+      "new": [
+        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan",
+        "src/core/embed-facts.ts:embedStaleFacts",
+        "src/core/embed-stale-images.ts:embedStaleImages"
+      ]
+    },
+    {
+      "old": "src/core/remediation/run.ts:runRemediation",
+      "kind": "extracted",
+      "facade": "src/core/remediation/run.ts:runRemediation",
+      "wasExported": true,
+      "new": [
+        "src/core/facts/relink.ts:runModelTier"
+      ]
+    },
+    {
+      "old": "src/core/schema-pack/unify-types-handler.ts:runUnifyTypes",
+      "kind": "extracted",
+      "facade": "src/core/schema-pack/unify-types-handler.ts:runUnifyTypes",
+      "wasExported": true,
+      "new": [
+        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan"
+      ]
+    },
+    {
+      "old": "src/core/search/exact-lookup.ts:applyExactLookupTier",
+      "kind": "extracted",
+      "facade": "src/core/search/exact-lookup.ts:applyExactLookupTier",
+      "wasExported": true,
+      "new": [
+        "src/core/search/alias-hop.ts:topOrganicScore"
+      ]
+    },
+    {
+      "old": "src/core/search/exact-lookup.ts:structuralExactLookup",
+      "kind": "extracted",
+      "facade": "src/core/search/exact-lookup.ts:structuralExactLookup",
+      "wasExported": true,
+      "new": [
+        "src/core/search/alias-hop.ts:aliasInjectedRow"
+      ]
+    },
+    {
+      "old": "src/core/search/hybrid.ts:ALIAS_HOP_PRESENT_BOOST",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/search/alias-hop.ts:ALIAS_HOP_PRESENT_BOOST"
+      ]
+    },
+    {
+      "old": "src/core/search/hybrid.ts:MAX_ALIAS_INJECT",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/search/alias-hop.ts:MAX_ALIAS_INJECT"
+      ]
+    },
+    {
+      "old": "src/core/search/hybrid.ts:MAX_ALIAS_QUERY_TOKENS",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/search/alias-hop.ts:MAX_ALIAS_QUERY_TOKENS"
+      ]
+    },
+    {
+      "old": "src/core/search/hybrid.ts:applyAliasHop",
+      "kind": "split",
+      "facade": "src/core/search/hybrid.ts:applyAliasHop",
+      "wasExported": true,
+      "new": [
+        "src/core/search/alias-hop.ts:IdentityTierOpts",
+        "src/core/search/alias-hop.ts:aliasInjectedRow",
+        "src/core/search/alias-hop.ts:applyAliasHop",
+        "src/core/search/alias-hop.ts:fetchAliasCanonical",
+        "src/core/search/alias-hop.ts:topOrganicScore"
+      ]
+    },
+    {
       "old": "src/core/search/hybrid.ts:hybridSearch",
       "kind": "split",
       "facade": "src/core/search/hybrid.ts:hybridSearch",
       "wasExported": true,
       "new": [
+        "src/core/search/date-bounds.ts:resolveSearchDateBounds",
         "src/core/search/hybrid/arms.ts:buildPostFusionOpts",
         "src/core/search/hybrid/arms.ts:buildRelationalList",
         "src/core/search/hybrid/arms.ts:resolveModalityAndQueries",
@@ -4237,7 +6214,6 @@
         "src/core/search/hybrid/rank.ts:fuseArms",
         "src/core/search/hybrid/rank.ts:rerankAndPin",
         "src/core/search/hybrid/rank.ts:sizeReturnPool",
-        "src/core/search/hybrid/request.ts:applyIdentityBoosts",
         "src/core/search/hybrid/request.ts:emitHybridMeta",
         "src/core/search/hybrid/request.ts:resolveHybridRequest"
       ]
@@ -4273,6 +6249,15 @@
       ]
     },
     {
+      "old": "src/core/search/hybrid.ts:resolveDateBoundary",
+      "kind": "moved",
+      "facade": "src/core/search/hybrid.ts:resolveDateBoundary",
+      "wasExported": true,
+      "new": [
+        "src/core/search/date-bounds.ts:resolveDateBoundary"
+      ]
+    },
+    {
       "old": "src/core/search/hybrid.ts:resolveEffectiveRecency",
       "kind": "moved",
       "facade": null,
@@ -4291,6 +6276,33 @@
       ]
     },
     {
+      "old": "src/core/search/hybrid.ts:rrfFusion",
+      "kind": "extracted",
+      "facade": "src/core/search/hybrid.ts:rrfFusion",
+      "wasExported": true,
+      "new": [
+        "src/core/search/rrf-page-fusion.ts:accumulateRrf"
+      ]
+    },
+    {
+      "old": "src/core/search/hybrid.ts:rrfFusionWeighted",
+      "kind": "extracted",
+      "facade": "src/core/search/hybrid.ts:rrfFusionWeighted",
+      "wasExported": true,
+      "new": [
+        "src/core/search/rrf-page-fusion.ts:accumulateRrf"
+      ]
+    },
+    {
+      "old": "src/core/search/hybrid.ts:rrfKey",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/search/rrf-page-fusion.ts:rrfKey"
+      ]
+    },
+    {
       "old": "src/core/search/hybrid.ts:stampBudgetStage",
       "kind": "moved",
       "facade": null,
@@ -4298,9 +6310,495 @@
       "new": [
         "src/core/search/hybrid/degraded.ts:stampBudgetStage"
       ]
+    },
+    {
+      "old": "src/core/skill-catalog.ts:buildSkillCatalog",
+      "kind": "extracted",
+      "facade": "src/core/skill-catalog.ts:buildSkillCatalog",
+      "wasExported": true,
+      "new": [
+        "src/core/shared-skills/compatibility.ts:listLegacySharedSkills"
+      ]
+    },
+    {
+      "old": "src/core/skillopt/orchestrator.ts:runOptimizationLoop",
+      "kind": "extracted",
+      "facade": "src/core/skillopt/orchestrator.ts:runOptimizationLoop",
+      "wasExported": false,
+      "new": [
+        "src/core/skillopt/bootstrap-run.ts:runGuardedBootstrap"
+      ]
+    },
+    {
+      "old": "src/core/skillopt/validate-gate.ts:SKILLOPT_RUNTIME_EXCEEDED",
+      "kind": "moved",
+      "facade": "src/core/skillopt/validate-gate.ts:SKILLOPT_RUNTIME_EXCEEDED",
+      "wasExported": true,
+      "new": [
+        "src/core/skillopt/must-abort.ts:SKILLOPT_RUNTIME_EXCEEDED"
+      ]
+    },
+    {
+      "old": "src/core/skillpack/doctor.ts:applyAutoFixes",
+      "kind": "extracted",
+      "facade": "src/core/skillpack/doctor.ts:applyAutoFixes",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/takes-prepare.ts:normalizeTakesIntent"
+      ]
+    },
+    {
+      "old": "src/core/source-resolver.ts:localFederatedSourceIds",
+      "kind": "split",
+      "facade": "src/core/source-resolver.ts:localFederatedSourceIds",
+      "wasExported": true,
+      "new": [
+        "src/core/source-resolver.ts:federatedSetFor",
+        "src/core/source-resolver.ts:liveSourceRows"
+      ]
+    },
+    {
+      "old": "src/core/sweep.ts:lookupRefsForSlugs",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/link-reconciliation.ts:lookupRefsForSlugs"
+      ]
+    },
+    {
+      "old": "src/core/sweep.ts:runCorpusIngestPass",
+      "kind": "extracted",
+      "facade": "src/core/sweep.ts:runCorpusIngestPass",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler"
+      ]
+    },
+    {
+      "old": "src/core/sweep.ts:runLinksTimelinePass",
+      "kind": "extracted",
+      "facade": "src/core/sweep.ts:runLinksTimelinePass",
+      "wasExported": false,
+      "new": [
+        "src/core/link-reconciliation.ts:loadLinkSourcePolicy"
+      ]
+    },
+    {
+      "old": "src/core/sync-embed-backfill.ts:buildSingleSyncJsonEnvelope",
+      "kind": "extracted",
+      "facade": "src/core/sync-embed-backfill.ts:buildSingleSyncJsonEnvelope",
+      "wasExported": true,
+      "new": [
+        "src/core/repair/google-file-modes.ts:googleFileModesRepair"
+      ]
+    },
+    {
+      "old": "src/core/sync-status-report.ts:buildSyncStatusReport",
+      "kind": "extracted",
+      "facade": "src/core/sync-status-report.ts:buildSyncStatusReport",
+      "wasExported": true,
+      "new": [
+        "src/commands/sync/run.ts:SyncAllSourceRow"
+      ]
+    },
+    {
+      "old": "src/core/takes-write.ts:appendTakesToPageMdFirst",
+      "kind": "extracted",
+      "facade": "src/core/takes-write.ts:appendTakesToPageMdFirst",
+      "wasExported": true,
+      "new": [
+        "src/core/takes-write.ts:appendTakesToPageBody"
+      ]
+    },
+    {
+      "old": "src/core/think/index.ts:runThink",
+      "kind": "extracted",
+      "facade": "src/core/think/index.ts:runThink",
+      "wasExported": true,
+      "new": [
+        "src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi",
+        "src/core/persistence/memory-mutations.ts:submitRememberMutation",
+        "src/core/think/decide.ts:thinkAbstainResult"
+      ]
+    },
+    {
+      "old": "src/core/timeline-extract.ts:extractTimelineFromContent",
+      "kind": "extracted",
+      "facade": "src/core/timeline-extract.ts:extractTimelineFromContent",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/links-maintenance.ts:extractManagedStaleLinks"
+      ]
+    },
+    {
+      "old": "src/core/types.ts:PageVersion",
+      "kind": "moved",
+      "facade": "src/core/types.ts:PageVersion",
+      "wasExported": true,
+      "new": [
+        "src/core/page-state/version-types.ts:PageVersion"
+      ]
+    },
+    {
+      "old": "src/core/verbs.ts:forget",
+      "kind": "extracted",
+      "facade": "src/core/verbs.ts:forget",
+      "wasExported": false,
+      "new": [
+        "src/core/persistence/memory-mutations.ts:submitForgetMutation"
+      ]
+    },
+    {
+      "old": "src/core/verbs.ts:synthesize",
+      "kind": "extracted",
+      "facade": "src/core/verbs.ts:synthesize",
+      "wasExported": false,
+      "new": [
+        "src/core/facts/relink.ts:estimateUsd"
+      ]
+    },
+    {
+      "old": "src/core/write-through.ts:resolvePageWriteTarget",
+      "kind": "extracted",
+      "facade": "src/core/write-through.ts:resolvePageWriteTarget",
+      "wasExported": true,
+      "new": [
+        "src/core/embed-stale-images.ts:embedStaleImages",
+        "src/core/shared-skills/knowledge-guard.ts:assertKnowledgePublicationAllowed"
+      ]
+    },
+    {
+      "old": "src/core/write-through.ts:writePageThrough",
+      "kind": "extracted",
+      "facade": "src/core/write-through.ts:writePageThrough",
+      "wasExported": true,
+      "new": [
+        "src/core/facts/proposal-supersede.ts:withFenceLocks"
+      ]
+    },
+    {
+      "old": "src/core/ze-exposure.ts:detectZeExposure",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/import-contextual-mode.ts:resolveImportContextualMode"
+      ]
+    },
+    {
+      "old": "src/mcp/http-transport.ts:startHttpTransport",
+      "kind": "extracted",
+      "facade": "src/mcp/http-transport.ts:startHttpTransport",
+      "wasExported": true,
+      "new": [
+        "src/commands/serve-http-mcp.ts:callMcpTool"
+      ]
+    },
+    {
+      "old": "src/mcp/server.ts:resolveMcpStdioSourceScope",
+      "kind": "extracted",
+      "facade": "src/mcp/server.ts:resolveMcpStdioSourceScope",
+      "wasExported": true,
+      "new": [
+        "src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler"
+      ]
     }
   ],
   "unmapped": [
+    "src/cli.ts:_clearIdentityCacheForTest",
+    "src/commands/autopilot.ts:systemdUnitPath",
+    "src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringArgs",
+    "src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringResult",
+    "src/commands/eval-schema-authoring.ts:EvalVerdict",
+    "src/commands/eval-schema-authoring.ts:HELP",
+    "src/commands/eval-schema-authoring.ts:aggregateVerdict",
+    "src/commands/eval-schema-authoring.ts:parseArgs",
+    "src/commands/eval-schema-authoring.ts:runEvalSchemaAuthoring",
+    "src/commands/extract.ts:parseFrontmatterFromContent",
+    "src/commands/frontmatter-install-hook.ts:HOOK_SCRIPT",
+    "src/commands/frontmatter-install-hook.ts:isGitRepo",
+    "src/commands/hook.ts:firstString",
+    "src/commands/hook.ts:lastSessionLine",
+    "src/commands/migrations/v0_11_0.ts:gbrainDir",
+    "src/commands/migrations/v0_12_0.ts:__testing",
+    "src/commands/migrations/v0_12_2.ts:__testing",
+    "src/commands/migrations/v0_13_0.ts:__testing",
+    "src/commands/migrations/v0_21_0.ts:__testing",
+    "src/commands/migrations/v0_22_4.ts:gbrainDir",
+    "src/commands/migrations/v0_46_3.ts:MIGRATION_VERSION",
+    "src/commands/migrations/v0_46_3.ts:PLAYBOOK_SKILL",
+    "src/commands/migrations/v0_46_3.ts:PendingHostWorkEntry",
+    "src/commands/migrations/v0_46_3.ts:emitHostWork",
+    "src/commands/migrations/v0_46_3.ts:existingEntryForVersion",
+    "src/commands/migrations/v0_46_3.ts:pendingHostWorkDir",
+    "src/commands/migrations/v0_46_3.ts:pendingHostWorkPath",
+    "src/commands/models.ts:probeSource",
+    "src/commands/providers.ts:sunsetMarker",
+    "src/commands/providers.ts:sunsetMarkerText",
+    "src/commands/takes.ts:cmdAdd",
+    "src/commands/takes.ts:cmdSupersede",
+    "src/commands/takes.ts:cmdUpdate",
+    "src/commands/takes.ts:ensureFloat",
+    "src/commands/takes.ts:ensureKind",
+    "src/commands/ze-switch.ts:KEY_PREVIOUS_SNAPSHOT",
+    "src/commands/ze-switch.ts:MODEL_ID_RE",
+    "src/commands/ze-switch.ts:RETIRED_FLAGS",
+    "src/commands/ze-switch.ts:SnapshotReadResult",
+    "src/commands/ze-switch.ts:ZeSwitchSnapshot",
+    "src/commands/ze-switch.ts:brainSuffix",
+    "src/commands/ze-switch.ts:buildUndoCommands",
+    "src/commands/ze-switch.ts:emitAndExit",
+    "src/commands/ze-switch.ts:parseSnapshot",
+    "src/commands/ze-switch.ts:printHelp",
+    "src/commands/ze-switch.ts:refusalEnvelope",
+    "src/commands/ze-switch.ts:runZeSwitch",
+    "src/commands/ze-switch.ts:runZeSwitchSelfHelp",
+    "src/core/ai/defaults.ts:LEGACY_DEFAULT_RERANKER_MODEL",
+    "src/core/ai/defaults.ts:RERANKER_SUNSETS",
+    "src/core/ai/defaults.ts:RerankerSunset",
+    "src/core/ai/defaults.ts:ZEROENTROPY_SUNSET_DATE",
+    "src/core/ai/defaults.ts:isZeroEntropyModel",
+    "src/core/ai/defaults.ts:providerIdOf",
+    "src/core/ai/defaults.ts:rerankerSunset",
+    "src/core/ai/defaults.ts:sunsetDateHasPassed",
+    "src/core/ai/dims.ts:ZEROENTROPY_DIM_MODELS",
+    "src/core/ai/dims.ts:ZEROENTROPY_VALID_DIMS",
+    "src/core/ai/dims.ts:isValidZeroEntropyDim",
+    "src/core/ai/dims.ts:supportsZeroEntropyDimension",
+    "src/core/ai/gateway.ts:MAX_CHARS",
+    "src/core/ai/gateway.ts:MAX_ZEROENTROPY_RESPONSE_BYTES",
+    "src/core/ai/gateway.ts:ZeroEntropyResponseTooLargeError.constructor",
+    "src/core/ai/gateway.ts:__setSunsetClockForTests",
+    "src/core/ai/gateway.ts:_resetSunsetWarningsForTest",
+    "src/core/ai/gateway.ts:_sunsetClock",
+    "src/core/ai/gateway.ts:_sunsetShortCircuited",
+    "src/core/ai/gateway.ts:_sunsetWarned",
+    "src/core/ai/gateway.ts:recordSpendOnTracker",
+    "src/core/ai/gateway.ts:sunsetHasPassed",
+    "src/core/ai/gateway.ts:sunsetShortCircuitOnce",
+    "src/core/ai/gateway.ts:warnSunsetOnce",
+    "src/core/ai/gateway.ts:zeroEntropyCompatFetch",
+    "src/core/ai/recipes/zeroentropyai.ts:zeroentropyai",
+    "src/core/artifact/index.ts:ArtifactDescriptor",
+    "src/core/artifact/index.ts:ArtifactKind",
+    "src/core/artifact/index.ts:detectArtifactKind",
+    "src/core/artifact/index.ts:installArtifact",
+    "src/core/artifact/index.ts:listInstalledArtifacts",
+    "src/core/artifact/index.ts:targetDirForKind",
+    "src/core/artifact/index.ts:validateManifestByKind",
+    "src/core/backfill-registry.ts:clearRegistryForTests",
+    "src/core/backup/coverage.ts:RECIPE_DETAIL",
+    "src/core/backup/coverage.ts:hasRemoteTrackingRef",
+    "src/core/backup/coverage.ts:originRemoteState",
+    "src/core/backup/snapshot.ts:relativeInside",
+    "src/core/calibration/cross-brain.ts:CrossBrainProfileResult",
+    "src/core/calibration/cross-brain.ts:CrossBrainQueryOpts",
+    "src/core/calibration/cross-brain.ts:attributionSuffix",
+    "src/core/calibration/cross-brain.ts:canReadMountsForCtx",
+    "src/core/calibration/cross-brain.ts:queryAcrossBrains",
+    "src/core/calibration/nudge.ts:EvaluateAndFireOpts",
+    "src/core/calibration/nudge.ts:NUDGE_CONVICTION_THRESHOLD",
+    "src/core/calibration/nudge.ts:NUDGE_COOLDOWN_DAYS",
+    "src/core/calibration/nudge.ts:NudgeDecision",
+    "src/core/calibration/nudge.ts:buildNudgeText",
+    "src/core/calibration/nudge.ts:checkCooldown",
+    "src/core/calibration/nudge.ts:evaluateAndFireNudge",
+    "src/core/calibration/nudge.ts:evaluateNudgeRule",
+    "src/core/calibration/nudge.ts:recordNudgeFire",
+    "src/core/calibration/nudge.ts:resetNudgeCooldown",
+    "src/core/calibration/nudge.ts:takeDomainHint",
+    "src/core/calibration/recall-footer.ts:AbandonedThreadSummary",
+    "src/core/calibration/recall-footer.ts:RecallFooterOpts",
+    "src/core/calibration/recall-footer.ts:buildRecallCalibrationFooter",
+    "src/core/calibration/recall-footer.ts:trendNote",
+    "src/core/calibration/take-forecast.ts:MIN_BUCKET_N",
+    "src/core/calibration/take-forecast.ts:TakeForecast",
+    "src/core/calibration/take-forecast.ts:TakeForecastInput",
+    "src/core/calibration/take-forecast.ts:batchForecast",
+    "src/core/calibration/take-forecast.ts:computeForecast",
+    "src/core/calibration/take-forecast.ts:forecastForTake",
+    "src/core/calibration/take-forecast.ts:resolveDomainPrefix",
+    "src/core/code-graph-readiness.ts:effectiveSourceId",
+    "src/core/code-graph-readiness.ts:pendingEdgeChunksExist",
+    "src/core/code-graph-readiness.ts:symbolChunksExist",
+    "src/core/code-intel/recursive-walk.ts:detectSymbolLanguage",
+    "src/core/connectors/providers/claude.ts:memoOrg",
+    "src/core/connectors/providers/claude.ts:resolveOrg",
+    "src/core/context/reflex.ts:HEARTBEAT_PATH",
+    "src/core/conversation-parser/llm-polish.ts:POLISH_HEADROOM_USD",
+    "src/core/conversation-parser/llm-polish.ts:POLISH_SYSTEM_PROMPT",
+    "src/core/conversation-parser/llm-polish.ts:PolishOps",
+    "src/core/conversation-parser/llm-polish.ts:RunLlmPolishOpts",
+    "src/core/conversation-parser/llm-polish.ts:applyPolish",
+    "src/core/conversation-parser/llm-polish.ts:runLlmPolish",
+    "src/core/cycle/atom-slug.ts:todayDate",
+    "src/core/cycle/drift.ts:lookbackCutoffIso",
+    "src/core/cycle/extract-atoms.ts:DiscoveredPage",
+    "src/core/cycle/extract-facts.ts:dedupeFactsByContentKey",
+    "src/core/cycle/extract-facts.ts:factContentKey",
+    "src/core/cycle/synthesize-verify.ts:countUngroundedNumericClaims",
+    "src/core/cycle/synthesize-verify.ts:emptyStats",
+    "src/core/cycle/synthesize-verify.ts:repairBody",
+    "src/core/cycle/synthesize-verify.ts:splitFrontmatter",
+    "src/core/data-research.ts:DateWindow",
+    "src/core/data-research.ts:DedupConfig",
+    "src/core/data-research.ts:DedupResult",
+    "src/core/data-research.ts:MAX_HTML_SIZE",
+    "src/core/data-research.ts:METRIC_PATTERNS",
+    "src/core/data-research.ts:ResearchRecipe",
+    "src/core/data-research.ts:TrackerEntry",
+    "src/core/data-research.ts:ValidationResult",
+    "src/core/data-research.ts:appendToTracker",
+    "src/core/data-research.ts:buildDateWindows",
+    "src/core/data-research.ts:computeTotals",
+    "src/core/data-research.ts:extractFields",
+    "src/core/data-research.ts:isDuplicate",
+    "src/core/data-research.ts:parseTrackerPage",
+    "src/core/data-research.ts:stripEmailHtml",
+    "src/core/data-research.ts:validateRecipe",
+    "src/core/data-research.ts:verifyExtraction",
+    "src/core/diarize/payload-fitter.ts:ChatFn",
+    "src/core/diarize/payload-fitter.ts:DEFAULT_MIN_SUCCESS_RATIO",
+    "src/core/diarize/payload-fitter.ts:DEFAULT_PARALLELISM",
+    "src/core/diarize/payload-fitter.ts:FitOptions",
+    "src/core/diarize/payload-fitter.ts:FitResult",
+    "src/core/diarize/payload-fitter.ts:FitStrategy",
+    "src/core/diarize/payload-fitter.ts:SummarizeOutcome",
+    "src/core/diarize/payload-fitter.ts:cosine",
+    "src/core/diarize/payload-fitter.ts:fit",
+    "src/core/diarize/payload-fitter.ts:fitBatch",
+    "src/core/diarize/payload-fitter.ts:fitSummarize",
+    "src/core/diarize/payload-fitter.ts:summarizeCluster",
+    "src/core/embedding-dim-check.ts:_resetFactsDimCheckCacheForTest",
+    "src/core/enrichment/budget.ts:BudgetError.constructor",
+    "src/core/enrichment/budget.ts:BudgetErrorCode",
+    "src/core/enrichment/budget.ts:BudgetLedger.cleanupExpired",
+    "src/core/enrichment/budget.ts:BudgetLedger.commit",
+    "src/core/enrichment/budget.ts:BudgetLedger.constructor",
+    "src/core/enrichment/budget.ts:BudgetLedger.reclaimExpiredRow",
+    "src/core/enrichment/budget.ts:BudgetLedger.reserve",
+    "src/core/enrichment/budget.ts:BudgetLedger.rollback",
+    "src/core/enrichment/budget.ts:BudgetLedger.state",
+    "src/core/enrichment/budget.ts:BudgetLedger.tz",
+    "src/core/enrichment/budget.ts:BudgetStateRow",
+    "src/core/enrichment/budget.ts:DEFAULT_SCOPE",
+    "src/core/enrichment/budget.ts:DEFAULT_TTL_SECONDS",
+    "src/core/enrichment/budget.ts:DEFAULT_TZ",
+    "src/core/enrichment/budget.ts:ReservationResult",
+    "src/core/enrichment/budget.ts:ReserveInput",
+    "src/core/enrichment/budget.ts:makeReservationId",
+    "src/core/enrichment/budget.ts:todayInTz",
+    "src/core/enrichment/completeness.ts:CompletenessDimension",
+    "src/core/enrichment/completeness.ts:CompletenessScore",
+    "src/core/enrichment/completeness.ts:RUBRICS_BY_TYPE",
+    "src/core/enrichment/completeness.ts:Rubric",
+    "src/core/enrichment/completeness.ts:clamp",
+    "src/core/enrichment/completeness.ts:companyRubric",
+    "src/core/enrichment/completeness.ts:conceptRubric",
+    "src/core/enrichment/completeness.ts:countListItems",
+    "src/core/enrichment/completeness.ts:dealRubric",
+    "src/core/enrichment/completeness.ts:defaultRubric",
+    "src/core/enrichment/completeness.ts:getRubric",
+    "src/core/enrichment/completeness.ts:hasBacklinkHint",
+    "src/core/enrichment/completeness.ts:hasBody",
+    "src/core/enrichment/completeness.ts:hasCitations",
+    "src/core/enrichment/completeness.ts:hasFrontmatterField",
+    "src/core/enrichment/completeness.ts:hasSourceUrls",
+    "src/core/enrichment/completeness.ts:hasTimelineEntries",
+    "src/core/enrichment/completeness.ts:hasTitle",
+    "src/core/enrichment/completeness.ts:mediaRubric",
+    "src/core/enrichment/completeness.ts:nonRedundancy",
+    "src/core/enrichment/completeness.ts:parseDate",
+    "src/core/enrichment/completeness.ts:personRubric",
+    "src/core/enrichment/completeness.ts:projectRubric",
+    "src/core/enrichment/completeness.ts:recencyScore",
+    "src/core/enrichment/completeness.ts:scorePage",
+    "src/core/enrichment/completeness.ts:sourceRubric",
+    "src/core/eval-capture-graph.ts:CodeWalkComparison",
+    "src/core/eval-capture-graph.ts:CodeWalkResultShape",
+    "src/core/eval-capture-graph.ts:GraphNode",
+    "src/core/eval-capture-graph.ts:adjustedRandIndex",
+    "src/core/eval-capture-graph.ts:compareCodeWalk",
+    "src/core/eval-capture-graph.ts:depthGroupStability",
+    "src/core/eval-capture-graph.ts:nodeKey",
+    "src/core/eval-capture-graph.ts:nodeSetJaccard",
+    "src/core/eval-capture-graph.ts:truncationMatch",
+    "src/core/eval-contradictions/calibration-join.ts:CalibrationJoinTag",
+    "src/core/eval-contradictions/calibration-join.ts:buildBiasContextString",
+    "src/core/eval-contradictions/calibration-join.ts:computeDomainHint",
+    "src/core/eval-contradictions/calibration-join.ts:tagFindingWithCalibration",
+    "src/core/extract/rollup-writer.ts:_resetRollupErrorLogForTests",
+    "src/core/fail-improve.ts:FailImproveLoop.analyzeFailures",
+    "src/core/fail-improve.ts:FailImproveLoop.constructor",
+    "src/core/fail-improve.ts:FailImproveLoop.ensureDir",
+    "src/core/fail-improve.ts:FailImproveLoop.execute",
+    "src/core/fail-improve.ts:FailImproveLoop.generateTestCases",
+    "src/core/fail-improve.ts:FailImproveLoop.getCallCountPath",
+    "src/core/fail-improve.ts:FailImproveLoop.getCallCounts",
+    "src/core/fail-improve.ts:FailImproveLoop.getFailures",
+    "src/core/fail-improve.ts:FailImproveLoop.getFailuresByPattern",
+    "src/core/fail-improve.ts:FailImproveLoop.getImprovements",
+    "src/core/fail-improve.ts:FailImproveLoop.getLogPath",
+    "src/core/fail-improve.ts:FailImproveLoop.incrementCallCount",
+    "src/core/fail-improve.ts:FailImproveLoop.logDir",
+    "src/core/fail-improve.ts:FailImproveLoop.logFailure",
+    "src/core/fail-improve.ts:FailImproveLoop.logImprovement",
+    "src/core/fail-improve.ts:FailImproveLoop.rotateIfNeeded",
+    "src/core/fail-improve.ts:FailureAnalysis",
+    "src/core/fail-improve.ts:FailureEntry",
+    "src/core/fail-improve.ts:MAX_ENTRIES",
+    "src/core/fail-improve.ts:TestCase",
+    "src/core/fail-improve.ts:getLogDir",
+    "src/core/fail-improve.ts:isAbortError",
+    "src/core/fail-improve.ts:makeAbortError",
+    "src/core/google/google-clients.ts:RawGmailHeader",
+    "src/core/google/google-source.ts:MAX_THREAD_FAILURES",
+    "src/core/google/google-source.ts:isRateLimitFailure",
+    "src/core/import-file.ts:_maybeOcrGatedForTests",
+    "src/core/minions/batch-projection.ts:BatchProjection",
+    "src/core/minions/batch-projection.ts:COLD_LATENCY_MS",
+    "src/core/minions/batch-projection.ts:ProjectBatchInput",
+    "src/core/minions/batch-projection.ts:RecentJobStats",
+    "src/core/minions/batch-projection.ts:formatProjection",
+    "src/core/minions/batch-projection.ts:modelDefaultMeanCostUsd",
+    "src/core/minions/batch-projection.ts:projectBatch",
+    "src/core/minions/batch-projection.ts:shouldPromptAtThreshold",
+    "src/core/minions/budget-tracker.ts:BudgetEventRecord",
+    "src/core/minions/budget-tracker.ts:BudgetExhausted.constructor",
+    "src/core/minions/budget-tracker.ts:BudgetOwnerDeleted.constructor",
+    "src/core/minions/budget-tracker.ts:BudgetOwnerInfo",
+    "src/core/minions/budget-tracker.ts:ReservationOutcome",
+    "src/core/minions/budget-tracker.ts:getBudgetOwner",
+    "src/core/minions/budget-tracker.ts:haltBudgetSubtree",
+    "src/core/minions/budget-tracker.ts:inheritBudgetOwner",
+    "src/core/minions/budget-tracker.ts:logBudgetEvent",
+    "src/core/minions/budget-tracker.ts:refundBudget",
+    "src/core/minions/budget-tracker.ts:reserveBudget",
+    "src/core/minions/budget-tracker.ts:setOwnerBudget",
+    "src/core/minions/lease-cap-controller.ts:ControllerOpts",
+    "src/core/minions/lease-cap-controller.ts:ControllerWindowStats",
+    "src/core/minions/lease-cap-controller.ts:DEFAULT_CONTROLLER_OPTS",
+    "src/core/minions/lease-cap-controller.ts:controllerTick",
+    "src/core/minions/lease-cap-controller.ts:nextLeaseCap",
+    "src/core/minions/lease-cap-controller.ts:readControllerWindow",
+    "src/core/minions/lease-cap-controller.ts:readCurrentLeaseCap",
+    "src/core/minions/lease-cap-controller.ts:writeLeaseCap",
+    "src/core/minions/self-fix.ts:DEFAULT_OPTS",
+    "src/core/minions/self-fix.ts:SelfFixDecision",
+    "src/core/minions/self-fix.ts:SelfFixEventRecord",
+    "src/core/minions/self-fix.ts:SelfFixOpts",
+    "src/core/minions/self-fix.ts:buildSelfFixPrompt",
+    "src/core/minions/self-fix.ts:computeChainDepth",
+    "src/core/minions/self-fix.ts:decideSelfFix",
+    "src/core/minions/self-fix.ts:logSelfFixEvent",
+    "src/core/minions/self-fix.ts:submitSelfFixChild",
+    "src/core/minions/stagger.ts:FNV_OFFSET",
+    "src/core/minions/stagger.ts:FNV_PRIME",
+    "src/core/minions/stagger.ts:staggerMinuteOffset",
+    "src/core/minions/stagger.ts:staggerSecondOffset",
+    "src/core/minions/supervisor.ts:MinionSupervisor.reconcileOrphanedPrivateQueuesBeforeWorkerSpawn",
+    "src/core/ops/pages.ts:assertSourceInWriteGrant",
     "src/core/pglite-engine.ts:PGLiteEngine._addLinksBatchOnce",
     "src/core/pglite-engine.ts:PGLiteEngine._addTimelineEntriesBatchOnce",
     "src/core/pglite-engine.ts:PGLiteEngine.buildChunklessPagesWhere",
@@ -4312,21 +6810,29 @@
     "src/core/pglite-engine.ts:PGLiteEngine.takesDeps",
     "src/core/pglite-engine/cjk-search.ts:PgliteCjkSearchDeps",
     "src/core/pglite-engine/code-edges.ts:PGLITE_EDGE_BATCH_MAX_BIND_PARAMS",
-    "src/core/pglite-engine/facts.ts:FactRowSqlShape",
     "src/core/pglite-engine/facts.ts:PgliteFactsDeps",
     "src/core/pglite-engine/facts.ts:_listFacts",
     "src/core/pglite-engine/facts.ts:toDate",
     "src/core/pglite-engine/salience.ts:PgliteSalienceDeps",
     "src/core/pglite-engine/takes.ts:PgliteTakesDeps",
+    "src/core/pglite-lock.ts:LOCK_DIR_NAME",
+    "src/core/pglite-lock.ts:REAP_CLAIM_TTL_MS",
+    "src/core/pglite-lock.ts:breakStaleClaim",
+    "src/core/pglite-lock.ts:formatLockTimestamp",
+    "src/core/pglite-lock.ts:pgliteLockTimeoutError",
+    "src/core/pglite-lock.ts:reapMarkerPath",
+    "src/core/pglite-lock.ts:recordReap",
+    "src/core/pglite-lock.ts:tryReapLockDir",
+    "src/core/postgres-engine.ts:PostgresEngine.__resetFactsEmbeddingCastCacheForTest",
     "src/core/postgres-engine.ts:PostgresEngine._addLinksBatchOnce",
     "src/core/postgres-engine.ts:PostgresEngine._addTimelineEntriesBatchOnce",
+    "src/core/postgres-engine.ts:PostgresEngine._reservedDirectInFlight",
     "src/core/postgres-engine.ts:PostgresEngine.buildChunklessPagesWhere",
     "src/core/postgres-engine.ts:PostgresEngine.buildStalePagesWhere",
     "src/core/postgres-engine.ts:PostgresEngine.codeEdgesDeps",
     "src/core/postgres-engine.ts:PostgresEngine.factsDeps",
     "src/core/postgres-engine.ts:PostgresEngine.salienceDeps",
     "src/core/postgres-engine.ts:PostgresEngine.takesDeps",
-    "src/core/postgres-engine/cjk-search.ts:CjkKeywordRunner",
     "src/core/postgres-engine/code-edges.ts:PgCodeEdgesDeps",
     "src/core/postgres-engine/code-edges.ts:PgSql",
     "src/core/postgres-engine/facts.ts:PgFactsDeps",
@@ -4334,9 +6840,104 @@
     "src/core/postgres-engine/salience.ts:PgSalienceDeps",
     "src/core/postgres-engine/salience.ts:PgSql",
     "src/core/postgres-engine/takes.ts:PgSql",
-    "src/core/postgres-engine/takes.ts:PgTakesDeps"
+    "src/core/postgres-engine/takes.ts:PgTakesDeps",
+    "src/core/process-cleanup.ts:cleanupInFlight",
+    "src/core/resolvers/builtin/url-reachable.ts:checkDnsRebinding",
+    "src/core/resolvers/builtin/url-reachable.ts:errMessage",
+    "src/core/retrieval-upgrade-planner.ts:ApplyOpts",
+    "src/core/retrieval-upgrade-planner.ts:ApplyResult",
+    "src/core/retrieval-upgrade-planner.ts:EMBED_PAGES_PER_MINUTE",
+    "src/core/retrieval-upgrade-planner.ts:KEY_APPLIED",
+    "src/core/retrieval-upgrade-planner.ts:KEY_DECLINED_AT",
+    "src/core/retrieval-upgrade-planner.ts:KEY_PREVIOUS_SNAPSHOT",
+    "src/core/retrieval-upgrade-planner.ts:KEY_PROMPT_SHOWN",
+    "src/core/retrieval-upgrade-planner.ts:KEY_REQUESTED",
+    "src/core/retrieval-upgrade-planner.ts:POSTGRES_DDL_MS_PER_PAGE",
+    "src/core/retrieval-upgrade-planner.ts:RetrievalUpgradeState",
+    "src/core/retrieval-upgrade-planner.ts:ZE_DECLINE_REASK_DAYS",
+    "src/core/retrieval-upgrade-planner.ts:ZE_MIN_PAGES_FOR_OFFER",
+    "src/core/retrieval-upgrade-planner.ts:ZE_TARGET_EMBEDDING_DIM",
+    "src/core/retrieval-upgrade-planner.ts:ZE_TARGET_EMBEDDING_MODEL",
+    "src/core/retrieval-upgrade-planner.ts:ZE_TARGET_RERANKER_MODEL",
+    "src/core/retrieval-upgrade-planner.ts:ZeSwitchSnapshot",
+    "src/core/retrieval-upgrade-planner.ts:applyRetrievalUpgrade",
+    "src/core/retrieval-upgrade-planner.ts:getStringConfig",
+    "src/core/retrieval-upgrade-planner.ts:planRetrievalUpgrade",
+    "src/core/retrieval-upgrade-planner.ts:recordDeclinedForever",
+    "src/core/retrieval-upgrade-planner.ts:recordDeclinedThisRun",
+    "src/core/retrieval-upgrade-planner.ts:resumeRetrievalUpgrade",
+    "src/core/retrieval-upgrade-planner.ts:undoRetrievalUpgrade",
+    "src/core/schema-pack/expand-type-filter.ts:ExpandedTypeFilter",
+    "src/core/schema-pack/expand-type-filter.ts:buildTypeFilterSql",
+    "src/core/schema-pack/expand-type-filter.ts:expandTypeFilter",
+    "src/core/schema-pack/rewrite-links-batch.ts:RewriteLinkPair",
+    "src/core/schema-pack/rewrite-links-batch.ts:rewriteLinksBatch",
+    "src/core/search/relational-intent.ts:WHO_REL_VERBS",
+    "src/core/search/title-match.ts:__test__",
+    "src/core/secret-scan.ts:PEM_BLOCK_RE",
+    "src/core/serve-sync-runner.ts:deferredEmbedSourceId",
+    "src/core/serve-sync-runner.ts:deferredEmbedsPending",
+    "src/core/serve-sync-runner.ts:embedDrainController",
+    "src/core/serve-sync-runner.ts:embedDrainRunning",
+    "src/core/serve-sync-runner.ts:scheduleEmbedDrain",
+    "src/core/skillopt/reflect.ts:tryExtractEdits",
+    "src/core/skillpack/brain-pack-lint.ts:BrainPackLintResult",
+    "src/core/skillpack/brain-pack-lint.ts:ToolSkewFinding",
+    "src/core/skillpack/brain-pack-lint.ts:lintBrainPackTools",
+    "src/core/source-resolver.ts:maybeWarnUnscopedDefaultWrite",
+    "src/core/thin-client-upgrade-prompt.ts:_clearPromptStateForTest",
+    "src/core/upgrade-checkpoint.ts:ALL_STEPS",
+    "src/core/upgrade-checkpoint.ts:ALL_UPGRADE_STEPS",
+    "src/core/upgrade-checkpoint.ts:CHECKPOINT_FILENAME",
+    "src/core/upgrade-checkpoint.ts:CheckpointValidation",
+    "src/core/upgrade-checkpoint.ts:UpgradeCheckpoint",
+    "src/core/upgrade-checkpoint.ts:UpgradeStep",
+    "src/core/upgrade-checkpoint.ts:checkpointPath",
+    "src/core/upgrade-checkpoint.ts:clearCheckpoint",
+    "src/core/upgrade-checkpoint.ts:computeBrainId",
+    "src/core/upgrade-checkpoint.ts:loadCheckpoint",
+    "src/core/upgrade-checkpoint.ts:markStepComplete",
+    "src/core/upgrade-checkpoint.ts:markStepFailed",
+    "src/core/upgrade-checkpoint.ts:validateCheckpoint",
+    "src/core/upgrade-checkpoint.ts:writeCheckpoint",
+    "src/core/ze-exposure.ts:BLAST_RADIUS_CAP",
+    "src/core/ze-exposure.ts:SAFE_COLUMN_KEY",
+    "src/core/ze-exposure.ts:ZE_PREFIX",
+    "src/core/ze-exposure.ts:ZeBlastRadius",
+    "src/core/ze-exposure.ts:ZeExposure",
+    "src/core/ze-exposure.ts:ZeExposureStatus",
+    "src/core/ze-exposure.ts:cappedCount",
+    "src/core/ze-exposure.ts:detectZeCustomColumns",
+    "src/core/ze-exposure.ts:fmtCount",
+    "src/core/ze-exposure.ts:renderZeActionRequired",
+    "src/core/ze-exposure.ts:zeColumnsFromRegistry",
+    "src/eval/shared/embed-cache.ts:EmbeddingCache.txBegin",
+    "src/eval/shared/embed-cache.ts:EmbeddingCache.txDepth",
+    "src/eval/shared/embed-cache.ts:EmbeddingCache.txEnd"
   ],
   "removedModules": [
+    "src/commands/eval-schema-authoring.ts",
+    "src/commands/ze-switch.ts",
+    "src/core/ai/recipes/zeroentropyai.ts",
+    "src/core/artifact/index.ts",
+    "src/core/calibration/cross-brain.ts",
+    "src/core/calibration/nudge.ts",
+    "src/core/calibration/recall-footer.ts",
+    "src/core/calibration/take-forecast.ts",
+    "src/core/conversation-parser/llm-polish.ts",
+    "src/core/data-research.ts",
+    "src/core/diarize/payload-fitter.ts",
+    "src/core/distribution/index.ts",
+    "src/core/enrichment/budget.ts",
+    "src/core/enrichment/completeness.ts",
+    "src/core/eval-capture-graph.ts",
+    "src/core/eval-contradictions/calibration-join.ts",
+    "src/core/fail-improve.ts",
+    "src/core/minions/batch-projection.ts",
+    "src/core/minions/budget-tracker.ts",
+    "src/core/minions/lease-cap-controller.ts",
+    "src/core/minions/self-fix.ts",
+    "src/core/minions/stagger.ts",
     "src/core/pglite-engine/cjk-search.ts",
     "src/core/pglite-engine/facts.ts",
     "src/core/pglite-engine/salience.ts",
@@ -4345,6 +6946,12 @@
     "src/core/postgres-engine/code-edges.ts",
     "src/core/postgres-engine/facts.ts",
     "src/core/postgres-engine/salience.ts",
-    "src/core/postgres-engine/takes.ts"
+    "src/core/postgres-engine/takes.ts",
+    "src/core/retrieval-upgrade-planner.ts",
+    "src/core/schema-pack/expand-type-filter.ts",
+    "src/core/schema-pack/rewrite-links-batch.ts",
+    "src/core/skillpack/brain-pack-lint.ts",
+    "src/core/upgrade-checkpoint.ts",
+    "src/core/ze-exposure.ts"
   ]
 }

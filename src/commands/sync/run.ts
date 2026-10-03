@@ -439,7 +439,7 @@ async function runSyncAll(
       includeGitignored,
       workingTree,
       sourceId: src.id,
-      strategy: selectSyncStrategy(undefined, cfg),
+      strategy: selectSyncStrategy(flags.strategyArg, cfg),
       concurrency,
       signal: composeAbortSignals(allInterrupt.signal, controller?.signal),
     };

@@ -207,34 +207,8 @@ for (const kind of ['pglite', 'postgres'] as const) {
               expect(JSON.stringify(rows)).not.toContain(PRIVATE);
             }
             const chunks = await call(scope.ctx, 'get_chunks', { slug });
-            if (exposePrivatePages) {
-              expect(policy.excludePrivate).toBe(false);
-              expect(policy.requireSafeChunks).toBe(false);
-              const expected = scope.sharedChunk ? [unsafe, cleanB] : [unsafe];
-              expect((chunks as Array<{ page_id: number }>).map(row => row.page_id).sort((a,b) => a-b)).toEqual(expected.sort((a,b) => a-b));
-              expect(JSON.stringify(chunks)).toContain(PRIVATE);
-              expect(JSON.stringify(await call(scope.ctx, 'get_chunks', { slug: 'notes/legacy-marker-free' }))).toContain(`${PRIVATE}_NO_MARKERS`);
-              const allowed = [unsafe, markerFree, legacyPublic, ...scope.allowedIds];
-              for (const rows of [
-                await engine.searchKeyword(QUERY, { ...policy, limit: 1 }),
-                await engine.searchKeywordChunks(QUERY, { ...policy, limit: 1 }),
-                await engine.searchVector(vector, { ...policy, limit: 1 }),
-              ]) {
-                expect(rows).toHaveLength(1);
-                expect(allowed).toContain(rows[0].page_id);
-                expect(JSON.stringify(rows)).not.toContain('PUBLIC_FOREIGN');
-              }
-              for (const keywordOnly of ['true', 'false']) {
-                await engine.setConfig('search.mcp_keyword_only', keywordOnly);
-                for (const name of ['search', 'query']) {
-                  const rows = await call(scope.ctx, name, { query: QUERY, expand: false, limit: 1 }) as SearchResult[];
-                  expect(rows).toHaveLength(1);
-                  expect(allowed).toContain(rows[0].page_id);
-                  expect(JSON.stringify(rows)).not.toContain('PUBLIC_FOREIGN');
-                }
-              }
-              continue;
-            }
+            if (exposePrivatePages) expect(policy.excludePrivate).toBe(false);
+            expect(policy.requireSafeChunks).toBe(true);
             if (scope.sharedChunk) expect(JSON.stringify(chunks)).toContain(scope.sharedChunk);
             else expect(chunks).toEqual([]);
             expect(JSON.stringify(chunks)).not.toContain(PRIVATE);

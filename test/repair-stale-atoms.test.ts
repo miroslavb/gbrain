@@ -28,6 +28,8 @@ import { operations } from '../src/core/operations.ts';
 import { computeAtomProvenanceDriftCheck } from '../src/commands/doctor.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
+
+const fixtureClaims: Record<string,string> = {"Patience compounds": "The Atlas team waits for three completed reviews before expanding a project.", "Hire slowly": "The Atlas team interviews three candidates before making a hiring decision.", "Patience compounds over years": "The Atlas team reviews progress over several years before expanding a project."};
 import { withEnv } from './helpers/with-env.ts';
 
 interface RepairJson { results: Array<{ affected: number; residuals: Record<string, number>; apply_command: string; applied: number; skipped: number;
@@ -190,6 +192,7 @@ for (const kind of testBackends()) {
       await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
       await engine.executeRaw('INSERT INTO sources(id,name,local_path) VALUES($1,$1,$2)', [sourceId, root]);
       const writeSource = async (body: string) => {
+        body += '\n'+Object.values(fixtureClaims).join(' ');
         const written = await engine.putPage(slug, { type: 'source', title: 'Example', compiled_truth: body }, { sourceId });
         mkdirSync(join(root, 'notes'), { recursive: true });
         writeFileSync(join(root, `${slug}.md`), serializePageToMarkdown(written, []));
@@ -202,7 +205,7 @@ for (const kind of testBackends()) {
       let calls = 0;
       const chat = async (): Promise<ChatResult> => {
         calls++;
-        return { text: JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: `Body for ${title}.` }))),
+        return { text: JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: fixtureClaims[title], source_quote: fixtureClaims[title] }))),
           blocks: [], stopReason: 'end', usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
           model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
       };

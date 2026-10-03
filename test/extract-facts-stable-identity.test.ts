@@ -119,7 +119,7 @@ describe('extract_facts stable identity', () => {
     const result = await runExtractFacts(engine, { slugs: [slug] });
     const after = await rows(slug);
     expect(after.map(r => r.id)).toEqual(before.map(r => r.id));
-    expect(after.map(r => [r.notability, r.visibility])).toEqual([['medium', 'world'], ['high', 'private']]);
+    expect(after.map(r => [r.notability, r.visibility])).toEqual([['medium', 'world'], ['high', 'world']]);
     expect(result.factsDeleted).toBe(0);
     const derived = await engine.executeRaw<{ source_session: string | null; consolidated: boolean; context: string | null }>(
       `SELECT source_session, consolidated_at IS NOT NULL AS consolidated, context FROM facts

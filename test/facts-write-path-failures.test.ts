@@ -7,18 +7,19 @@
  *   - The fence writer's fallback to file-only row numbering when the DB
  *     MAX(row_num) lookup fails (the duplicate-key class it guards) is
  *     reported instead of silent.
- *   - A failed page-cache mirror after a fence write is reported.
+ *   - A failed atomic fact projection rolls back the canonical file and DB.
  *
- * Real PGLite; failures injected by wrapping executeRaw / refreshPageBody.
+ * Real PGLite; failures injected by wrapping executeRaw / insertFacts.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { resolveEntitySlugWithSource } from '../src/core/entities/resolve.ts';
 import { writeFactsToFence } from '../src/core/facts/fence-write.ts';
+import { serializePageToMarkdown } from '../src/core/markdown.ts';
 import { importFromContent } from '../src/core/import-file.ts';
 import { _resetWriteThroughCacheForTest } from '../src/core/write-through.ts';
 
@@ -90,22 +91,18 @@ describe('facts write-path failures (B-21)', () => {
     }
   });
 
-  test('a failed page-cache mirror after a fence write is reported', async () => {
+  test('a failed atomic fact projection restores the owned file and is reported', async () => {
     await importFromContent(engine, 'people/alice-example', '---\ntitle: Alice Example\ntype: person\n---\n# Alice Example\n', { noEmbed: true });
-    const broken = new Proxy(engine, {
-      get(target, prop, receiver) {
-        if (prop === 'refreshPageBody') return async () => { throw new Error('mirror write failed'); };
-        const value = Reflect.get(target, prop, receiver);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    }) as unknown as BrainEngine;
-    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    const path = join(brainDir, 'people/alice-example.md');
+    const snapshot = (await engine.readPageSnapshot('people/alice-example', { sourceId: 'default' }))!;
+    mkdirSync(join(brainDir, 'people'), { recursive: true });
+    writeFileSync(path, serializePageToMarkdown(snapshot.page, snapshot.tags));
+    const before = readFileSync(path);
+    const write = spyOn(engine, 'insertFacts').mockRejectedValue(new Error('projection write failed'));
     try {
-      const result = await writeFactsToFence(broken, { sourceId: 'default', localPath: brainDir, slug: 'people/alice-example', resolutionSource: 'exact_page' }, [input]);
-      expect(result.inserted).toBe(1);
-      expect(warn.mock.calls.some(c => String(c[0]).includes('FACTS_PAGE_MIRROR_FAILED') && String(c[0]).includes('mirror write failed'))).toBe(true);
-    } finally {
-      warn.mockRestore();
-    }
+      await expect(writeFactsToFence(engine, { sourceId: 'default', localPath: brainDir, slug: 'people/alice-example', resolutionSource: 'exact_page' }, [input])).rejects.toThrow('projection write failed');
+      expect(readFileSync(path)).toEqual(before);
+      expect(await engine.executeRaw('SELECT id FROM facts')).toEqual([]);
+    } finally { write.mockRestore(); }
   });
 });

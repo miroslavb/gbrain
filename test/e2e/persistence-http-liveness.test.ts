@@ -89,6 +89,7 @@ describe.skipIf(!url)('authenticated PostgreSQL HTTP accepted-write liveness', (
     await withEnv({ GBRAIN_HOME: home, GBRAIN_PERSISTENCE_FIXTURE_HOME: home }, async () => {
       selectFixtureHost(config.hostId);
       await initializeFixtures(pg.engine, config);
+      await pg.engine.setConfig('facts.default_visibility', 'private');
     });
     mkdirSync(join(home, '.gbrain'), { recursive: true });
     writeFileSync(join(home, '.gbrain', 'config.json'), JSON.stringify({ engine: 'postgres', database_url: pg.databaseUrl, embedding_disabled: true }));

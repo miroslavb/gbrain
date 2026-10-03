@@ -20,6 +20,7 @@ beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  await engine.setConfig('facts.default_visibility', 'private');
   await engine.putPage('notes/world', { type: 'note', title: 'World', compiled_truth: 'body' } as any);
   await engine.putPage('notes/secret', { type: 'note', title: 'Secret', compiled_truth: 'body', frontmatter: { visibility: 'private' } } as any);
   await engine.putPage('notes/gone', { type: 'note', title: 'Gone', compiled_truth: 'body' } as any);

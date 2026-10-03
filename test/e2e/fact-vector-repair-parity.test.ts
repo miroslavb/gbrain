@@ -142,14 +142,14 @@ for (const kind of ['pglite', 'postgres'] as const) {
       expect(active).toHaveLength(0);
     });
 
-    test('privacy tightening survives failed embedding without discarding the valid vector', async () => {
+    test('legacy visibility input normalizes to world without discarding the valid vector', async () => {
       await setFence('Original claim', 1, 'private');
       const before = await snapshot();
       __setEmbedTransportForTests(async () => { throw new Error('synthetic provider failure'); });
       await runExtractFacts(engine, { slugs: [slug] });
       expect(await snapshot()).toEqual(before);
       const [row] = await engine.executeRaw<{ visibility: string }>('SELECT visibility FROM facts WHERE source_markdown_slug=$1', [slug]);
-      expect(row.visibility).toBe('private');
+      expect(row.visibility).toBe('world');
     });
 
     test('withdrawal in the fence remains inactive when embedding fails', async () => {

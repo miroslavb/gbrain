@@ -5,6 +5,7 @@ import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { configureGateway, resetGateway, __setEmbedTransportForTests } from '../src/core/ai/gateway.ts';
 import { runEmbedCore } from '../src/commands/embed.ts';
 import { backfillStaleFactEmbeddings } from '../src/core/embed-stale-facts.ts';
+import { countStaleFactEmbeddings } from '../src/core/facts/embedding-identity.ts';
 import { AITransientError } from '../src/core/ai/errors.ts';
 
 const DIMS = 1536;
@@ -31,7 +32,12 @@ afterAll(async () => {
   await engine.disconnect();
 });
 
-beforeEach(async () => resetPgliteState(engine));
+beforeEach(async () => {
+  await resetPgliteState(engine);
+  await engine.setConfig('embedding_model', 'openai:text-embedding-3-large');
+  await engine.setConfig('embedding_dimensions', String(DIMS));
+  await engine.setConfig('embedding_disabled', 'false');
+});
 
 async function insertNullFact(text: string): Promise<number> {
   return (await engine.insertFact({
@@ -63,6 +69,9 @@ describe('explicit stale fact embedding lane', () => {
       considered: 1, embedded: 1, skipped: 0, failures: 0,
     });
     expect(await pending()).toBe(0);
+    expect(await countStaleFactEmbeddings(engine, 'openai:text-embedding-3-large', DIMS)).toMatchObject({ count: 0 });
+    const [identity] = await engine.executeRaw('SELECT embedding_model,embedded_text_hash=md5(fact) AS matches FROM facts');
+    expect(identity).toEqual({ embedding_model: 'openai:text-embedding-3-large', matches: true });
   });
 
   test('dry-run reports exact pending facts and performs no writes', async () => {
@@ -155,4 +164,22 @@ describe('explicit stale fact embedding lane', () => {
     });
     expect(await pending()).toBe(4);
   });
+});
+
+
+test('catch-up excludes audit and retired rows and refuses a model change during the provider call', async () => {
+  const audit = await insertNullFact('EXTRACTION_COMPLETE');
+  await engine.executeRaw("UPDATE facts SET source='cli:extract-conversation-facts:terminal:v2' WHERE id=$1", [audit]);
+  const old = await insertNullFact('expired claim');
+  await engine.executeRaw('UPDATE facts SET expired_at=now() WHERE id=$1', [old]);
+  const active = await insertNullFact('active claim');
+  const result = await backfillStaleFactEmbeddings(engine, {
+    embedBatch: async texts => {
+      expect(texts).toEqual(['active claim']);
+      await engine.setConfig('embedding_model', 'different:model');
+      return [new Float32Array(DIMS).fill(0.001)];
+    },
+  });
+  expect(result).toMatchObject({ pending_before: 1, considered: 1, embedded: 0, failures: 1, pending_after: 1 });
+  expect((await engine.executeRaw('SELECT embedding FROM facts WHERE id=$1', [active]))[0].embedding).toBeNull();
 });

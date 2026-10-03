@@ -161,6 +161,12 @@
       "persistence_writer_protocols.persistence_writer_protocols_pkey": "p PRIMARY KEY (worktree_id, host_id)",
       "persistence_writer_protocols.persistence_writer_protocols_protocol_version_check": "c CHECK ((protocol_version = 2))",
       "persistence_writer_protocols.persistence_writer_protocols_worktree_id_fkey": "f FOREIGN KEY (worktree_id) REFERENCES persistence_worktrees(id)",
+      "proposal_page_runs.proposal_page_runs_evidence_span_count_check": "c CHECK ((evidence_span_count >= 0))",
+      "proposal_page_runs.proposal_page_runs_pkey": "p PRIMARY KEY (id)",
+      "proposal_page_runs.proposal_page_runs_proposal_count_check": "c CHECK ((proposal_count >= 0))",
+      "proposal_page_runs.proposal_page_runs_rejection_reason_counts_object_check": "c CHECK ((jsonb_typeof(rejection_reason_counts) = 'object'::text))",
+      "proposal_page_runs.proposal_page_runs_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "proposal_page_runs.proposal_page_runs_status_check": "c CHECK ((status = ANY (ARRAY['completed'::text, 'empty'::text, 'quality_rejected'::text, 'failed'::text])))",
       "raw_data.raw_data_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "raw_data.raw_data_page_id_source_key": "u UNIQUE (page_id, source)",
       "raw_data.raw_data_pkey": "p PRIMARY KEY (id)",
@@ -429,6 +435,9 @@
       "persistence_writer_protocols": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "proposal_page_runs": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "raw_data": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
@@ -675,6 +684,10 @@
       "persistence_topology_recovering": "CREATE INDEX persistence_topology_recovering ON public.persistence_topology_changes USING btree (created_at) WHERE (state = 'recovering'::text)",
       "persistence_worktrees_pkey": "CREATE UNIQUE INDEX persistence_worktrees_pkey ON public.persistence_worktrees USING btree (id)",
       "persistence_writer_protocols_pkey": "CREATE UNIQUE INDEX persistence_writer_protocols_pkey ON public.persistence_writer_protocols USING btree (worktree_id, host_id)",
+      "proposal_page_runs_cache_idx": "CREATE INDEX proposal_page_runs_cache_idx ON public.proposal_page_runs USING btree (source_id, page_slug, source_hash, prompt_version) WHERE (status = ANY (ARRAY['completed'::text, 'empty'::text]))",
+      "proposal_page_runs_identity_idx": "CREATE UNIQUE INDEX proposal_page_runs_identity_idx ON public.proposal_page_runs USING btree (source_id, page_slug, source_hash, prompt_version, proposal_run_id)",
+      "proposal_page_runs_pkey": "CREATE UNIQUE INDEX proposal_page_runs_pkey ON public.proposal_page_runs USING btree (id)",
+      "proposal_page_runs_run_idx": "CREATE INDEX proposal_page_runs_run_idx ON public.proposal_page_runs USING btree (proposal_run_id, completed_at)",
       "raw_data_page_id_source_key": "CREATE UNIQUE INDEX raw_data_page_id_source_key ON public.raw_data USING btree (page_id, source)",
       "raw_data_pkey": "CREATE UNIQUE INDEX raw_data_pkey ON public.raw_data USING btree (id)",
       "session_context_state_pkey": "CREATE UNIQUE INDEX session_context_state_pkey ON public.session_context_state USING btree (source_id, client_id, session_id)",
@@ -761,6 +774,7 @@
       "pages_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=pages.id",
       "persistence_effects_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=persistence_effects.id",
       "persistence_requests_sequence_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=persistence_requests.sequence",
+      "proposal_page_runs_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=proposal_page_runs.id",
       "raw_data_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=raw_data.id",
       "subagent_messages_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=subagent_messages.id",
       "subagent_rate_leases_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=subagent_rate_leases.id",
@@ -1702,6 +1716,24 @@
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },
+      "proposal_page_runs": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('proposal_page_runs_id_seq'::regclass)",
+          "2 source_id text/text NOT NULL",
+          "3 page_slug text/text NOT NULL",
+          "4 source_hash text/text NOT NULL",
+          "5 prompt_version text/text NOT NULL",
+          "6 proposal_run_id text/text NOT NULL",
+          "7 model_id text/text NOT NULL",
+          "8 status text/text NOT NULL",
+          "9 proposal_count integer/int4 NOT NULL DEFAULT 0",
+          "10 evidence_span_count integer/int4 NOT NULL DEFAULT 0",
+          "11 error_code text/text NULL",
+          "12 rejection_reason_counts jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
+          "13 completed_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "raw_data": {
         "columns": [
           "1 id integer/int4 NOT NULL DEFAULT nextval('raw_data_id_seq'::regclass)",
@@ -1995,13 +2027,15 @@
           "12 holder text/text NOT NULL",
           "13 weight real/float4 NOT NULL",
           "14 domain text/text NULL",
-          "15 dedup_against_fence_rows jsonb/jsonb NULL",
-          "16 model_id text/text NOT NULL",
-          "17 acted_at timestamp with time zone/timestamptz NULL",
-          "18 acted_by text/text NULL",
-          "19 promoted_row_num integer/int4 NULL",
-          "20 predicted_brier real/float4 NULL",
-          "21 predicted_brier_bucket_n integer/int4 NULL"
+          "15 evidence_span text/text NULL",
+          "16 source_hash text/text NULL",
+          "17 dedup_against_fence_rows jsonb/jsonb NULL",
+          "18 model_id text/text NOT NULL",
+          "19 acted_at timestamp with time zone/timestamptz NULL",
+          "20 acted_by text/text NULL",
+          "21 promoted_row_num integer/int4 NULL",
+          "22 predicted_brier real/float4 NULL",
+          "23 predicted_brier_bucket_n integer/int4 NULL"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },

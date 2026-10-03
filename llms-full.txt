@@ -2250,6 +2250,65 @@ helper resets the epoch, schedules work, changes mass gates or stores raw text.
 Retired epochs fail before changing counters. Treat crash/interrupted attempts
 as uncompleted, never reconstruct success from publications or page timestamps.
 
+## Local upgrade candidate — 2026-10-02
+
+This fork ports upstream v0.60.31.0 on top of schema157 production. See
+[upgrade contracts](docs/architecture/key-files/fork-memory-contracts.md#v06031-port-and-verification).
+Use Bun1.4.0+ in isolated HOME/network/DB/filesystem. Never run this candidate
+against production, including help/version. Schema migrations retain this
+fork’s historical IDs and reach197; verify with
+`GBRAIN_MIGRATION_BASE_REF=92e06c6c2cc307b4d617c75e9081dfe485c244fa`.
+The stages1–6 operator authorization covers staging and rollback rehearsal;
+production activation needs separate go.
+
+During the 2026-10-03 isolated retry, catalog and fixture changes must explicitly preserve
+fork world-only and grounded-atom contracts. E2E uses only an isolated loopback-to-stage-Unix
+relay so sanitized child environments need no production configuration. See the fork matrix.
+
+
+### Staging integration checkpoint — 2026-10-03
+
+Upstream v0.60.31.0 is merged for isolated validation, not activated. Preserve
+strict atom quotation/semantic gates while adopting transcript tombstones and
+parser fixes. Keep mirror-read-only source policy, raw reconciliation backups/CAS,
+and canonical withdrawal overlays. Remote reads require sealed safe chunks even
+on the world-only host; complete the projection rebuild before retrieval gates.
+The old-fork schema157 replay fixture proves this fork lineage, not arbitrary
+upstream databases. Full unit/PG gates remain unresolved at this checkpoint;
+see docs/architecture/key-files/fork-memory-contracts.md and staging HANDOFF.md.
+
+Atom pricing preflight covers extractor, semantic validator and embedding routes.
+Unknown prices block before extraction; neither default nor explicit caps can be
+dropped or satisfied by an invented zero price. Explicit pricing.overrides unlocks
+the route. Proposal model provenance prefers the served response per row and falls
+back to configured model only when the response stamp is blank.
+
+Managed fact intent thawing normalizes visibility to world before both dedup
+planning and publication validation, so legacy private input cannot cause a false
+revision conflict after fence projection. The old contextual-vector activation
+shortcut is retired: missing input provenance requires re-embedding on the stage.
+
+Exact-file reconciliation scans matching origins in keyset batches of 100, with
+a fail-closed 10,000-row total cap. It compares every resolved file identity,
+including directory symlinks, and never accepts from a truncated candidate set.
+Internal NULL fact-vector catch-up stamps the actual model and text hash, excludes
+retired/audit rows, and checks row version, source incarnation, dimensions and
+model configuration again when writing. Public CLI fact repair keeps its bounded
+source/approval/budget protocol. These ports require the full staging gates.
+
+Sync fan-out must pass the explicit --strategy flag to every selected source;
+only an absent override inherits each saved strategy. The warm PostgreSQL test
+reset reinstalls the fork's world fact/page-policy default; legacy private-policy
+fixtures select that policy explicitly. Do not treat same-slug entities across
+unlinked granted sources as one entity: recall requires source disambiguation.
+
+The 2026-10-03 staging replay exposed resident-consumer code drift: an older
+process can claim requests submitted by a newly fixed CLI on the same owner.
+Restart all staging consumers together after a persistence code change; inspect
+journal state before resubmitting any timed-out or apparently refused write.
+Doctor and catalog goldens reflect schema197 and the fork's existing world,
+extraction-provenance and graph contracts; they do not replace retrieval gold.
+
 ---
 
 ## CLAUDE.md
@@ -2278,8 +2337,7 @@ bake-off, off-mission).
 
 ## Two organizational axes (read this first)
 
-GBrain knowledge is organized along two orthogonal axes. Users AND agents must
-understand both, or queries misroute silently.
+GBrain has two routing axes. Users and agents must distinguish them to avoid misrouted queries.
 
 - **Brain** — WHICH DATABASE. Your personal brain is `host`. You can mount
   additional brains (team-published, each with their own DB and access policy)
@@ -3634,7 +3692,7 @@ I'm Garry Tan, President and CEO of Y Combinator. I built GBrain to run my own A
 
 **It works as a company brain too.** Authenticated remote clients are constrained by source and operation grants plus visibility filters. Local files and shared database credentials are a different trust boundary: sources alone do not isolate those callers. The authorization tests exercise specific access paths, not a universal no-leak guarantee. Read the [sharing boundaries](docs/architecture/brains-and-sources.md#what-confines-remote-callers-and-what-does-not) and [company-brain tutorial](docs/tutorials/company-brain.md) before setting up shared access.
 
-Alongside keyword and semantic retrieval, GBrain offers two optional ways to use your stored knowledge:
+GBrain also offers two optional ways to use stored knowledge:
 
 - **A synthesis layer that gives you the actual answer.** Synthesized, well-cited prose across people, companies, deals, and ideas. Not "here are 10 chunks that mention your query"; an actual answer with citations and an explicit note on what the brain doesn't know yet. The gap analysis is the part that changes how you use the brain.
 - **A typed knowledge graph.** Trusted local page writes extract supported references without LLM calls when auto-linking is enabled. Remote `put_page` does not extract graph edges inline: stdio has best-effort startup/idle sweeps; HTTP needs explicit maintenance or authorized `add_link` calls. Ask "who works at acme-example?" to use stored relationships. On BrainBench relationship questions a graph adapter scored **P@5 0.3421, R@5 0.9791** vs 0.1917 / 0.6874 plain hybrid ([2026-09-09 refresh](https://github.com/garrytan/gbrain-evals/blob/main/docs/benchmarks/2026-09-09-retrieval-refresh.md)): whole systems, not a graph-only lift or a general guarantee.

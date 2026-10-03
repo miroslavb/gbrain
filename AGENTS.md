@@ -645,3 +645,35 @@ on the world-only host; complete the projection rebuild before retrieval gates.
 The old-fork schema157 replay fixture proves this fork lineage, not arbitrary
 upstream databases. Full unit/PG gates remain unresolved at this checkpoint;
 see docs/architecture/key-files/fork-memory-contracts.md and staging HANDOFF.md.
+
+Atom pricing preflight covers extractor, semantic validator and embedding routes.
+Unknown prices block before extraction; neither default nor explicit caps can be
+dropped or satisfied by an invented zero price. Explicit pricing.overrides unlocks
+the route. Proposal model provenance prefers the served response per row and falls
+back to configured model only when the response stamp is blank.
+
+Managed fact intent thawing normalizes visibility to world before both dedup
+planning and publication validation, so legacy private input cannot cause a false
+revision conflict after fence projection. The old contextual-vector activation
+shortcut is retired: missing input provenance requires re-embedding on the stage.
+
+Exact-file reconciliation scans matching origins in keyset batches of 100, with
+a fail-closed 10,000-row total cap. It compares every resolved file identity,
+including directory symlinks, and never accepts from a truncated candidate set.
+Internal NULL fact-vector catch-up stamps the actual model and text hash, excludes
+retired/audit rows, and checks row version, source incarnation, dimensions and
+model configuration again when writing. Public CLI fact repair keeps its bounded
+source/approval/budget protocol. These ports require the full staging gates.
+
+Sync fan-out must pass the explicit --strategy flag to every selected source;
+only an absent override inherits each saved strategy. The warm PostgreSQL test
+reset reinstalls the fork's world fact/page-policy default; legacy private-policy
+fixtures select that policy explicitly. Do not treat same-slug entities across
+unlinked granted sources as one entity: recall requires source disambiguation.
+
+The 2026-10-03 staging replay exposed resident-consumer code drift: an older
+process can claim requests submitted by a newly fixed CLI on the same owner.
+Restart all staging consumers together after a persistence code change; inspect
+journal state before resubmitting any timed-out or apparently refused write.
+Doctor and catalog goldens reflect schema197 and the fork's existing world,
+extraction-provenance and graph contracts; they do not replace retrieval gold.

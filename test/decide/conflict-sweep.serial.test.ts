@@ -185,6 +185,8 @@ describe('sweep outcomes', () => {
   test('the new fact is excluded from its own neighbours and ineligible rows never take a slot', async () => {
     const fresh = await remember('[g1][v1] Alice leads design');
     await remember('[g1][v2] Alice leads research', 'companies/acme-example');
+    // Legacy private rows differ from new world-normalized writes.
+    await engine.executeRaw("UPDATE facts SET visibility='private'");
     await writeSingleFact(engine, 'default', { fact: '[g1][v3] Alice leads marketing', provenance: 'test', entity: SLUG, kind: 'fact', visibility: 'world' });
     await setConfig(ON);
     transport(() => P(0.1, 0.8, 0.1));
@@ -284,6 +286,7 @@ describe('fail directions: no proposal, the fact stays as written', () => {
   test('egress refused (private facts, decide.egress.private deny) sends nothing', async () => {
     await remember('[g1][v1] Alice leads research');
     const fresh = await remember('[g1][v2] Alice leads design');
+    await engine.executeRaw("UPDATE facts SET visibility='private'");
     await setConfig({ ...ON, 'decide.egress.private': 'deny' });
     transport(() => P(0.1, 0.9, 0));
     const r = await runConflictSweep(engine, { since: fresh - 1, now: LATER });

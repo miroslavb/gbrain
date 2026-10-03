@@ -25,8 +25,13 @@ function ctxOf(remote: boolean | undefined): OperationContext {
     logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
   } as OperationContext;
 }
-const run = (name: string, remote: boolean | undefined, p: Record<string, unknown>) =>
-  operationsByName[name].handler(ctxOf(remote), p) as Promise<unknown>;
+const run = async (name: string, remote: boolean | undefined, p: Record<string, unknown>) => {
+  const result = await operationsByName[name].handler(ctxOf(remote), p);
+  // Install legacy private observations explicitly: this fork's new writes are world-only.
+  if (name === 'ontology_propose' && p.visibility === 'private') await engine.executeRaw(
+    "UPDATE facts SET visibility='private' WHERE source_id='default' AND entity_slug=$1 AND fact LIKE '%privmarker%'", [p.entity]);
+  return result;
+};
 const values = (rows: unknown) => (rows as Array<{ dimension: string; value: string }>).map(r => `${r.dimension}=${r.value}`).sort();
 
 beforeAll(async () => {
@@ -38,6 +43,7 @@ afterAll(async () => { await engine.disconnect(); }, 60_000);
 
 beforeEach(async () => {
   await resetPgliteState(engine);
+  await engine.setConfig('facts.default_visibility','private');
   await run('ontology_propose', false, { entity: ALICE, dimension: 'risk_tolerance', value: 'high privmarker', visibility: 'private' });
   await run('ontology_propose', false, { entity: ALICE, dimension: 'decision_style', value: 'deliberate', visibility: 'world' });
   // Backdated second write: both rows stay open, the private one is newer.

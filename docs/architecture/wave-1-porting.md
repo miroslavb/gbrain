@@ -12,7 +12,7 @@ follow it. The map below is generated from the AST (`scripts/generate-wave-1-mov
 [`wave-1-moves.json`](wave-1-moves.json). Where a contribution goes today is in
 [CONTRIBUTING.md, "Where does my change go?"](../../CONTRIBUTING.md#where-does-my-change-go).
 
-Base `f8d1e3936d90`, head `43a9e6b10075`.
+Base `92e06c6c2cc3`, head `27ddcb1c1602`.
 
 ## Landing window
 
@@ -139,27 +139,192 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `CLI_ONLY_SELF_HELP` | moved | module-private | `src/cli/command-table.ts:CLI_ONLY_SELF_HELP` |
 | `STARTUP_HOOK_SKIP_COMMANDS` | moved | module-private | `src/cli/command-table.ts:STARTUP_HOOK_SKIP_COMMANDS` |
 | `THIN_CLIENT_REFUSED_COMMANDS` | moved | `src/cli.ts:THIN_CLIENT_REFUSED_COMMANDS` | `src/cli/command-table.ts:THIN_CLIENT_REFUSED_COMMANDS` |
+| `applyThinClientSourceScope` | extracted | `src/cli.ts:applyThinClientSourceScope` | `src/cli/source-scope.ts:assertSingleSourceScopeFlag` |
+| `formatResult` | extracted | `src/cli.ts:formatResult` | `src/cli/remember-format.ts:formatRememberResult`<br>`src/commands/persistence-admin.ts:runPersistenceAdminCli` |
 | `handleCliOnly` | split | `src/cli.ts:handleCliOnly` | `src/cli.ts:connectCliOnlyEngine`<br>`src/cli.ts:prepareConnectedDispatch`<br>`src/cli.ts:routeCliOnlyBeforeTable`<br>`src/cli.ts:routeEngineFreeSubcommands`<br>`src/cli.ts:runReadOnlyTimeoutDispatch`<br>`src/cli/commands/advisor.ts:run`<br>`src/cli/commands/agent.ts:run`<br>`src/cli/commands/anomalies.ts:run`<br>… and 87 more (see the JSON) |
-| `main` | extracted | `src/cli.ts:main` | `src/cli.ts:runSharedOperation` |
+| `isBooleanLiteral` | moved | module-private | `src/core/op-flag-tokens.ts:isBooleanLiteral` |
+| `main` | extracted | `src/cli.ts:main` | `src/cli.ts:runSharedOperation`<br>`src/core/cli-preflight.ts:runCliPreflight` |
+| `makeContext` | extracted | `src/cli.ts:makeContext` | `src/commands/serve-http-mcp.ts:callMcpTool` |
+
+### `src/commands/apply-migrations.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runApplyMigrations` | moved | `src/commands/apply-migrations.ts:runApplyMigrations` | `src/commands/apply-migrations.ts:runLockedMigrations` |
 
 ### `src/commands/autopilot.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `crontabIndicatesAutopilotInstall` | moved | `src/commands/autopilot.ts:crontabIndicatesAutopilotInstall` | `src/commands/autopilot/jobs.ts:crontabIndicatesAutopilotInstall` |
+| `detectInstalledTarget` | moved | module-private | `src/commands/autopilot/jobs.ts:detectInstalledJob` |
+| `detectOpenClaw` | moved | module-private | `src/commands/autopilot/jobs.ts:detectOpenClaw` |
+| `ephemeralStartScriptPath` | moved | module-private | `src/commands/autopilot/jobs.ts:legacyStartScriptPath` |
+| `installCrontab` | extracted | `src/commands/autopilot.ts:installCrontab` | `src/commands/autopilot/jobs.ts:detectInstalledJob` |
+| `installDaemon` | extracted | `src/commands/autopilot.ts:installDaemon` | `src/commands/autopilot-daemon.ts:runAutopilotDaemon` |
+| `installEphemeralContainer` | extracted | `src/commands/autopilot.ts:installEphemeralContainer` | `src/commands/autopilot/jobs.ts:stripBootstrapLines` |
+| `installSystemd` | extracted | `src/commands/autopilot.ts:installSystemd` | `src/commands/autopilot/jobs.ts:systemdUnitPath` |
 | `parseArg` | extracted | `src/commands/autopilot.ts:parseArg` | `src/commands/jobs/shared.ts:parseFlag` |
+| `plistPath` | moved | module-private | `src/commands/autopilot/jobs.ts:plistPath` |
 | `runAutopilot` | split | `src/commands/autopilot.ts:runAutopilot` | `src/commands/autopilot-daemon.ts:acquireAutopilotLock`<br>`src/commands/autopilot-daemon.ts:adaptiveInterval`<br>`src/commands/autopilot-daemon.ts:probeDatabaseOrReconnect`<br>`src/commands/autopilot-daemon.ts:probeNoWorkerPeer`<br>`src/commands/autopilot-daemon.ts:runAutopilotDaemon`<br>`src/commands/autopilot-daemon.ts:runInlineCycle`<br>`src/commands/autopilot-daemon.ts:startAutopilotWorker`<br>`src/commands/autopilot-daemon.ts:warnNoChatProviderOnce`<br>… and 6 more (see the JSON) |
+| `uninstallDaemon` | extracted | `src/commands/autopilot.ts:uninstallDaemon` | `src/commands/autopilot-daemon.ts:runAutopilotDaemon`<br>`src/commands/autopilot/jobs.ts:detectInstalledJob`<br>`src/commands/autopilot/jobs.ts:stripBootstrapLines` |
+
+### `src/commands/backup.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runBackupCli` | extracted | `src/commands/backup.ts:runBackupCli` | `src/commands/persistence-delegate.ts:runDeferredPersistenceCommand` |
+
+### `src/commands/call.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runCall` | extracted | `src/commands/call.ts:runCall` | `src/commands/persistence-admin.ts:runPersistenceAdminCli`<br>`src/commands/persistence-delegate.ts:reportPersistenceCliError`<br>`src/commands/serve-http-mcp.ts:callMcpTool`<br>`src/commands/sync/run.ts:resolveCliSyncSource` |
+
+### `src/commands/config.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runConfig` | extracted | `src/commands/config.ts:runConfig` | `src/commands/doctor/checks/embedding-health.ts:runEmbeddingColumnRegistry`<br>`src/commands/sync/trigger.ts:runSyncTrigger`<br>`src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler` |
 
 ### `src/commands/doctor.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `buildChecks` | split | `src/commands/doctor.ts:buildChecks` | `src/commands/doctor/checks/content-quality.ts:runContentSanity`<br>`src/commands/doctor/checks/content-quality.ts:runFrontmatter`<br>`src/commands/doctor/checks/content-quality.ts:runQuarantine`<br>`src/commands/doctor/checks/data-integrity.ts:runCrossModal`<br>`src/commands/doctor/checks/data-integrity.ts:runIntegrity`<br>`src/commands/doctor/checks/data-integrity.ts:runJsonbIntegrity`<br>`src/commands/doctor/checks/data-integrity.ts:runMarkdownBody`<br>`src/commands/doctor/checks/data-integrity.ts:runWhoknows`<br>… and 38 more (see the JSON) |
+| `RemediationPlanShape` | moved | module-private | `src/commands/doctor/remediate.ts:RemediationPlanShape` |
+| `buildChecks` | split | `src/commands/doctor.ts:buildChecks` | `src/commands/doctor/checks/content-quality.ts:runContentSanity`<br>`src/commands/doctor/checks/content-quality.ts:runFrontmatter`<br>`src/commands/doctor/checks/content-quality.ts:runQuarantine`<br>`src/commands/doctor/checks/data-integrity.ts:runCrossModal`<br>`src/commands/doctor/checks/data-integrity.ts:runIntegrity`<br>`src/commands/doctor/checks/data-integrity.ts:runJsonbIntegrity`<br>`src/commands/doctor/checks/data-integrity.ts:runMarkdownBody`<br>`src/commands/doctor/checks/data-integrity.ts:runWhoknows`<br>… and 37 more (see the JSON) |
 | `checkSelfUpgradeHealth` | moved | `src/commands/doctor.ts:checkSelfUpgradeHealth` | `src/commands/doctor/checks/upgrade-health.ts:checkSelfUpgradeHealth` |
 | `checkUpgradeErrors` | moved | `src/commands/doctor.ts:checkUpgradeErrors` | `src/commands/doctor/checks/upgrade-health.ts:checkUpgradeErrors` |
 | `classifiedConnectionCheck` | moved | module-private | `src/commands/doctor/checks/db-connection.ts:classifiedConnectionCheck` |
+| `parseFloatFlag` | moved | module-private | `src/commands/doctor/remediate.ts:parseFloatFlag` |
+| `parseIntFlag` | moved | module-private | `src/commands/doctor/remediate.ts:parseIntFlag` |
 | `pgbouncerPrepareCheck` | moved | module-private | `src/commands/doctor/checks/db-connection.ts:pgbouncerPrepareCheck` |
 | `printAutoFixReport` | moved | module-private | `src/commands/doctor/checks/skill-group.ts:printAutoFixReport` |
+| `renderRemediationPlanLines` | moved | `src/commands/doctor.ts:renderRemediationPlanLines` | `src/commands/doctor/remediate.ts:renderRemediationPlanLines` |
+| `runRemediate` | split | `src/commands/doctor.ts:runRemediate` | `src/cli/commands/reindex.ts:run`<br>`src/commands/doctor/remediate.ts:remediationExitStatus`<br>`src/commands/doctor/remediate.ts:runRemediate` |
+| `runRemediationPlan` | moved | `src/commands/doctor.ts:runRemediationPlan` | `src/commands/doctor/remediate.ts:runRemediationPlan` |
 | `upgradeErrorResolved` | moved | `src/commands/doctor.ts:upgradeErrorResolved` | `src/commands/doctor/checks/upgrade-health.ts:upgradeErrorResolved` |
+
+### `src/commands/doctor/checks/calibration.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `checkRerankerHealth` | extracted | `src/commands/doctor/checks/calibration.ts:checkRerankerHealth` | `src/core/import-contextual-mode.ts:resolveImportContextualMode` |
+
+### `src/commands/doctor/checks/extraction-sync.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `checkLinksExtractionLag` | extracted | `src/commands/doctor/checks/extraction-sync.ts:checkLinksExtractionLag` | `src/commands/sync/report.ts:maybeExtractionNudge` |
+| `checkSyncFreshness` | extracted | `src/commands/doctor/checks/extraction-sync.ts:checkSyncFreshness` | `src/commands/doctor/checks/extraction-sync.ts:loadSyncFreshnessSources` |
+
+### `src/commands/doctor/checks/graph-embedding.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `checkProviderSunset` | split | **not re-exported** | `src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider`<br>`src/core/import-contextual-mode.ts:resolveImportContextualMode` |
+| `checkZeEmbeddingHealth` | moved | **not re-exported** | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan` |
+
+### `src/commands/doctor/report-remote.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `doctorReportRemote` | extracted | `src/commands/doctor/report-remote.ts:doctorReportRemote` | `src/commands/doctor/checks/embedding-health.ts:runEmbeddingEnvOverride`<br>`src/commands/doctor/checks/local-audits.ts:runDefaultSourcePath`<br>`src/commands/doctor/checks/local-runtime.ts:runMinionsMigration`<br>`src/commands/doctor/checks/queue-assets.ts:runQueueHealth`<br>`src/commands/doctor/checks/schema-health.ts:runPgvector`<br>`src/commands/doctor/checks/schema-health.ts:runSchemaVersion`<br>`src/commands/doctor/checks/sync-search.ts:runSearchMode`<br>`src/commands/doctor/checks/sync-search.ts:runSyncFreshness` |
+
+### `src/commands/dream-retriage.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runDreamRetriage` | extracted | `src/commands/dream-retriage.ts:runDreamRetriage` | `src/core/cycle/synthesize-postprocess.ts:postprocessManagedSynthesis`<br>`src/core/cycle/triage-decide.ts:resolveTriageDecide` |
+
+### `src/commands/dream.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runDrain` | extracted | `src/commands/dream.ts:runDrain` | `src/cli/commands/reindex.ts:run`<br>`src/commands/autopilot-dispatch.ts:dispatchAutoDrain`<br>`src/core/minions/handlers/extract-atoms-drain.ts:makeExtractAtomsDrainHandler` |
+
+### `src/commands/embed.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `embedAll` | extracted | `src/commands/embed.ts:embedAll` | `src/commands/sync/imports.ts:importOnePath` |
+| `embedAllStale` | extracted | `src/commands/embed.ts:embedAllStale` | `src/commands/sync/imports.ts:importOnePath` |
+| `healChunklessPages` | extracted | `src/commands/embed.ts:healChunklessPages` | `src/commands/sync/imports.ts:importOnePath` |
+
+### `src/commands/eval-brainbench.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `parseArgs` | extracted | `src/commands/eval-brainbench.ts:parseArgs` | `src/commands/facts.ts:parseRelinkArgs` |
+
+### `src/commands/eval-longmemeval.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `floorBreaches` | moved | module-private | `src/eval/longmemeval/metrics.ts:floorBreaches` |
+
+### `src/commands/eval-schema-authoring.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runEvalSchemaAuthoringCli` | moved | **old module removed** | `src/cli/commands/reindex.ts:run` |
+
+### `src/commands/extract-conversation-facts.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runExtractConversationFacts` | extracted | `src/commands/extract-conversation-facts.ts:runExtractConversationFacts` | `src/commands/dream-reset-key.ts:runDreamResetKey` |
+
+### `src/commands/extract.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `CandidateSourceResolution` | moved | `src/commands/extract.ts:CandidateSourceResolution` | `src/core/link-reconciliation.ts:CandidateSourceResolution` |
+| `extractLinksFromDB` | extracted | `src/commands/extract.ts:extractLinksFromDB` | `src/core/link-reconciliation.ts:lookupRefsForSlugs` |
+| `extractMarkdownLinks` | moved | `src/commands/extract.ts:extractMarkdownLinks` | `src/core/link-extraction.ts:extractMarkdownLinks` |
+| `extractStaleFromDB` | extracted | `src/commands/extract.ts:extractStaleFromDB` | `src/core/link-reconciliation.ts:lookupRefsForSlugs` |
+| `extractTimelineForSlugs` | extracted | `src/commands/extract.ts:extractTimelineForSlugs` | `src/core/persistence/links-maintenance.ts:extractManagedStaleLinks` |
+| `extractTimelineFromDB` | extracted | `src/commands/extract.ts:extractTimelineFromDB` | `src/core/persistence/links-maintenance.ts:extractManagedStaleLinks` |
+| `resolveCandidateSources` | moved | `src/commands/extract.ts:resolveCandidateSources` | `src/core/link-reconciliation.ts:resolveCandidateSources` |
+| `resolveLinkFallbackDefault` | moved | `src/commands/extract.ts:resolveLinkFallbackDefault` | `src/core/link-reconciliation.ts:resolveLinkFallbackDefault` |
+| `runExtract` | extracted | `src/commands/extract.ts:runExtract` | `src/cli/commands/reindex.ts:run`<br>`src/core/minions/handlers/extract-ner.ts:makeExtractNerHandler`<br>`src/core/minions/handlers/extract-timeline-from-meetings.ts:makeExtractTimelineFromMeetingsHandler` |
+
+### `src/commands/files.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `uploadRaw` | extracted | `src/commands/files.ts:uploadRaw` | `src/commands/sync/run.ts:resolveCliSyncSource` |
+
+### `src/commands/google-setup-tail.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runGoogleSetupTail` | extracted | `src/commands/google-setup-tail.ts:runGoogleSetupTail` | `src/cli/commands/waiting.ts:run` |
+
+### `src/commands/harness-connect.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runHarnessConnect` | extracted | `src/commands/harness-connect.ts:runHarnessConnect` | `src/commands/mcp-expose.ts:parseExposeArgs` |
+
+### `src/commands/hook.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `hookUserPrompt` | extracted | `src/commands/hook.ts:hookUserPrompt` | `src/core/repair/google-file-modes.ts:googleFileModesRepair` |
+
+### `src/commands/import.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runImport` | extracted | `src/commands/import.ts:runImport` | `src/commands/sync/finalize.ts:finalizeIncrementalSync`<br>`src/commands/sync/imports.ts:drainImports`<br>`src/commands/sync/imports.ts:resolveImportConcurrency`<br>`src/commands/sync/incremental.ts:readTypeWarningsEnabled`<br>`src/commands/sync/preflight.ts:computeFilteredDelta`<br>`src/commands/sync/preflight.ts:resolveSyncRepo`<br>`src/commands/sync/run.ts:resolveCliSyncSource`<br>`src/commands/sync/sync-run.ts:noteTypeWarning`<br>… and 1 more (see the JSON) |
+
+### `src/commands/init.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `groupReadyByProvider` | extracted | `src/commands/init.ts:groupReadyByProvider` | `src/commands/doctor/checks/embedding-health.ts:runAlternativeProviders` |
+| `resolveEmbeddingByEnv` | extracted | `src/commands/init.ts:resolveEmbeddingByEnv` | `src/commands/doctor/checks/embedding-health.ts:runAlternativeProviders` |
 
 ### `src/commands/jobs.ts`
 
@@ -180,11 +345,87 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `parseMaxRssFlag` | moved | `src/commands/jobs.ts:parseMaxRssFlag` | `src/commands/jobs/shared.ts:parseMaxRssFlag` |
 | `parseMaxWaitingFlag` | moved | `src/commands/jobs.ts:parseMaxWaitingFlag` | `src/commands/jobs/shared.ts:parseMaxWaitingFlag` |
 | `parseNiceFlag` | moved | `src/commands/jobs.ts:parseNiceFlag` | `src/commands/jobs/shared.ts:parseNiceFlag` |
-| `registerBuiltinHandlers` | split | `src/commands/jobs.ts:registerBuiltinHandlers` | `src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler`<br>`src/core/minions/handlers/autopilot-global-maintenance.ts:makeAutopilotGlobalMaintenanceHandler`<br>`src/core/minions/handlers/backlinks.ts:makeBacklinksHandler`<br>`src/core/minions/handlers/chronicle-extract.ts:makeChronicleExtractHandler`<br>`src/core/minions/handlers/cycle-phase.ts:makeCyclePhaseHandler`<br>`src/core/minions/handlers/embed-catch-up.ts:makeEmbedCatchUpHandler`<br>`src/core/minions/handlers/embed.ts:makeEmbedHandler`<br>`src/core/minions/handlers/enrich.ts:makeEnrichHandler`<br>… and 20 more (see the JSON) |
+| `registerBuiltinHandlers` | split | `src/commands/jobs.ts:registerBuiltinHandlers` | `src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler`<br>`src/core/minions/handlers/autopilot-global-maintenance.ts:makeAutopilotGlobalMaintenanceHandler`<br>`src/core/minions/handlers/backlinks.ts:makeBacklinksHandler`<br>`src/core/minions/handlers/chronicle-extract.ts:makeChronicleExtractHandler`<br>`src/core/minions/handlers/cycle-phase.ts:makeCyclePhaseHandler`<br>`src/core/minions/handlers/embed-catch-up.ts:makeEmbedCatchUpHandler`<br>`src/core/minions/handlers/embed.ts:makeEmbedHandler`<br>`src/core/minions/handlers/enrich.ts:makeEnrichHandler`<br>… and 22 more (see the JSON) |
 | `rehydrateJobDates` | moved | `src/commands/jobs.ts:rehydrateJobDates` | `src/commands/jobs/shared.ts:rehydrateJobDates` |
 | `resolveJobPull` | moved | `src/commands/jobs.ts:resolveJobPull` | `src/core/minions/handlers/job-pull.ts:resolveJobPull` |
 | `resolveWorkerConcurrency` | moved | `src/commands/jobs.ts:resolveWorkerConcurrency` | `src/commands/jobs/shared.ts:resolveWorkerConcurrency` |
-| `runJobs` | split | `src/commands/jobs.ts:runJobs` | `src/commands/jobs/authorize-legacy.ts:runJobsAuthorizeLegacy`<br>`src/commands/jobs/cancel.ts:runJobsCancel`<br>`src/commands/jobs/child-readiness.ts:runJobsChildReadiness`<br>`src/commands/jobs/delete.ts:runJobsDelete`<br>`src/commands/jobs/get.ts:runJobsGet`<br>`src/commands/jobs/list.ts:runJobsList`<br>`src/commands/jobs/prune.ts:runJobsPrune`<br>`src/commands/jobs/retry.ts:runJobsRetry`<br>… and 10 more (see the JSON) |
+| `runJobs` | split | `src/commands/jobs.ts:runJobs` | `src/commands/jobs/authorize-legacy.ts:runJobsAuthorizeLegacy`<br>`src/commands/jobs/cancel.ts:runJobsCancel`<br>`src/commands/jobs/delete.ts:runJobsDelete`<br>`src/commands/jobs/get.ts:runJobsGet`<br>`src/commands/jobs/list.ts:runJobsList`<br>`src/commands/jobs/prune.ts:runJobsPrune`<br>`src/commands/jobs/retry.ts:runJobsRetry`<br>`src/commands/jobs/run-child.ts:runJobsRunChild`<br>… and 9 more (see the JSON) |
+
+### `src/commands/mcp-provision.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `provisionHarnessGrant` | extracted | `src/commands/mcp-provision.ts:provisionHarnessGrant` | `src/core/harness/client-setup.ts:recoverClientSetup` |
+
+### `src/commands/mcp.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `parseMcpGrant` | extracted | `src/commands/mcp.ts:parseMcpGrant` | `src/commands/mcp-admin.ts:runMcpAdmin` |
+| `runMcp` | extracted | `src/commands/mcp.ts:runMcp` | `src/commands/mcp-admin-http.ts:createMcpAdminHttp`<br>`src/commands/mcp-admin.ts:runMcpAdmin`<br>`src/commands/mcp-expose.ts:parseExposeArgs` |
+
+### `src/commands/migrate-embeddings.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `MigrateEmbeddingsFlags` | moved | `src/commands/migrate-embeddings.ts:MigrateEmbeddingsFlags` | `src/core/embedding-migration-cli.ts:MigrateEmbeddingsFlags` |
+| `parseMigrateEmbeddingsFlags` | moved | `src/commands/migrate-embeddings.ts:parseMigrateEmbeddingsFlags` | `src/core/embedding-migration-cli.ts:parseMigrateEmbeddingsFlags` |
+| `planMigrationFlow` | extracted | `src/commands/migrate-embeddings.ts:planMigrationFlow` | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan` |
+| `runMigrateEmbeddings` | extracted | `src/commands/migrate-embeddings.ts:runMigrateEmbeddings` | `src/cli/commands/projections.ts:run` |
+
+### `src/commands/migrations/v0_11_0.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `rewriteCronManifest` | extracted | `src/commands/migrations/v0_11_0.ts:rewriteCronManifest` | `src/commands/autopilot/jobs.ts:stripBootstrapLines` |
+
+### `src/commands/migrations/v0_32_2.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `phaseBFenceFacts` | extracted | `src/commands/migrations/v0_32_2.ts:phaseBFenceFacts` | `src/commands/migrations/v0_32_2.ts:fenceFactsResult` |
+
+### `src/commands/migrations/v0_46_3.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `orchestrator` | moved | module-private | `src/commands/migrations/v0_60_31.ts:orchestrator` |
+
+### `src/commands/onboard.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `renderPackUpgradeExplain` | extracted | `src/commands/onboard.ts:renderPackUpgradeExplain` | `src/core/minions/handlers/unify-types.ts:makeUnifyTypesHandler` |
+
+### `src/commands/pages.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runPurgeDeleted` | extracted | `src/commands/pages.ts:runPurgeDeleted` | `src/core/persistence/purge-deleted.ts:purgeDeletedPagesCoordinated` |
+
+### `src/commands/reindex-code.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runReindexCodeCli` | extracted | `src/commands/reindex-code.ts:runReindexCodeCli` | `src/cli/commands/reindex.ts:run` |
+
+### `src/commands/reindex-search-vector.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runReindexSearchVector` | extracted | `src/commands/reindex-search-vector.ts:runReindexSearchVector` | `src/cli/commands/reindex.ts:run` |
+
+### `src/commands/reinit-pglite.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runReinitPglite` | extracted | `src/commands/reinit-pglite.ts:runReinitPglite` | `src/cli/commands/init.ts:run` |
+
+### `src/commands/serve-http-grants.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `mountAdminGrantDiscovery` | extracted | `src/commands/serve-http-grants.ts:mountAdminGrantDiscovery` | `src/commands/serve-http-clients.ts:mountAdminClients` |
 
 ### `src/commands/serve-http.ts`
 
@@ -203,8 +444,27 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `probeLiveness` | moved | `src/commands/serve-http.ts:probeLiveness` | `src/commands/serve-http-metrics.ts:probeLiveness` |
 | `queryAgentClientSpend` | moved | `src/commands/serve-http.ts:queryAgentClientSpend` | `src/commands/serve-http-admin-api.ts:queryAgentClientSpend` |
 | `resolveCorsOrigin` | moved | `src/commands/serve-http.ts:resolveCorsOrigin` | `src/commands/serve-http-oauth.ts:resolveCorsOrigin` |
-| `runServeHttp` | split | `src/commands/serve-http.ts:runServeHttp` | `src/commands/serve-http-admin-api.ts:createRequireAdmin`<br>`src/commands/serve-http-admin-api.ts:mountAdminApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminClientApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminKeyApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminLogin`<br>`src/commands/serve-http-admin-api.ts:mountAdminOverviewApi`<br>`src/commands/serve-http-mcp.ts:callMcpTool`<br>… and 21 more (see the JSON) |
+| `runServeHttp` | split | `src/commands/serve-http.ts:runServeHttp` | `src/commands/serve-http-admin-api.ts:createRequireAdmin`<br>`src/commands/serve-http-admin-api.ts:mountAdminApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminClientApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminKeyApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminLogin`<br>`src/commands/serve-http-admin-api.ts:mountAdminOverviewApi`<br>`src/commands/serve-http-grants.ts:mountAdminGrantEdits`<br>… and 23 more (see the JSON) |
 | `selectGitHubItemSources` | moved | `src/commands/serve-http.ts:selectGitHubItemSources` | `src/commands/serve-http-webhooks.ts:selectGitHubItemSources` |
+| `waitForHttpServerLifecycle` | extracted | `src/commands/serve-http.ts:waitForHttpServerLifecycle` | `src/core/persistence/ipc.ts:startPersistenceIpcServer` |
+
+### `src/commands/serve.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `installStdioLifecycle` | extracted | `src/commands/serve.ts:installStdioLifecycle` | `src/commands/jobs/work.ts:maybeRunWorkerStartupRecovery`<br>`src/commands/sync/sync-run.ts:maybeYield` |
+
+### `src/commands/skillpack/harness.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `parseHarnessArgs` | extracted | `src/commands/skillpack/harness.ts:parseHarnessArgs` | `src/eval/decide-eval-flags.ts:extractDecideEvalFlags` |
+
+### `src/commands/sources.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runSources` | extracted | `src/commands/sources.ts:runSources` | `src/commands/sources-lifecycle.ts:runSourceLifecycleCli` |
 
 ### `src/commands/sync.ts`
 
@@ -217,6 +477,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `SYNC_MAX_CHECKPOINT_FAILURES_DEFAULT` | moved | module-private | `src/commands/sync/checkpoint.ts:SYNC_MAX_CHECKPOINT_FAILURES_DEFAULT` |
 | `SYNC_TARGET_OP` | moved | module-private | `src/commands/sync/checkpoint.ts:SYNC_TARGET_OP` |
 | `SYNC_YIELD_EVERY_DEFAULT` | moved | module-private | `src/commands/sync/checkpoint.ts:SYNC_YIELD_EVERY_DEFAULT` |
+| `SyncResult` | extracted | `src/commands/sync.ts:SyncResult` | `src/core/persistence/sync-discovery.ts:SyncDiscovery`<br>`src/core/persistence/sync-failures.ts:syncFailureJsonFields` |
 | `TrackedSlugIndex` | moved | module-private | `src/commands/sync/rename-reconcile.ts:TrackedSlugIndex` |
 | `__resetPGLiteTierWarn` | moved | `src/commands/sync.ts:__resetPGLiteTierWarn` | `src/commands/sync/gitignore.ts:__resetPGLiteTierWarn` |
 | `_pgliteTierWarned` | moved | module-private | `src/commands/sync/gitignore.ts:_pgliteTierWarned` |
@@ -236,13 +497,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `pathHasContentFilter` | moved | module-private | `src/commands/sync/rename-reconcile.ts:pathHasContentFilter` |
 | `performFullSync` | split | module-private | `src/commands/sync/full.ts:fullSyncDryRun`<br>`src/commands/sync/full.ts:performFullSync`<br>`src/commands/sync/full.ts:reconcileFullSyncDeletes`<br>`src/commands/sync/full.ts:reportBlockedFullSync` |
 | `performSync` | moved | `src/commands/sync.ts:performSync` | `src/commands/sync/perform.ts:performSync` |
-| `performSyncInner` | split | module-private | `src/commands/sync/deletes.ts:runDeletesPhase`<br>`src/commands/sync/deletes.ts:sweepUnsyncableModified`<br>`src/commands/sync/finalize.ts:applyBookmarkGate`<br>`src/commands/sync/finalize.ts:backstopAffectedPageFacts`<br>`src/commands/sync/finalize.ts:embedAffectedPages`<br>`src/commands/sync/finalize.ts:extractAffectedPages`<br>`src/commands/sync/finalize.ts:finalizeIncrementalSync`<br>`src/commands/sync/finalize.ts:finishWithoutChanges`<br>… and 26 more (see the JSON) |
+| `performSyncInner` | split | module-private | `src/commands/sync/connector.ts:runConnectorSync`<br>`src/commands/sync/deletes.ts:runDeletesPhase`<br>`src/commands/sync/deletes.ts:sweepUnsyncableModified`<br>`src/commands/sync/finalize.ts:applyBookmarkGate`<br>`src/commands/sync/finalize.ts:backstopAffectedPageFacts`<br>`src/commands/sync/finalize.ts:embedAffectedPages`<br>`src/commands/sync/finalize.ts:extractAffectedPages`<br>`src/commands/sync/finalize.ts:finalizeIncrementalSync`<br>… and 28 more (see the JSON) |
 | `printSyncResult` | moved | `src/commands/sync.ts:printSyncResult` | `src/commands/sync/report.ts:printSyncResult` |
 | `resolveSyncCheckpointEvery` | moved | module-private | `src/commands/sync/checkpoint.ts:resolveSyncCheckpointEvery` |
 | `resolveSyncCheckpointSeconds` | moved | module-private | `src/commands/sync/checkpoint.ts:resolveSyncCheckpointSeconds` |
 | `resolveSyncMaxCheckpointFailures` | moved | module-private | `src/commands/sync/checkpoint.ts:resolveSyncMaxCheckpointFailures` |
 | `resolveSyncYieldEvery` | moved | module-private | `src/commands/sync/checkpoint.ts:resolveSyncYieldEvery` |
-| `runConnectorSync` | moved | module-private | `src/commands/sync/connector.ts:runConnectorSync` |
 | `runSyncInner` | split | module-private | `src/commands/sync/args.ts:parseSyncFanoutFlags`<br>`src/commands/sync/args.ts:parseSyncFlags`<br>`src/commands/sync/run.ts:PerSourceResult`<br>`src/commands/sync/run.ts:SyncAllSourceRow`<br>`src/commands/sync/run.ts:dispatchSyncAll`<br>`src/commands/sync/run.ts:emitSyncAllEnvelope`<br>`src/commands/sync/run.ts:resolveCliSyncSource`<br>`src/commands/sync/run.ts:runSingleSourceSync`<br>… and 3 more (see the JSON) |
 | `runSyncTrigger` | moved | `src/commands/sync.ts:runSyncTrigger` | `src/commands/sync/trigger.ts:runSyncTrigger` |
 | `shouldNudgeAfterSync` | moved | `src/commands/sync.ts:shouldNudgeAfterSync` | `src/commands/sync/report.ts:shouldNudgeAfterSync` |
@@ -251,21 +511,394 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `trackedSlugIndex` | moved | module-private | `src/commands/sync/rename-reconcile.ts:trackedSlugIndex` |
 | `verifyOrRestoreClearedSentinels` | moved | module-private | `src/commands/sync/rename-reconcile.ts:verifyOrRestoreClearedSentinels` |
 
+### `src/commands/takes.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `cmdExtract` | extracted | `src/commands/takes.ts:cmdExtract` | `src/core/minions/handlers/extract-takes-from-pages.ts:makeExtractTakesFromPagesHandler` |
+| `cmdPropose` | extracted | `src/commands/takes.ts:cmdPropose` | `src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi` |
+| `cmdResolve` | moved | module-private | `src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi` |
+
+### `src/commands/upgrade.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runPostUpgrade` | extracted | `src/commands/upgrade.ts:runPostUpgrade` | `src/cli/commands/apply-migrations.ts:run`<br>`src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider`<br>`src/core/import-contextual-mode.ts:resolveImportContextualMode` |
+
+### `src/core/agent-install/setup.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `ownFile` | extracted | `src/core/agent-install/setup.ts:ownFile` | `src/core/agent-install/setup.ts:ownedFileHash` |
+
+### `src/core/agent-install/state.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `AgentInstallReceipt` | extracted | `src/core/agent-install/state.ts:AgentInstallReceipt` | `src/core/shared-skills/adapter.ts:SharedSkillsLocalReceipt` |
+
+### `src/core/ai/gateway.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `DEFAULT_CHARS_PER_TOKEN` | moved | module-private | `src/core/ai/embed-batch-plan.ts:DEFAULT_CHARS_PER_TOKEN` |
+| `DEFAULT_SAFETY_FACTOR` | moved | module-private | `src/core/ai/embed-batch-plan.ts:DEFAULT_SAFETY_FACTOR` |
+| `NO_BATCH_CAP_SUB_BATCH_ITEMS` | moved | `src/core/ai/gateway.ts:NO_BATCH_CAP_SUB_BATCH_ITEMS` | `src/core/ai/embed-batch-plan.ts:NO_BATCH_CAP_SUB_BATCH_ITEMS` |
+| `capBatchItems` | moved | `src/core/ai/gateway.ts:capBatchItems` | `src/core/ai/embed-batch-plan.ts:capBatchItems` |
+| `embed` | extracted | `src/core/ai/gateway.ts:embed` | `src/core/ai/embed-batch-plan.ts:planEmbedRequests` |
+| `rerank` | extracted | `src/core/ai/gateway.ts:rerank` | `src/core/ai/decide/rerank-adapter.ts:rerankViaDecide` |
+| `splitByTokenBudget` | moved | `src/core/ai/gateway.ts:splitByTokenBudget` | `src/core/ai/embed-batch-plan.ts:splitByTokenBudget` |
+
+### `src/core/backup/quarantine.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `quarantineRestoredExecution` | extracted | `src/core/backup/quarantine.ts:quarantineRestoredExecution` | `src/commands/serve-http-webhooks.ts:handleGitHubItemEvent` |
+
+### `src/core/bootstrap/harness.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `applyHarness` | extracted | `src/core/bootstrap/harness.ts:applyHarness` | `src/core/bootstrap/harness.ts:logAmbientPostureNotes` |
+
+### `src/core/budget/budget-tracker.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `BudgetKind` | moved | `src/core/budget/budget-tracker.ts:BudgetKind` | `src/core/budget/reservation-cost.ts:BudgetKind` |
+| `FREE_LOCAL_CHAT_PROVIDERS` | moved | module-private | `src/core/budget/reservation-cost.ts:FREE_LOCAL_CHAT_PROVIDERS` |
+| `FREE_LOCAL_EMBED_PROVIDERS` | moved | module-private | `src/core/budget/reservation-cost.ts:FREE_LOCAL_EMBED_PROVIDERS` |
+| `FREE_LOCAL_RERANK_PROVIDERS` | moved | module-private | `src/core/budget/reservation-cost.ts:FREE_LOCAL_RERANK_PROVIDERS` |
+| `PricingOverrides` | moved | `src/core/budget/budget-tracker.ts:PricingOverrides` | `src/core/budget/reservation-cost.ts:PricingOverrides` |
+| `canonicalPricingKey` | moved | module-private | `src/core/budget/reservation-cost.ts:canonicalPricingKey` |
+| `costForUsage` | moved | module-private | `src/core/budget/reservation-cost.ts:usageCostUsd` |
+| `extractUsageFromError` | split | `src/core/budget/budget-tracker.ts:extractUsageFromError` | `src/core/ai/budget-record.ts:failedCallUsage`<br>`src/core/budget/budget-tracker.ts:usageFromError` |
+| `isModelPriceable` | moved | `src/core/budget/budget-tracker.ts:isModelPriceable` | `src/core/budget/reservation-cost.ts:isModelPriceable` |
+| `lookupPricing` | moved | module-private | `src/core/budget/reservation-cost.ts:lookupPricing` |
+| `overrideFor` | moved | module-private | `src/core/budget/reservation-cost.ts:overrideFor` |
+
+### `src/core/chunkers/token-estimate.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `estimateTokens` | extracted | `src/core/chunkers/token-estimate.ts:estimateTokens` | `src/core/chunkers/token-estimate.ts:loadEncoder` |
+
+### `src/core/config.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `CWD_DOTENV_FILES` | moved | `src/core/config.ts:CWD_DOTENV_FILES` | `src/core/env-trust.ts:CWD_DOTENV_FILES` |
+| `dotenvValuesForKey` | split | `src/core/config.ts:dotenvValuesForKey` | `src/core/env-trust.ts:dotenvAssignments`<br>`src/core/env-trust.ts:dotenvValuesForKey` |
+
+### `src/core/context/turn-context.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `assembleTurnContext` | extracted | `src/core/context/turn-context.ts:assembleTurnContext` | `src/core/context/recall-needed.ts:RecallApplyContext` |
+
+### `src/core/cycle.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `anyAbortSignal` | moved | `src/core/cycle.ts:anyAbortSignal` | `src/core/abort-signals.ts:anyAbortSignal` |
+| `runCycle` | extracted | `src/core/cycle.ts:runCycle` | `src/core/cycle/phase-containment.ts:timeContainedPhase`<br>`src/core/persistence/atom-retry.ts:retryManagedAtomBatch` |
+| `runPhaseExtract` | extracted | `src/core/cycle.ts:runPhaseExtract` | `src/core/extract-frontmatter.ts:resolveIncludeFrontmatter` |
+| `runPhasePurge` | extracted | `src/core/cycle.ts:runPhasePurge` | `src/core/minions/handlers/purge.ts:makePurgeHandler` |
+| `runPhaseSync` | extracted | `src/core/cycle.ts:runPhaseSync` | `src/commands/sync/run.ts:runSingleSourceSync`<br>`src/core/minions/handlers/sync.ts:makeSyncHandler` |
+| `timePhase` | moved | module-private | `src/core/cycle/phase-containment.ts:timeContainedPhase` |
+
+### `src/core/cycle/conversation-facts-backfill.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runPhaseConversationFactsBackfill` | extracted | `src/core/cycle/conversation-facts-backfill.ts:runPhaseConversationFactsBackfill` | `src/core/embedding-migration-budget.ts:authorizeMigrationBudget` |
+
+### `src/core/cycle/drift.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `defaultDriftJudge` | extracted | `src/core/cycle/drift.ts:defaultDriftJudge` | `src/core/facts/relink-model.ts:judgeBatch` |
+| `runPhaseDrift` | extracted | `src/core/cycle/drift.ts:runPhaseDrift` | `src/core/persistence/takes-prepare.ts:normalizeTakesIntent` |
+
+### `src/core/cycle/extract-atoms-drain.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runExtractAtomsDrainForSource` | extracted | `src/core/cycle/extract-atoms-drain.ts:runExtractAtomsDrainForSource` | `src/core/persistence/atom-retry.ts:retryManagedAtomBatch` |
+
+### `src/core/cycle/extract-atoms.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `ATOM_TYPES` | moved | module-private | `src/core/cycle/extract-atoms-schema.ts:ATOM_TYPES` |
+| `ExtractAtomsOpts` | extracted | `src/core/cycle/extract-atoms.ts:ExtractAtomsOpts` | `src/core/persistence/atom-maintenance.ts:readAtomOrigin` |
+| `runPhaseExtractAtoms` | extracted | `src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms` | `src/core/persistence/atom-maintenance.ts:readAtomOrigin` |
+
+### `src/core/cycle/extract-takes.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `extractTakesFromDb` | extracted | `src/core/cycle/extract-takes.ts:extractTakesFromDb` | `src/core/cycle/extract-takes.ts:reconcilePageTakes` |
+
+### `src/core/cycle/patterns.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runPhasePatterns` | extracted | `src/core/cycle/patterns.ts:runPhasePatterns` | `src/commands/sync/finalize.ts:finalizeIncrementalSync` |
+
+### `src/core/cycle/phantom-redirect.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `tryRedirectPhantom` | extracted | `src/core/cycle/phantom-redirect.ts:tryRedirectPhantom` | `src/core/cycle/phantom-redirect-managed.ts:redirectManagedPhantom` |
+
+### `src/core/cycle/phases/consolidate.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runPhaseConsolidate` | extracted | `src/core/cycle/phases/consolidate.ts:runPhaseConsolidate` | `src/core/ai/decide/sweep.ts:conflictSweepTail` |
+
+### `src/core/cycle/synthesize.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runPhaseSynthesizeInner` | extracted | `src/core/cycle/synthesize.ts:runPhaseSynthesizeInner` | `src/commands/sync/finalize.ts:finalizeIncrementalSync` |
+| `runTriagePass` | extracted | `src/core/cycle/synthesize.ts:runTriagePass` | `src/core/cycle/triage-decide.ts:resolveTriageDecide` |
+| `stampDreamProvenance` | moved | module-private | `src/core/cycle/dream-provenance.ts:stampDreamProvenance` |
+
+### `src/core/embed-stale.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `embedStaleForSource` | extracted | `src/core/embed-stale.ts:embedStaleForSource` | `src/commands/sync/imports.ts:importOnePath` |
+
+### `src/core/embedding-migration.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `applyEmbeddingMigration` | extracted | `src/core/embedding-migration.ts:applyEmbeddingMigration` | `src/core/embedding-migration-budget.ts:authorizeMigrationBudget` |
+| `readMigrationStatus` | extracted | `src/core/embedding-migration.ts:readMigrationStatus` | `src/core/embed-facts.ts:embedStaleFacts` |
+| `resolveRerankerExposure` | extracted | `src/core/embedding-migration.ts:resolveRerankerExposure` | `src/core/import-contextual-mode.ts:resolveImportContextualMode` |
+
+### `src/core/embedding.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `embedQuery` | moved | `src/core/embedding.ts:embedQuery` | `src/core/ai/gateway.ts:embedQuery` |
+
+### `src/core/engine.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `BrainEngine` | extracted | `src/core/engine.ts:BrainEngine` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:listChunklessPagesWithContent`<br>`src/core/engine-sql/chunks.ts:listStaleChunks`<br>`src/core/engine-sql/chunks.ts:setPageEmbeddingSignature`<br>`src/core/engine-sql/code-edges.ts:getCallersOf`<br>`src/core/engine-sql/code-edges.ts:getEdgesByChunk`<br>`src/core/engine-sql/links.ts:addLink`<br>`src/core/engine-sql/links.ts:listLinkSources`<br>… and 20 more (see the JSON) |
+
+### `src/core/enrichment/budget.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `toNum` | moved | module-private | `src/core/ai/decide/store.ts:toNum` |
+
+### `src/core/extract-timeline-from-meetings.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `AttendedEdgeRow` | extracted | `src/core/extract-timeline-from-meetings.ts:AttendedEdgeRow` | `src/core/engine-sql/links.ts:removeLinksByPagesAndSource` |
+
+### `src/core/facts/backstop.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runFactsBackstop` | extracted | `src/core/facts/backstop.ts:runFactsBackstop` | `src/commands/doctor/checks/knowledge-health.ts:runFactsExtraction`<br>`src/core/minions/handlers/facts-absorb.ts:makeFactsAbsorbHandler` |
+| `runPipelineBodyInner` | extracted | `src/core/facts/backstop.ts:runPipelineBodyInner` | `src/core/facts/subject-infer-write.ts:writesDatabaseOnly`<br>`src/core/persistence/facts-maintenance.ts:collectManagedFacts` |
+
+### `src/core/facts/fence-write.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `writeFactsToFence` | extracted | `src/core/facts/fence-write.ts:writeFactsToFence` | `src/core/facts/proposal-supersede.ts:PairFact` |
+
+### `src/core/facts/withdrawal.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `recordFactWithdrawalInTransaction` | extracted | `src/core/facts/withdrawal.ts:recordFactWithdrawalInTransaction` | `src/core/persistence/effect-retry.ts:retryEmbeddingEffect` |
+
+### `src/core/facts/write-single.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `writeSingleFact` | extracted | `src/core/facts/write-single.ts:writeSingleFact` | `src/core/facts/single-prepare.ts:assertFactNotWithdrawn`<br>`src/core/facts/subject-infer-write.ts:linkAllowed`<br>`src/core/persistence/memory-mutations.ts:submitRememberMutation` |
+
+### `src/core/github-source.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `AppTokenProvider.cached` | moved | **not re-exported** | `src/core/github-app-token.ts:AppTokenProvider.cached` |
+| `AppTokenProvider.constructor` | moved | **not re-exported** | `src/core/github-app-token.ts:AppTokenProvider.constructor` |
+| `AppTokenProvider.getToken` | moved | **not re-exported** | `src/core/github-app-token.ts:AppTokenProvider.getToken` |
+| `AppTokenProvider.refresh` | moved | **not re-exported** | `src/core/github-app-token.ts:AppTokenProvider.refresh` |
+| `MintedInstallationToken` | moved | module-private | `src/core/github-app-token.ts:MintedInstallationToken` |
+| `b64url` | moved | module-private | `src/core/github-app-token.ts:b64url` |
+| `isValidRepoName` | moved | `src/core/github-source.ts:isValidRepoName` | `src/core/github-source-config.ts:isValidRepoName` |
+| `mintAppInstallationToken` | moved | `src/core/github-source.ts:mintAppInstallationToken` | `src/core/github-app-token.ts:mintAppInstallationToken` |
+| `parseGitHubSourceConfig` | moved | `src/core/github-source.ts:parseGitHubSourceConfig` | `src/core/github-source-config.ts:parseGitHubSourceConfig` |
+| `runExtractAndEmbed` | extracted | `src/core/github-source.ts:runExtractAndEmbed` | `src/core/minions/handlers/sync.ts:makeSyncHandler` |
+| `runGitHubSync` | split | `src/core/github-source.ts:runGitHubSync` | `src/core/github-source.ts:runGitHubSyncInner`<br>`src/core/google/google-source.ts:runGoogleSyncInner` |
+
+### `src/core/google/google-source.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `parseGoogleSourceConfig` | moved | `src/core/google/google-source.ts:parseGoogleSourceConfig` | `src/core/google/source-config.ts:parseGoogleSourceConfig` |
+| `runExtractAndEmbed` | extracted | `src/core/google/google-source.ts:runExtractAndEmbed` | `src/core/minions/handlers/sync.ts:makeSyncHandler` |
+| `runGoogleSync` | split | `src/core/google/google-source.ts:runGoogleSync` | `src/core/github-source.ts:runGitHubSyncInner`<br>`src/core/google/google-source.ts:runGoogleSyncInner` |
+
+### `src/core/google/loops-extract.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runLoopsExtract` | extracted | `src/core/google/loops-extract.ts:runLoopsExtract` | `src/core/persistence/memory-mutations.ts:submitRememberMutation` |
+
+### `src/core/harness/install.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `installHarnessConnection` | extracted | `src/core/harness/install.ts:installHarnessConnection` | `src/core/harness/status.ts:harnessSharedSkillsRoot` |
+| `installThinClient` | extracted | `src/core/harness/install.ts:installThinClient` | `src/core/shared-skills/adapter.ts:SharedSkillsLocalReceipt`<br>`src/core/shared-skills/adapter.ts:createSharedSkillsAdapter`<br>`src/core/skillpack/shared-brain-bridge.ts:installSharedBrainBridge` |
+
+### `src/core/import-file.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `FENCE_TAG_TO_PSEUDO_PATH` | moved | module-private | `src/core/markdown-chunks.ts:FENCE_TAG_TO_PSEUDO_PATH` |
+| `ImportResult` | extracted | `src/core/import-file.ts:ImportResult` | `src/commands/sync/sync-run.ts:noteTypeWarning` |
+| `extractFencedChunks` | moved | module-private | `src/core/markdown-chunks.ts:extractFencedChunks` |
+| `fenceTagToPseudoPath` | moved | module-private | `src/core/markdown-chunks.ts:fenceTagToPseudoPath` |
+| `importCodeFile` | extracted | `src/core/import-file.ts:importCodeFile` | `src/core/code-chunks.ts:prepareCodeChunks` |
+| `importFromContent` | extracted | `src/core/import-file.ts:importFromContent` | `src/core/import-contextual-mode.ts:resolveImportContextualMode`<br>`src/core/import-identity.ts:decideImportIdentity`<br>`src/core/markdown-chunks.ts:prepareMarkdownChunks`<br>`src/core/persistence/import-mutations.ts:importManagedFile` |
+| `importFromFile` | extracted | `src/core/import-file.ts:importFromFile` | `src/core/persistence/import-mutations.ts:importManagedFile` |
+| `withImportTransaction` | moved | `src/core/import-file.ts:withImportTransaction` | `src/core/import-file.ts:applyImportTransaction` |
+
+### `src/core/link-extraction.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `extractPageLinks` | extracted | `src/core/link-extraction.ts:extractPageLinks` | `src/core/attendance-repair.ts:prepareOrigin` |
+
 ### `src/core/migrate.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `MIGRATIONS` | split | `src/core/migrate.ts:MIGRATIONS` | `src/core/schema-migrations/v002-slugify-existing-pages.ts:v002`<br>`src/core/schema-migrations/v003-unique-chunk-index.ts:v003`<br>`src/core/schema-migrations/v004-access-tokens-and-mcp-log.ts:v004`<br>`src/core/schema-migrations/v005-minion-jobs-table.ts:v005`<br>`src/core/schema-migrations/v006-agent-orchestration-primitives.ts:v006`<br>`src/core/schema-migrations/v007-agent-parity-layer.ts:v007`<br>`src/core/schema-migrations/v008-multi-type-links-constraint.ts:v008`<br>`src/core/schema-migrations/v009-timeline-dedup-index.ts:v009`<br>… and 165 more (see the JSON) |
+| `MIGRATIONS` | split | `src/core/migrate.ts:MIGRATIONS` | `src/core/schema-migrations/v002-slugify-existing-pages.ts:v002`<br>`src/core/schema-migrations/v003-unique-chunk-index.ts:v003`<br>`src/core/schema-migrations/v004-access-tokens-and-mcp-log.ts:v004`<br>`src/core/schema-migrations/v005-minion-jobs-table.ts:v005`<br>`src/core/schema-migrations/v006-agent-orchestration-primitives.ts:v006`<br>`src/core/schema-migrations/v007-agent-parity-layer.ts:v007`<br>`src/core/schema-migrations/v008-multi-type-links-constraint.ts:v008`<br>`src/core/schema-migrations/v009-timeline-dedup-index.ts:v009`<br>… and 144 more (see the JSON) |
 | `Migration` | moved | `src/core/migrate.ts:Migration` | `src/core/schema-migrations/types.ts:Migration` |
 | `dropInvalidConcurrentIndex` | moved | module-private | `src/core/schema-migrations/helpers.ts:dropInvalidConcurrentIndex` |
 | `migrationNotice` | moved | module-private | `src/core/schema-migrations/helpers.ts:migrationNotice` |
 | `quietMigrationNotices` | moved | module-private | `src/core/schema-migrations/helpers.ts:quietMigrationNotices` |
 
+### `src/core/minions/authorize-legacy.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `snapshot` | extracted | `src/core/minions/authorize-legacy.ts:snapshot` | `src/core/minions/legacy-selection.ts:assertNoActiveJobs` |
+
+### `src/core/minions/child-job-runner.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runJobInChild` | moved | `src/core/minions/child-job-runner.ts:runJobInChild` | `src/core/minions/child-job-runner.ts:runJobChildProcess` |
+
+### `src/core/minions/db-probe.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runDbProbe` | moved | `src/core/minions/db-probe.ts:runDbProbe` | `src/core/minions/db-probe.ts:probeLanes` |
+
+### `src/core/minions/handlers/embed-backfill.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `makeEmbedBackfillHandler` | extracted | `src/core/minions/handlers/embed-backfill.ts:makeEmbedBackfillHandler` | `src/core/embedding-migration-budget.ts:authorizeMigrationBudget` |
+
+### `src/core/minions/queue.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `MinionQueue.add` | extracted | `src/core/minions/queue.ts:MinionQueue.add` | `src/commands/doctor/checks/embedding-health.ts:runAlternativeProviders`<br>`src/core/minions/idempotency-coalesce.ts:insertOrCoalesce` |
+
+### `src/core/minions/source-filesystem.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `withSourceFilesystemLock` | extracted | `src/core/minions/source-filesystem.ts:withSourceFilesystemLock` | `src/core/persistence/sync-run.ts:performManagedSync` |
+
+### `src/core/minions/submission-authority.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `assertCurrentAgent` | extracted | `src/core/minions/submission-authority.ts:assertCurrentAgent` | `src/core/persistence/authority.ts:authorizeWrite` |
+| `assertCurrentPrincipal` | moved | module-private | `src/core/minions/submission-authority.ts:assertCurrentRemoteJobPrincipal` |
+
+### `src/core/minions/worker.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `MinionWorker.start` | extracted | `src/core/minions/worker.ts:MinionWorker.start` | `src/commands/jobs/work.ts:runJobsWork`<br>`src/core/minions/worker.ts:MinionWorker.probeDatabase` |
+
+### `src/core/model-config.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `enforceSubagentCapable` | moved | `src/core/model-config.ts:enforceSubagentCapable` | `src/core/model-config.ts:subagentGate` |
+
+### `src/core/ops/insights.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `find_contradictions` | extracted | `src/core/ops/insights.ts:find_contradictions` | `src/commands/doctor/checks/knowledge-health.ts:runContradictions` |
+
+### `src/core/ops/jobs.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `submit_job` | extracted | `src/core/ops/jobs.ts:submit_job` | `src/commands/jobs/submit.ts:runJobsSubmit` |
+
+### `src/core/ops/pages.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `autoLinkWrittenPage` | extracted | `src/core/ops/pages.ts:autoLinkWrittenPage` | `src/core/minions/handlers/facts-absorb.ts:makeFactsAbsorbHandler` |
+| `capture` | moved | `src/core/ops/pages.ts:capture` | `src/core/persistence/page-mutations.ts:submitPageMutation` |
+| `put_page` | moved | `src/core/ops/pages.ts:put_page` | `src/commands/sync/finalize.ts:backstopAffectedPageFacts` |
+| `stripPrivacyFencesForRemoteReader` | extracted | `src/core/ops/pages.ts:stripPrivacyFencesForRemoteReader` | `src/core/persistence/page-advisories.ts:preparePageAdvisories` |
+
+### `src/core/ops/request-tools.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `visibleOpsForCaller` | extracted | `src/core/ops/request-tools.ts:visibleOpsForCaller` | `src/core/shared-skills/tool-access.ts:sharedSkillToolAccess` |
+
+### `src/core/ops/skillopt.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `run_skillopt` | extracted | `src/core/ops/skillopt.ts:run_skillopt` | `src/core/shared-skills/optimizer.ts:authorize`<br>`src/core/skillopt/job.ts:runSkillOptJob` |
+
+### `src/core/ops/skills-catalog.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `get_status_snapshot` | extracted | `src/core/ops/skills-catalog.ts:get_status_snapshot` | `src/commands/sync/run.ts:SyncAllSourceRow` |
+
+### `src/core/ops/takes.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `takes_resolve` | extracted | `src/core/ops/takes.ts:takes_resolve` | `src/core/persistence/takes-prepare.ts:normalizeTakesIntent` |
+
 ### `src/core/pglite-engine.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `PGLiteEngine._putPage` | moved | **not re-exported** | `src/core/engine-sql/pages.ts:putPage` |
 | `PGLiteEngine._upsertChunksOnce` | moved | `src/core/pglite-engine.ts:PGLiteEngine._upsertChunksOnce` | `src/core/engine-sql/chunks.ts:upsertChunksOnce` |
 | `PGLiteEngine.addCodeEdges` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addCodeEdges` | `src/core/engine-sql/code-edges.ts:addCodeEdges` |
 | `PGLiteEngine.addLink` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addLink` | `src/core/engine-sql/links.ts:addLink` |
@@ -277,12 +910,14 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PGLiteEngine.applyForwardReferenceBootstrap` | split | `src/core/pglite-engine.ts:PGLiteEngine.applyForwardReferenceBootstrap` | `src/core/engine-sql/bootstrap.ts:applyForwardReferenceBootstrap`<br>`src/core/engine-sql/bootstrap.ts:forwardReferenceGaps` |
 | `PGLiteEngine.batchLoadEmotionalInputs` | moved | `src/core/pglite-engine.ts:PGLiteEngine.batchLoadEmotionalInputs` | `src/core/engine-sql/salience.ts:batchLoadEmotionalInputs` |
 | `PGLiteEngine.buildStaleChunkWhere` | moved | **not re-exported** | `src/core/engine-sql/chunks.ts:StaleChunkOpts` |
+| `PGLiteEngine.connect` | moved | `src/core/pglite-engine.ts:PGLiteEngine.connect` | `src/core/pglite-engine.ts:PGLiteEngine._connectInternal` |
 | `PGLiteEngine.consolidateFact` | moved | `src/core/pglite-engine.ts:PGLiteEngine.consolidateFact` | `src/core/engine-sql/facts.ts:consolidateFact` |
 | `PGLiteEngine.countChunklessPagesWithContent` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countChunklessPagesWithContent` | `src/core/engine-sql/chunks.ts:countChunklessPagesWithContent` |
 | `PGLiteEngine.countStaleChunks` | split | `src/core/pglite-engine.ts:PGLiteEngine.countStaleChunks` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:countStaleChunks` |
 | `PGLiteEngine.countStalePagesForExtraction` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countStalePagesForExtraction` | `src/core/engine-sql/pages.ts:countStalePagesForExtraction` |
 | `PGLiteEngine.countStaleTakes` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countStaleTakes` | `src/core/engine-sql/takes.ts:countStaleTakes` |
 | `PGLiteEngine.countUnconsolidatedFacts` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countUnconsolidatedFacts` | `src/core/engine-sql/facts.ts:countUnconsolidatedFacts` |
+| `PGLiteEngine.createVersion` | moved | `src/core/pglite-engine.ts:PGLiteEngine.createVersion` | `src/core/page-state/versions.ts:createPageVersion` |
 | `PGLiteEngine.deleteChunks` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deleteChunks` | `src/core/engine-sql/chunks.ts:deleteChunks` |
 | `PGLiteEngine.deleteCodeEdgesForChunks` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deleteCodeEdgesForChunks` | `src/core/engine-sql/code-edges.ts:deleteCodeEdgesForChunks` |
 | `PGLiteEngine.deleteFactsForPage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deleteFactsForPage` | `src/core/engine-sql/facts.ts:deleteFactsForPage` |
@@ -298,7 +933,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PGLiteEngine.getAllSlugs` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getAllSlugs` | `src/core/engine-sql/pages.ts:getAllSlugs` |
 | `PGLiteEngine.getBacklinks` | split | `src/core/pglite-engine.ts:PGLiteEngine.getBacklinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PGLiteEngine.getCalibrationCurve` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getCalibrationCurve` | `src/core/engine-sql/takes.ts:getCalibrationCurve` |
-| `PGLiteEngine.getCalleesOf` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getCalleesOf` | `src/core/engine-sql/code-edges.ts:getCalleesOf` |
+| `PGLiteEngine.getCalleesOf` | split | `src/core/pglite-engine.ts:PGLiteEngine.getCalleesOf` | `src/core/engine-sql/code-edges.ts:getCalleesOf`<br>`src/core/engine-sql/code-edges.ts:getCallersOf` |
 | `PGLiteEngine.getCallersOf` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getCallersOf` | `src/core/engine-sql/code-edges.ts:getCallersOf` |
 | `PGLiteEngine.getChunks` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getChunks` | `src/core/engine-sql/chunks.ts:getChunks` |
 | `PGLiteEngine.getChunksWithEmbeddings` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getChunksWithEmbeddings` | `src/core/engine-sql/chunks.ts:getChunksWithEmbeddings` |
@@ -307,14 +942,16 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PGLiteEngine.getEmbeddingsByChunkIds` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getEmbeddingsByChunkIds` | `src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds` |
 | `PGLiteEngine.getFactsHealth` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getFactsHealth` | `src/core/engine-sql/facts.ts:getFactsHealth` |
 | `PGLiteEngine.getFile` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getFile` | `src/core/engine-sql/files.ts:getFile` |
+| `PGLiteEngine.getHealth` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.getHealth` | `src/commands/doctor/checks/graph-health.ts:runGraphCoverage`<br>`src/core/engine-sql/links.ts:listLinkSources` |
 | `PGLiteEngine.getLastSeen` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getLastSeen` | `src/core/engine-sql/timeline.ts:getLastSeen` |
 | `PGLiteEngine.getLinks` | split | `src/core/pglite-engine.ts:PGLiteEngine.getLinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PGLiteEngine.getOnThisDay` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getOnThisDay` | `src/core/engine-sql/timeline.ts:getOnThisDay` |
 | `PGLiteEngine.getPageTimestamps` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getPageTimestamps` | `src/core/engine-sql/pages.ts:getPageTimestamps` |
+| `PGLiteEngine.getRawData` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.getRawData` | `src/core/page-state/snapshot.ts:readPageSnapshot` |
 | `PGLiteEngine.getRecentSalience` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getRecentSalience` | `src/core/engine-sql/salience.ts:getRecentSalience` |
 | `PGLiteEngine.getScorecard` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getScorecard` | `src/core/engine-sql/takes.ts:getScorecard` |
 | `PGLiteEngine.getSince` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getSince` | `src/core/engine-sql/timeline.ts:getSince` |
-| `PGLiteEngine.getTags` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTags` | `src/core/engine-sql/tags.ts:getTags` |
+| `PGLiteEngine.getTags` | split | `src/core/pglite-engine.ts:PGLiteEngine.getTags` | `src/core/engine-sql/links.ts:listLinkSources`<br>`src/core/engine-sql/tags.ts:getTags` |
 | `PGLiteEngine.getTakeEmbeddings` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTakeEmbeddings` | `src/core/engine-sql/takes.ts:getTakeEmbeddings` |
 | `PGLiteEngine.getTimeline` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTimeline` | `src/core/engine-sql/timeline.ts:getTimeline` |
 | `PGLiteEngine.getTimelineForDate` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTimelineForDate` | `src/core/engine-sql/timeline.ts:getTimelineForDate` |
@@ -355,8 +992,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PGLiteEngine.resolveTake` | moved | `src/core/pglite-engine.ts:PGLiteEngine.resolveTake` | `src/core/engine-sql/takes.ts:resolveTake` |
 | `PGLiteEngine.restorePage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.restorePage` | `src/core/engine-sql/pages.ts:restorePage` |
 | `PGLiteEngine.revertToVersion` | moved | `src/core/pglite-engine.ts:PGLiteEngine.revertToVersion` | `src/core/engine-sql/pages.ts:revertToVersion` |
+| `PGLiteEngine.searchKeyword` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchKeyword` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PGLiteEngine.searchKeywordChunks` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchKeywordChunks` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
 | `PGLiteEngine.searchTakes` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchTakes` | `src/core/engine-sql/takes.ts:searchTakes` |
 | `PGLiteEngine.searchTakesVector` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchTakesVector` | `src/core/engine-sql/takes.ts:searchTakesVector` |
+| `PGLiteEngine.searchTitles` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchTitles` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PGLiteEngine.searchVector` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchVector` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
 | `PGLiteEngine.setEmotionalWeightBatch` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setEmotionalWeightBatch` | `src/core/engine-sql/salience.ts:setEmotionalWeightBatch` |
 | `PGLiteEngine.setPageAliases` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setPageAliases` | `src/core/engine-sql/pages.ts:setPageAliases` |
 | `PGLiteEngine.setPageEmbeddingSignature` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setPageEmbeddingSignature` | `src/core/engine-sql/chunks.ts:setPageEmbeddingSignature` |
@@ -388,13 +1029,15 @@ module path when it keeps exporting the name; "module-private" means the old mod
 |---|---|---|---|
 | `addCodeEdges` | moved | **not re-exported** | `src/core/engine-sql/code-edges.ts:addCodeEdges` |
 | `deleteCodeEdgesForChunks` | moved | **not re-exported** | `src/core/engine-sql/code-edges.ts:deleteCodeEdgesForChunks` |
-| `getCalleesOf` | moved | **not re-exported** | `src/core/engine-sql/code-edges.ts:getCalleesOf` |
+| `getCalleesOf` | moved | **not re-exported** | `src/core/engine-sql/code-edges.ts:getCallersOf` |
 | `getCallersOf` | moved | **not re-exported** | `src/core/engine-sql/code-edges.ts:getCallersOf` |
+| `rowToCodeEdge` | moved | module-private | `src/core/engine-sql/code-edges.ts:rowToCodeEdge` |
 
 ### `src/core/pglite-engine/facts.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `FactRowSqlShape` | moved | module-private | `src/core/engine-sql/facts.ts:FactRowSqlShape` |
 | `consolidateFact` | moved | **old module removed** | `src/core/engine-sql/facts.ts:consolidateFact` |
 | `countUnconsolidatedFacts` | moved | **old module removed** | `src/core/engine-sql/facts.ts:countUnconsolidatedFacts` |
 | `deleteFactsForPage` | moved | **old module removed** | `src/core/engine-sql/facts.ts:deleteFactsForPage` |
@@ -460,7 +1103,6 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `PostgresEngine._putPage` | moved | **not re-exported** | `src/core/engine-sql/pages.ts:putPage` |
 | `PostgresEngine._upsertChunksOnce` | moved | `src/core/postgres-engine.ts:PostgresEngine._upsertChunksOnce` | `src/core/engine-sql/chunks.ts:upsertChunksOnce` |
 | `PostgresEngine.addCodeEdges` | moved | `src/core/postgres-engine.ts:PostgresEngine.addCodeEdges` | `src/core/engine-sql/code-edges.ts:addCodeEdges` |
 | `PostgresEngine.addLink` | moved | `src/core/postgres-engine.ts:PostgresEngine.addLink` | `src/core/engine-sql/links.ts:addLink` |
@@ -472,17 +1114,20 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PostgresEngine.batchLoadEmotionalInputs` | moved | `src/core/postgres-engine.ts:PostgresEngine.batchLoadEmotionalInputs` | `src/core/engine-sql/salience.ts:batchLoadEmotionalInputs` |
 | `PostgresEngine.buildStaleChunkWhere` | moved | **not re-exported** | `src/core/engine-sql/chunks.ts:StaleChunkOpts` |
 | `PostgresEngine.chronicleSourceCond` | moved | **not re-exported** | `src/core/engine-sql/timeline.ts:chronicleSourceCond` |
+| `PostgresEngine.connect` | moved | `src/core/postgres-engine.ts:PostgresEngine.connect` | `src/core/db.ts:connect` |
 | `PostgresEngine.consolidateFact` | moved | `src/core/postgres-engine.ts:PostgresEngine.consolidateFact` | `src/core/engine-sql/facts.ts:consolidateFact` |
 | `PostgresEngine.countChunklessPagesWithContent` | moved | `src/core/postgres-engine.ts:PostgresEngine.countChunklessPagesWithContent` | `src/core/engine-sql/chunks.ts:countChunklessPagesWithContent` |
 | `PostgresEngine.countStaleChunks` | split | `src/core/postgres-engine.ts:PostgresEngine.countStaleChunks` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:countStaleChunks` |
 | `PostgresEngine.countStalePagesForExtraction` | moved | `src/core/postgres-engine.ts:PostgresEngine.countStalePagesForExtraction` | `src/core/engine-sql/pages.ts:countStalePagesForExtraction` |
 | `PostgresEngine.countStaleTakes` | moved | `src/core/postgres-engine.ts:PostgresEngine.countStaleTakes` | `src/core/engine-sql/takes.ts:countStaleTakes` |
 | `PostgresEngine.countUnconsolidatedFacts` | moved | `src/core/postgres-engine.ts:PostgresEngine.countUnconsolidatedFacts` | `src/core/engine-sql/facts.ts:countUnconsolidatedFacts` |
+| `PostgresEngine.createVersion` | moved | `src/core/postgres-engine.ts:PostgresEngine.createVersion` | `src/core/page-state/versions.ts:createPageVersion` |
 | `PostgresEngine.deleteChunks` | moved | `src/core/postgres-engine.ts:PostgresEngine.deleteChunks` | `src/core/engine-sql/chunks.ts:deleteChunks` |
 | `PostgresEngine.deleteCodeEdgesForChunks` | moved | `src/core/postgres-engine.ts:PostgresEngine.deleteCodeEdgesForChunks` | `src/core/engine-sql/code-edges.ts:deleteCodeEdgesForChunks` |
 | `PostgresEngine.deleteFactsForPage` | moved | `src/core/postgres-engine.ts:PostgresEngine.deleteFactsForPage` | `src/core/engine-sql/facts.ts:deleteFactsForPage` |
 | `PostgresEngine.deletePage` | moved | `src/core/postgres-engine.ts:PostgresEngine.deletePage` | `src/core/engine-sql/pages.ts:deletePage` |
 | `PostgresEngine.deletePages` | moved | `src/core/postgres-engine.ts:PostgresEngine.deletePages` | `src/core/engine-sql/pages.ts:deletePages` |
+| `PostgresEngine.disconnect` | moved | `src/core/postgres-engine.ts:PostgresEngine.disconnect` | `src/core/postgres-engine.ts:PostgresEngine.disconnectInternal` |
 | `PostgresEngine.expireFact` | moved | `src/core/postgres-engine.ts:PostgresEngine.expireFact` | `src/core/engine-sql/facts.ts:expireFact` |
 | `PostgresEngine.findAnomalies` | moved | `src/core/postgres-engine.ts:PostgresEngine.findAnomalies` | `src/core/engine-sql/salience.ts:findAnomalies` |
 | `PostgresEngine.findByTitleFuzzy` | moved | `src/core/postgres-engine.ts:PostgresEngine.findByTitleFuzzy` | `src/core/engine-sql/pages.ts:findByTitleFuzzy` |
@@ -493,7 +1138,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PostgresEngine.getAllSlugs` | moved | `src/core/postgres-engine.ts:PostgresEngine.getAllSlugs` | `src/core/engine-sql/pages.ts:getAllSlugs` |
 | `PostgresEngine.getBacklinks` | split | `src/core/postgres-engine.ts:PostgresEngine.getBacklinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PostgresEngine.getCalibrationCurve` | moved | `src/core/postgres-engine.ts:PostgresEngine.getCalibrationCurve` | `src/core/engine-sql/takes.ts:getCalibrationCurve` |
-| `PostgresEngine.getCalleesOf` | moved | `src/core/postgres-engine.ts:PostgresEngine.getCalleesOf` | `src/core/engine-sql/code-edges.ts:getCalleesOf` |
+| `PostgresEngine.getCalleesOf` | split | `src/core/postgres-engine.ts:PostgresEngine.getCalleesOf` | `src/core/engine-sql/code-edges.ts:getCalleesOf`<br>`src/core/engine-sql/code-edges.ts:getCallersOf` |
 | `PostgresEngine.getCallersOf` | moved | `src/core/postgres-engine.ts:PostgresEngine.getCallersOf` | `src/core/engine-sql/code-edges.ts:getCallersOf` |
 | `PostgresEngine.getChunks` | moved | `src/core/postgres-engine.ts:PostgresEngine.getChunks` | `src/core/engine-sql/chunks.ts:getChunks` |
 | `PostgresEngine.getChunksWithEmbeddings` | moved | `src/core/postgres-engine.ts:PostgresEngine.getChunksWithEmbeddings` | `src/core/engine-sql/chunks.ts:getChunksWithEmbeddings` |
@@ -502,6 +1147,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PostgresEngine.getEmbeddingsByChunkIds` | moved | `src/core/postgres-engine.ts:PostgresEngine.getEmbeddingsByChunkIds` | `src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds` |
 | `PostgresEngine.getFactsHealth` | moved | `src/core/postgres-engine.ts:PostgresEngine.getFactsHealth` | `src/core/engine-sql/facts.ts:getFactsHealth` |
 | `PostgresEngine.getFile` | moved | `src/core/postgres-engine.ts:PostgresEngine.getFile` | `src/core/engine-sql/files.ts:getFile` |
+| `PostgresEngine.getHealth` | extracted | `src/core/postgres-engine.ts:PostgresEngine.getHealth` | `src/core/engine-sql/links.ts:listLinkSources` |
 | `PostgresEngine.getLastSeen` | moved | `src/core/postgres-engine.ts:PostgresEngine.getLastSeen` | `src/core/engine-sql/timeline.ts:getLastSeen` |
 | `PostgresEngine.getLinks` | split | `src/core/postgres-engine.ts:PostgresEngine.getLinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PostgresEngine.getOnThisDay` | moved | `src/core/postgres-engine.ts:PostgresEngine.getOnThisDay` | `src/core/engine-sql/timeline.ts:getOnThisDay` |
@@ -509,7 +1155,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PostgresEngine.getRecentSalience` | moved | `src/core/postgres-engine.ts:PostgresEngine.getRecentSalience` | `src/core/engine-sql/salience.ts:getRecentSalience` |
 | `PostgresEngine.getScorecard` | moved | `src/core/postgres-engine.ts:PostgresEngine.getScorecard` | `src/core/engine-sql/takes.ts:getScorecard` |
 | `PostgresEngine.getSince` | moved | `src/core/postgres-engine.ts:PostgresEngine.getSince` | `src/core/engine-sql/timeline.ts:getSince` |
-| `PostgresEngine.getTags` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTags` | `src/core/engine-sql/tags.ts:getTags` |
+| `PostgresEngine.getTags` | split | `src/core/postgres-engine.ts:PostgresEngine.getTags` | `src/core/engine-sql/links.ts:listLinkSources`<br>`src/core/engine-sql/tags.ts:getTags` |
 | `PostgresEngine.getTakeEmbeddings` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTakeEmbeddings` | `src/core/engine-sql/takes.ts:getTakeEmbeddings` |
 | `PostgresEngine.getTimeline` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTimeline` | `src/core/engine-sql/timeline.ts:getTimeline` |
 | `PostgresEngine.getTimelineForDate` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTimelineForDate` | `src/core/engine-sql/timeline.ts:getTimelineForDate` |
@@ -550,8 +1196,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PostgresEngine.resolveTake` | moved | `src/core/postgres-engine.ts:PostgresEngine.resolveTake` | `src/core/engine-sql/takes.ts:resolveTake` |
 | `PostgresEngine.restorePage` | moved | `src/core/postgres-engine.ts:PostgresEngine.restorePage` | `src/core/engine-sql/pages.ts:restorePage` |
 | `PostgresEngine.revertToVersion` | moved | `src/core/postgres-engine.ts:PostgresEngine.revertToVersion` | `src/core/engine-sql/pages.ts:revertToVersion` |
+| `PostgresEngine.searchKeyword` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchKeyword` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PostgresEngine.searchKeywordChunks` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchKeywordChunks` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
 | `PostgresEngine.searchTakes` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchTakes` | `src/core/engine-sql/takes.ts:searchTakes` |
 | `PostgresEngine.searchTakesVector` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchTakesVector` | `src/core/engine-sql/takes.ts:searchTakesVector` |
+| `PostgresEngine.searchTitles` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchTitles` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PostgresEngine.searchVector` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchVector` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
 | `PostgresEngine.setEmotionalWeightBatch` | moved | `src/core/postgres-engine.ts:PostgresEngine.setEmotionalWeightBatch` | `src/core/engine-sql/salience.ts:setEmotionalWeightBatch` |
 | `PostgresEngine.setPageAliases` | moved | `src/core/postgres-engine.ts:PostgresEngine.setPageAliases` | `src/core/engine-sql/pages.ts:setPageAliases` |
 | `PostgresEngine.setPageEmbeddingSignature` | moved | `src/core/postgres-engine.ts:PostgresEngine.setPageEmbeddingSignature` | `src/core/engine-sql/chunks.ts:setPageEmbeddingSignature` |
@@ -575,6 +1225,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `CjkKeywordRunner` | moved | **old module removed** | `src/core/search/vector-settings.ts:withVectorSettings` |
 | `searchKeywordCJK` | moved | **old module removed** | `src/core/engine-sql/cjk-search.ts:searchKeywordCJK` |
 
 ### `src/core/postgres-engine/code-edges.ts`
@@ -583,7 +1234,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 |---|---|---|---|
 | `addCodeEdges` | moved | **old module removed** | `src/core/engine-sql/code-edges.ts:addCodeEdges` |
 | `deleteCodeEdgesForChunks` | moved | **old module removed** | `src/core/engine-sql/code-edges.ts:deleteCodeEdgesForChunks` |
-| `getCalleesOf` | moved | **old module removed** | `src/core/engine-sql/code-edges.ts:getCalleesOf` |
+| `getCalleesOf` | moved | **old module removed** | `src/core/engine-sql/code-edges.ts:getCallersOf` |
 | `getCallersOf` | moved | **old module removed** | `src/core/engine-sql/code-edges.ts:getCallersOf` |
 | `getEdgesByChunk` | moved | **old module removed** | `src/core/engine-sql/code-edges.ts:getEdgesByChunk` |
 | `pgRowToCodeEdge` | moved | module-private | `src/core/engine-sql/code-edges.ts:rowToCodeEdge` |
@@ -653,22 +1304,460 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `updateTakeEmbeddings` | moved | **old module removed** | `src/core/engine-sql/takes.ts:updateTakeEmbeddings` |
 | `writeContradictionsRun` | moved | **old module removed** | `src/core/engine-sql/takes.ts:writeContradictionsRun` |
 
+### `src/core/process-cleanup.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runCleanupPass` | moved | `src/core/process-cleanup.ts:runCleanupPass` | `src/core/process-cleanup.ts:runCleanupCallbacks` |
+
+### `src/core/remediation/context.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `loadRecommendationContext` | extracted | `src/core/remediation/context.ts:loadRecommendationContext` | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan`<br>`src/core/embed-facts.ts:embedStaleFacts`<br>`src/core/embed-stale-images.ts:embedStaleImages` |
+
+### `src/core/remediation/run.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runRemediation` | extracted | `src/core/remediation/run.ts:runRemediation` | `src/core/facts/relink.ts:runModelTier` |
+
+### `src/core/schema-pack/unify-types-handler.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runUnifyTypes` | extracted | `src/core/schema-pack/unify-types-handler.ts:runUnifyTypes` | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan` |
+
+### `src/core/search/exact-lookup.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `applyExactLookupTier` | extracted | `src/core/search/exact-lookup.ts:applyExactLookupTier` | `src/core/search/alias-hop.ts:topOrganicScore` |
+| `structuralExactLookup` | extracted | `src/core/search/exact-lookup.ts:structuralExactLookup` | `src/core/search/alias-hop.ts:aliasInjectedRow` |
+
 ### `src/core/search/hybrid.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `hybridSearch` | split | `src/core/search/hybrid.ts:hybridSearch` | `src/core/search/hybrid/arms.ts:buildPostFusionOpts`<br>`src/core/search/hybrid/arms.ts:buildRelationalList`<br>`src/core/search/hybrid/arms.ts:resolveModalityAndQueries`<br>`src/core/search/hybrid/arms.ts:runLexicalArms`<br>`src/core/search/hybrid/arms.ts:runVectorArms`<br>`src/core/search/hybrid/keyword-only.ts:searchVectorFallback`<br>`src/core/search/hybrid/keyword-only.ts:searchWithoutEmbeddings`<br>`src/core/search/hybrid/rank.ts:expandStructuralNeighbors`<br>… and 7 more (see the JSON) |
+| `ALIAS_HOP_PRESENT_BOOST` | moved | module-private | `src/core/search/alias-hop.ts:ALIAS_HOP_PRESENT_BOOST` |
+| `MAX_ALIAS_INJECT` | moved | module-private | `src/core/search/alias-hop.ts:MAX_ALIAS_INJECT` |
+| `MAX_ALIAS_QUERY_TOKENS` | moved | module-private | `src/core/search/alias-hop.ts:MAX_ALIAS_QUERY_TOKENS` |
+| `applyAliasHop` | split | `src/core/search/hybrid.ts:applyAliasHop` | `src/core/search/alias-hop.ts:IdentityTierOpts`<br>`src/core/search/alias-hop.ts:aliasInjectedRow`<br>`src/core/search/alias-hop.ts:applyAliasHop`<br>`src/core/search/alias-hop.ts:fetchAliasCanonical`<br>`src/core/search/alias-hop.ts:topOrganicScore` |
+| `hybridSearch` | split | `src/core/search/hybrid.ts:hybridSearch` | `src/core/search/date-bounds.ts:resolveSearchDateBounds`<br>`src/core/search/hybrid/arms.ts:buildPostFusionOpts`<br>`src/core/search/hybrid/arms.ts:buildRelationalList`<br>`src/core/search/hybrid/arms.ts:resolveModalityAndQueries`<br>`src/core/search/hybrid/arms.ts:runLexicalArms`<br>`src/core/search/hybrid/arms.ts:runVectorArms`<br>`src/core/search/hybrid/keyword-only.ts:searchVectorFallback`<br>`src/core/search/hybrid/keyword-only.ts:searchWithoutEmbeddings`<br>… and 7 more (see the JSON) |
 | `hybridSearchCached` | split | `src/core/search/hybrid.ts:hybridSearchCached` | `src/core/search/hybrid/cache-stages.ts:prepareSemanticCache`<br>`src/core/search/hybrid/cache-stages.ts:resolveCacheSearchMode`<br>`src/core/search/hybrid/cache-stages.ts:semanticCacheSkipped`<br>`src/core/search/hybrid/cache-stages.ts:serveSemanticCacheHit` |
 | `isTimeoutError` | moved | module-private | `src/core/search/hybrid/degraded.ts:isTimeoutError` |
 | `pushDegraded` | moved | module-private | `src/core/search/hybrid/degraded.ts:pushDegraded` |
+| `resolveDateBoundary` | moved | `src/core/search/hybrid.ts:resolveDateBoundary` | `src/core/search/date-bounds.ts:resolveDateBoundary` |
 | `resolveEffectiveRecency` | moved | module-private | `src/core/search/hybrid/effective-modes.ts:resolveEffectiveRecency` |
 | `resolveEffectiveSalience` | moved | module-private | `src/core/search/hybrid/effective-modes.ts:resolveEffectiveSalience` |
+| `rrfFusion` | extracted | `src/core/search/hybrid.ts:rrfFusion` | `src/core/search/rrf-page-fusion.ts:accumulateRrf` |
+| `rrfFusionWeighted` | extracted | `src/core/search/hybrid.ts:rrfFusionWeighted` | `src/core/search/rrf-page-fusion.ts:accumulateRrf` |
+| `rrfKey` | moved | module-private | `src/core/search/rrf-page-fusion.ts:rrfKey` |
 | `stampBudgetStage` | moved | module-private | `src/core/search/hybrid/degraded.ts:stampBudgetStage` |
+
+### `src/core/skill-catalog.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `buildSkillCatalog` | extracted | `src/core/skill-catalog.ts:buildSkillCatalog` | `src/core/shared-skills/compatibility.ts:listLegacySharedSkills` |
+
+### `src/core/skillopt/orchestrator.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runOptimizationLoop` | extracted | `src/core/skillopt/orchestrator.ts:runOptimizationLoop` | `src/core/skillopt/bootstrap-run.ts:runGuardedBootstrap` |
+
+### `src/core/skillopt/validate-gate.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `SKILLOPT_RUNTIME_EXCEEDED` | moved | `src/core/skillopt/validate-gate.ts:SKILLOPT_RUNTIME_EXCEEDED` | `src/core/skillopt/must-abort.ts:SKILLOPT_RUNTIME_EXCEEDED` |
+
+### `src/core/skillpack/doctor.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `applyAutoFixes` | extracted | `src/core/skillpack/doctor.ts:applyAutoFixes` | `src/core/persistence/takes-prepare.ts:normalizeTakesIntent` |
+
+### `src/core/source-resolver.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `localFederatedSourceIds` | split | `src/core/source-resolver.ts:localFederatedSourceIds` | `src/core/source-resolver.ts:federatedSetFor`<br>`src/core/source-resolver.ts:liveSourceRows` |
+
+### `src/core/sweep.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `lookupRefsForSlugs` | moved | module-private | `src/core/link-reconciliation.ts:lookupRefsForSlugs` |
+| `runCorpusIngestPass` | extracted | `src/core/sweep.ts:runCorpusIngestPass` | `src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler` |
+| `runLinksTimelinePass` | extracted | `src/core/sweep.ts:runLinksTimelinePass` | `src/core/link-reconciliation.ts:loadLinkSourcePolicy` |
+
+### `src/core/sync-embed-backfill.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `buildSingleSyncJsonEnvelope` | extracted | `src/core/sync-embed-backfill.ts:buildSingleSyncJsonEnvelope` | `src/core/repair/google-file-modes.ts:googleFileModesRepair` |
+
+### `src/core/sync-status-report.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `buildSyncStatusReport` | extracted | `src/core/sync-status-report.ts:buildSyncStatusReport` | `src/commands/sync/run.ts:SyncAllSourceRow` |
+
+### `src/core/takes-write.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `appendTakesToPageMdFirst` | extracted | `src/core/takes-write.ts:appendTakesToPageMdFirst` | `src/core/takes-write.ts:appendTakesToPageBody` |
+
+### `src/core/think/index.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runThink` | extracted | `src/core/think/index.ts:runThink` | `src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi`<br>`src/core/persistence/memory-mutations.ts:submitRememberMutation`<br>`src/core/think/decide.ts:thinkAbstainResult` |
+
+### `src/core/timeline-extract.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `extractTimelineFromContent` | extracted | `src/core/timeline-extract.ts:extractTimelineFromContent` | `src/core/persistence/links-maintenance.ts:extractManagedStaleLinks` |
+
+### `src/core/types.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `PageVersion` | moved | `src/core/types.ts:PageVersion` | `src/core/page-state/version-types.ts:PageVersion` |
+
+### `src/core/verbs.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `forget` | extracted | `src/core/verbs.ts:forget` | `src/core/persistence/memory-mutations.ts:submitForgetMutation` |
+| `synthesize` | extracted | `src/core/verbs.ts:synthesize` | `src/core/facts/relink.ts:estimateUsd` |
+
+### `src/core/write-through.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `resolvePageWriteTarget` | extracted | `src/core/write-through.ts:resolvePageWriteTarget` | `src/core/embed-stale-images.ts:embedStaleImages`<br>`src/core/shared-skills/knowledge-guard.ts:assertKnowledgePublicationAllowed` |
+| `writePageThrough` | extracted | `src/core/write-through.ts:writePageThrough` | `src/core/facts/proposal-supersede.ts:withFenceLocks` |
+
+### `src/core/ze-exposure.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `detectZeExposure` | moved | **old module removed** | `src/core/import-contextual-mode.ts:resolveImportContextualMode` |
+
+### `src/mcp/http-transport.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `startHttpTransport` | extracted | `src/mcp/http-transport.ts:startHttpTransport` | `src/commands/serve-http-mcp.ts:callMcpTool` |
+
+### `src/mcp/server.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `resolveMcpStdioSourceScope` | extracted | `src/mcp/server.ts:resolveMcpStdioSourceScope` | `src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler` |
 
 ### Removed without a traceable destination
 
 Deleted with their callers, or rewritten beyond token matching. Search the new module directories by behavior.
 
+- `src/cli.ts:_clearIdentityCacheForTest`
+- `src/commands/autopilot.ts:systemdUnitPath`
+- `src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringArgs`
+- `src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringResult`
+- `src/commands/eval-schema-authoring.ts:EvalVerdict`
+- `src/commands/eval-schema-authoring.ts:HELP`
+- `src/commands/eval-schema-authoring.ts:aggregateVerdict`
+- `src/commands/eval-schema-authoring.ts:parseArgs`
+- `src/commands/eval-schema-authoring.ts:runEvalSchemaAuthoring`
+- `src/commands/extract.ts:parseFrontmatterFromContent`
+- `src/commands/frontmatter-install-hook.ts:HOOK_SCRIPT`
+- `src/commands/frontmatter-install-hook.ts:isGitRepo`
+- `src/commands/hook.ts:firstString`
+- `src/commands/hook.ts:lastSessionLine`
+- `src/commands/migrations/v0_11_0.ts:gbrainDir`
+- `src/commands/migrations/v0_12_0.ts:__testing`
+- `src/commands/migrations/v0_12_2.ts:__testing`
+- `src/commands/migrations/v0_13_0.ts:__testing`
+- `src/commands/migrations/v0_21_0.ts:__testing`
+- `src/commands/migrations/v0_22_4.ts:gbrainDir`
+- `src/commands/migrations/v0_46_3.ts:MIGRATION_VERSION`
+- `src/commands/migrations/v0_46_3.ts:PLAYBOOK_SKILL`
+- `src/commands/migrations/v0_46_3.ts:PendingHostWorkEntry`
+- `src/commands/migrations/v0_46_3.ts:emitHostWork`
+- `src/commands/migrations/v0_46_3.ts:existingEntryForVersion`
+- `src/commands/migrations/v0_46_3.ts:pendingHostWorkDir`
+- `src/commands/migrations/v0_46_3.ts:pendingHostWorkPath`
+- `src/commands/models.ts:probeSource`
+- `src/commands/providers.ts:sunsetMarker`
+- `src/commands/providers.ts:sunsetMarkerText`
+- `src/commands/takes.ts:cmdAdd`
+- `src/commands/takes.ts:cmdSupersede`
+- `src/commands/takes.ts:cmdUpdate`
+- `src/commands/takes.ts:ensureFloat`
+- `src/commands/takes.ts:ensureKind`
+- `src/commands/ze-switch.ts:KEY_PREVIOUS_SNAPSHOT`
+- `src/commands/ze-switch.ts:MODEL_ID_RE`
+- `src/commands/ze-switch.ts:RETIRED_FLAGS`
+- `src/commands/ze-switch.ts:SnapshotReadResult`
+- `src/commands/ze-switch.ts:ZeSwitchSnapshot`
+- `src/commands/ze-switch.ts:brainSuffix`
+- `src/commands/ze-switch.ts:buildUndoCommands`
+- `src/commands/ze-switch.ts:emitAndExit`
+- `src/commands/ze-switch.ts:parseSnapshot`
+- `src/commands/ze-switch.ts:printHelp`
+- `src/commands/ze-switch.ts:refusalEnvelope`
+- `src/commands/ze-switch.ts:runZeSwitch`
+- `src/commands/ze-switch.ts:runZeSwitchSelfHelp`
+- `src/core/ai/defaults.ts:LEGACY_DEFAULT_RERANKER_MODEL`
+- `src/core/ai/defaults.ts:RERANKER_SUNSETS`
+- `src/core/ai/defaults.ts:RerankerSunset`
+- `src/core/ai/defaults.ts:ZEROENTROPY_SUNSET_DATE`
+- `src/core/ai/defaults.ts:isZeroEntropyModel`
+- `src/core/ai/defaults.ts:providerIdOf`
+- `src/core/ai/defaults.ts:rerankerSunset`
+- `src/core/ai/defaults.ts:sunsetDateHasPassed`
+- `src/core/ai/dims.ts:ZEROENTROPY_DIM_MODELS`
+- `src/core/ai/dims.ts:ZEROENTROPY_VALID_DIMS`
+- `src/core/ai/dims.ts:isValidZeroEntropyDim`
+- `src/core/ai/dims.ts:supportsZeroEntropyDimension`
+- `src/core/ai/gateway.ts:MAX_CHARS`
+- `src/core/ai/gateway.ts:MAX_ZEROENTROPY_RESPONSE_BYTES`
+- `src/core/ai/gateway.ts:ZeroEntropyResponseTooLargeError.constructor`
+- `src/core/ai/gateway.ts:__setSunsetClockForTests`
+- `src/core/ai/gateway.ts:_resetSunsetWarningsForTest`
+- `src/core/ai/gateway.ts:_sunsetClock`
+- `src/core/ai/gateway.ts:_sunsetShortCircuited`
+- `src/core/ai/gateway.ts:_sunsetWarned`
+- `src/core/ai/gateway.ts:recordSpendOnTracker`
+- `src/core/ai/gateway.ts:sunsetHasPassed`
+- `src/core/ai/gateway.ts:sunsetShortCircuitOnce`
+- `src/core/ai/gateway.ts:warnSunsetOnce`
+- `src/core/ai/gateway.ts:zeroEntropyCompatFetch`
+- `src/core/ai/recipes/zeroentropyai.ts:zeroentropyai`
+- `src/core/artifact/index.ts:ArtifactDescriptor`
+- `src/core/artifact/index.ts:ArtifactKind`
+- `src/core/artifact/index.ts:detectArtifactKind`
+- `src/core/artifact/index.ts:installArtifact`
+- `src/core/artifact/index.ts:listInstalledArtifacts`
+- `src/core/artifact/index.ts:targetDirForKind`
+- `src/core/artifact/index.ts:validateManifestByKind`
+- `src/core/backfill-registry.ts:clearRegistryForTests`
+- `src/core/backup/coverage.ts:RECIPE_DETAIL`
+- `src/core/backup/coverage.ts:hasRemoteTrackingRef`
+- `src/core/backup/coverage.ts:originRemoteState`
+- `src/core/backup/snapshot.ts:relativeInside`
+- `src/core/calibration/cross-brain.ts:CrossBrainProfileResult`
+- `src/core/calibration/cross-brain.ts:CrossBrainQueryOpts`
+- `src/core/calibration/cross-brain.ts:attributionSuffix`
+- `src/core/calibration/cross-brain.ts:canReadMountsForCtx`
+- `src/core/calibration/cross-brain.ts:queryAcrossBrains`
+- `src/core/calibration/nudge.ts:EvaluateAndFireOpts`
+- `src/core/calibration/nudge.ts:NUDGE_CONVICTION_THRESHOLD`
+- `src/core/calibration/nudge.ts:NUDGE_COOLDOWN_DAYS`
+- `src/core/calibration/nudge.ts:NudgeDecision`
+- `src/core/calibration/nudge.ts:buildNudgeText`
+- `src/core/calibration/nudge.ts:checkCooldown`
+- `src/core/calibration/nudge.ts:evaluateAndFireNudge`
+- `src/core/calibration/nudge.ts:evaluateNudgeRule`
+- `src/core/calibration/nudge.ts:recordNudgeFire`
+- `src/core/calibration/nudge.ts:resetNudgeCooldown`
+- `src/core/calibration/nudge.ts:takeDomainHint`
+- `src/core/calibration/recall-footer.ts:AbandonedThreadSummary`
+- `src/core/calibration/recall-footer.ts:RecallFooterOpts`
+- `src/core/calibration/recall-footer.ts:buildRecallCalibrationFooter`
+- `src/core/calibration/recall-footer.ts:trendNote`
+- `src/core/calibration/take-forecast.ts:MIN_BUCKET_N`
+- `src/core/calibration/take-forecast.ts:TakeForecast`
+- `src/core/calibration/take-forecast.ts:TakeForecastInput`
+- `src/core/calibration/take-forecast.ts:batchForecast`
+- `src/core/calibration/take-forecast.ts:computeForecast`
+- `src/core/calibration/take-forecast.ts:forecastForTake`
+- `src/core/calibration/take-forecast.ts:resolveDomainPrefix`
+- `src/core/code-graph-readiness.ts:effectiveSourceId`
+- `src/core/code-graph-readiness.ts:pendingEdgeChunksExist`
+- `src/core/code-graph-readiness.ts:symbolChunksExist`
+- `src/core/code-intel/recursive-walk.ts:detectSymbolLanguage`
+- `src/core/connectors/providers/claude.ts:memoOrg`
+- `src/core/connectors/providers/claude.ts:resolveOrg`
+- `src/core/context/reflex.ts:HEARTBEAT_PATH`
+- `src/core/conversation-parser/llm-polish.ts:POLISH_HEADROOM_USD`
+- `src/core/conversation-parser/llm-polish.ts:POLISH_SYSTEM_PROMPT`
+- `src/core/conversation-parser/llm-polish.ts:PolishOps`
+- `src/core/conversation-parser/llm-polish.ts:RunLlmPolishOpts`
+- `src/core/conversation-parser/llm-polish.ts:applyPolish`
+- `src/core/conversation-parser/llm-polish.ts:runLlmPolish`
+- `src/core/cycle/atom-slug.ts:todayDate`
+- `src/core/cycle/drift.ts:lookbackCutoffIso`
+- `src/core/cycle/extract-atoms.ts:DiscoveredPage`
+- `src/core/cycle/extract-facts.ts:dedupeFactsByContentKey`
+- `src/core/cycle/extract-facts.ts:factContentKey`
+- `src/core/cycle/synthesize-verify.ts:countUngroundedNumericClaims`
+- `src/core/cycle/synthesize-verify.ts:emptyStats`
+- `src/core/cycle/synthesize-verify.ts:repairBody`
+- `src/core/cycle/synthesize-verify.ts:splitFrontmatter`
+- `src/core/data-research.ts:DateWindow`
+- `src/core/data-research.ts:DedupConfig`
+- `src/core/data-research.ts:DedupResult`
+- `src/core/data-research.ts:MAX_HTML_SIZE`
+- `src/core/data-research.ts:METRIC_PATTERNS`
+- `src/core/data-research.ts:ResearchRecipe`
+- `src/core/data-research.ts:TrackerEntry`
+- `src/core/data-research.ts:ValidationResult`
+- `src/core/data-research.ts:appendToTracker`
+- `src/core/data-research.ts:buildDateWindows`
+- `src/core/data-research.ts:computeTotals`
+- `src/core/data-research.ts:extractFields`
+- `src/core/data-research.ts:isDuplicate`
+- `src/core/data-research.ts:parseTrackerPage`
+- `src/core/data-research.ts:stripEmailHtml`
+- `src/core/data-research.ts:validateRecipe`
+- `src/core/data-research.ts:verifyExtraction`
+- `src/core/diarize/payload-fitter.ts:ChatFn`
+- `src/core/diarize/payload-fitter.ts:DEFAULT_MIN_SUCCESS_RATIO`
+- `src/core/diarize/payload-fitter.ts:DEFAULT_PARALLELISM`
+- `src/core/diarize/payload-fitter.ts:FitOptions`
+- `src/core/diarize/payload-fitter.ts:FitResult`
+- `src/core/diarize/payload-fitter.ts:FitStrategy`
+- `src/core/diarize/payload-fitter.ts:SummarizeOutcome`
+- `src/core/diarize/payload-fitter.ts:cosine`
+- `src/core/diarize/payload-fitter.ts:fit`
+- `src/core/diarize/payload-fitter.ts:fitBatch`
+- `src/core/diarize/payload-fitter.ts:fitSummarize`
+- `src/core/diarize/payload-fitter.ts:summarizeCluster`
+- `src/core/embedding-dim-check.ts:_resetFactsDimCheckCacheForTest`
+- `src/core/enrichment/budget.ts:BudgetError.constructor`
+- `src/core/enrichment/budget.ts:BudgetErrorCode`
+- `src/core/enrichment/budget.ts:BudgetLedger.cleanupExpired`
+- `src/core/enrichment/budget.ts:BudgetLedger.commit`
+- `src/core/enrichment/budget.ts:BudgetLedger.constructor`
+- `src/core/enrichment/budget.ts:BudgetLedger.reclaimExpiredRow`
+- `src/core/enrichment/budget.ts:BudgetLedger.reserve`
+- `src/core/enrichment/budget.ts:BudgetLedger.rollback`
+- `src/core/enrichment/budget.ts:BudgetLedger.state`
+- `src/core/enrichment/budget.ts:BudgetLedger.tz`
+- `src/core/enrichment/budget.ts:BudgetStateRow`
+- `src/core/enrichment/budget.ts:DEFAULT_SCOPE`
+- `src/core/enrichment/budget.ts:DEFAULT_TTL_SECONDS`
+- `src/core/enrichment/budget.ts:DEFAULT_TZ`
+- `src/core/enrichment/budget.ts:ReservationResult`
+- `src/core/enrichment/budget.ts:ReserveInput`
+- `src/core/enrichment/budget.ts:makeReservationId`
+- `src/core/enrichment/budget.ts:todayInTz`
+- `src/core/enrichment/completeness.ts:CompletenessDimension`
+- `src/core/enrichment/completeness.ts:CompletenessScore`
+- `src/core/enrichment/completeness.ts:RUBRICS_BY_TYPE`
+- `src/core/enrichment/completeness.ts:Rubric`
+- `src/core/enrichment/completeness.ts:clamp`
+- `src/core/enrichment/completeness.ts:companyRubric`
+- `src/core/enrichment/completeness.ts:conceptRubric`
+- `src/core/enrichment/completeness.ts:countListItems`
+- `src/core/enrichment/completeness.ts:dealRubric`
+- `src/core/enrichment/completeness.ts:defaultRubric`
+- `src/core/enrichment/completeness.ts:getRubric`
+- `src/core/enrichment/completeness.ts:hasBacklinkHint`
+- `src/core/enrichment/completeness.ts:hasBody`
+- `src/core/enrichment/completeness.ts:hasCitations`
+- `src/core/enrichment/completeness.ts:hasFrontmatterField`
+- `src/core/enrichment/completeness.ts:hasSourceUrls`
+- `src/core/enrichment/completeness.ts:hasTimelineEntries`
+- `src/core/enrichment/completeness.ts:hasTitle`
+- `src/core/enrichment/completeness.ts:mediaRubric`
+- `src/core/enrichment/completeness.ts:nonRedundancy`
+- `src/core/enrichment/completeness.ts:parseDate`
+- `src/core/enrichment/completeness.ts:personRubric`
+- `src/core/enrichment/completeness.ts:projectRubric`
+- `src/core/enrichment/completeness.ts:recencyScore`
+- `src/core/enrichment/completeness.ts:scorePage`
+- `src/core/enrichment/completeness.ts:sourceRubric`
+- `src/core/eval-capture-graph.ts:CodeWalkComparison`
+- `src/core/eval-capture-graph.ts:CodeWalkResultShape`
+- `src/core/eval-capture-graph.ts:GraphNode`
+- `src/core/eval-capture-graph.ts:adjustedRandIndex`
+- `src/core/eval-capture-graph.ts:compareCodeWalk`
+- `src/core/eval-capture-graph.ts:depthGroupStability`
+- `src/core/eval-capture-graph.ts:nodeKey`
+- `src/core/eval-capture-graph.ts:nodeSetJaccard`
+- `src/core/eval-capture-graph.ts:truncationMatch`
+- `src/core/eval-contradictions/calibration-join.ts:CalibrationJoinTag`
+- `src/core/eval-contradictions/calibration-join.ts:buildBiasContextString`
+- `src/core/eval-contradictions/calibration-join.ts:computeDomainHint`
+- `src/core/eval-contradictions/calibration-join.ts:tagFindingWithCalibration`
+- `src/core/extract/rollup-writer.ts:_resetRollupErrorLogForTests`
+- `src/core/fail-improve.ts:FailImproveLoop.analyzeFailures`
+- `src/core/fail-improve.ts:FailImproveLoop.constructor`
+- `src/core/fail-improve.ts:FailImproveLoop.ensureDir`
+- `src/core/fail-improve.ts:FailImproveLoop.execute`
+- `src/core/fail-improve.ts:FailImproveLoop.generateTestCases`
+- `src/core/fail-improve.ts:FailImproveLoop.getCallCountPath`
+- `src/core/fail-improve.ts:FailImproveLoop.getCallCounts`
+- `src/core/fail-improve.ts:FailImproveLoop.getFailures`
+- `src/core/fail-improve.ts:FailImproveLoop.getFailuresByPattern`
+- `src/core/fail-improve.ts:FailImproveLoop.getImprovements`
+- `src/core/fail-improve.ts:FailImproveLoop.getLogPath`
+- `src/core/fail-improve.ts:FailImproveLoop.incrementCallCount`
+- `src/core/fail-improve.ts:FailImproveLoop.logDir`
+- `src/core/fail-improve.ts:FailImproveLoop.logFailure`
+- `src/core/fail-improve.ts:FailImproveLoop.logImprovement`
+- `src/core/fail-improve.ts:FailImproveLoop.rotateIfNeeded`
+- `src/core/fail-improve.ts:FailureAnalysis`
+- `src/core/fail-improve.ts:FailureEntry`
+- `src/core/fail-improve.ts:MAX_ENTRIES`
+- `src/core/fail-improve.ts:TestCase`
+- `src/core/fail-improve.ts:getLogDir`
+- `src/core/fail-improve.ts:isAbortError`
+- `src/core/fail-improve.ts:makeAbortError`
+- `src/core/google/google-clients.ts:RawGmailHeader`
+- `src/core/google/google-source.ts:MAX_THREAD_FAILURES`
+- `src/core/google/google-source.ts:isRateLimitFailure`
+- `src/core/import-file.ts:_maybeOcrGatedForTests`
+- `src/core/minions/batch-projection.ts:BatchProjection`
+- `src/core/minions/batch-projection.ts:COLD_LATENCY_MS`
+- `src/core/minions/batch-projection.ts:ProjectBatchInput`
+- `src/core/minions/batch-projection.ts:RecentJobStats`
+- `src/core/minions/batch-projection.ts:formatProjection`
+- `src/core/minions/batch-projection.ts:modelDefaultMeanCostUsd`
+- `src/core/minions/batch-projection.ts:projectBatch`
+- `src/core/minions/batch-projection.ts:shouldPromptAtThreshold`
+- `src/core/minions/budget-tracker.ts:BudgetEventRecord`
+- `src/core/minions/budget-tracker.ts:BudgetExhausted.constructor`
+- `src/core/minions/budget-tracker.ts:BudgetOwnerDeleted.constructor`
+- `src/core/minions/budget-tracker.ts:BudgetOwnerInfo`
+- `src/core/minions/budget-tracker.ts:ReservationOutcome`
+- `src/core/minions/budget-tracker.ts:getBudgetOwner`
+- `src/core/minions/budget-tracker.ts:haltBudgetSubtree`
+- `src/core/minions/budget-tracker.ts:inheritBudgetOwner`
+- `src/core/minions/budget-tracker.ts:logBudgetEvent`
+- `src/core/minions/budget-tracker.ts:refundBudget`
+- `src/core/minions/budget-tracker.ts:reserveBudget`
+- `src/core/minions/budget-tracker.ts:setOwnerBudget`
+- `src/core/minions/lease-cap-controller.ts:ControllerOpts`
+- `src/core/minions/lease-cap-controller.ts:ControllerWindowStats`
+- `src/core/minions/lease-cap-controller.ts:DEFAULT_CONTROLLER_OPTS`
+- `src/core/minions/lease-cap-controller.ts:controllerTick`
+- `src/core/minions/lease-cap-controller.ts:nextLeaseCap`
+- `src/core/minions/lease-cap-controller.ts:readControllerWindow`
+- `src/core/minions/lease-cap-controller.ts:readCurrentLeaseCap`
+- `src/core/minions/lease-cap-controller.ts:writeLeaseCap`
+- `src/core/minions/self-fix.ts:DEFAULT_OPTS`
+- `src/core/minions/self-fix.ts:SelfFixDecision`
+- `src/core/minions/self-fix.ts:SelfFixEventRecord`
+- `src/core/minions/self-fix.ts:SelfFixOpts`
+- `src/core/minions/self-fix.ts:buildSelfFixPrompt`
+- `src/core/minions/self-fix.ts:computeChainDepth`
+- `src/core/minions/self-fix.ts:decideSelfFix`
+- `src/core/minions/self-fix.ts:logSelfFixEvent`
+- `src/core/minions/self-fix.ts:submitSelfFixChild`
+- `src/core/minions/stagger.ts:FNV_OFFSET`
+- `src/core/minions/stagger.ts:FNV_PRIME`
+- `src/core/minions/stagger.ts:staggerMinuteOffset`
+- `src/core/minions/stagger.ts:staggerSecondOffset`
+- `src/core/minions/supervisor.ts:MinionSupervisor.reconcileOrphanedPrivateQueuesBeforeWorkerSpawn`
+- `src/core/ops/pages.ts:assertSourceInWriteGrant`
 - `src/core/pglite-engine.ts:PGLiteEngine._addLinksBatchOnce`
 - `src/core/pglite-engine.ts:PGLiteEngine._addTimelineEntriesBatchOnce`
 - `src/core/pglite-engine.ts:PGLiteEngine.buildChunklessPagesWhere`
@@ -680,21 +1769,29 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/pglite-engine.ts:PGLiteEngine.takesDeps`
 - `src/core/pglite-engine/cjk-search.ts:PgliteCjkSearchDeps`
 - `src/core/pglite-engine/code-edges.ts:PGLITE_EDGE_BATCH_MAX_BIND_PARAMS`
-- `src/core/pglite-engine/facts.ts:FactRowSqlShape`
 - `src/core/pglite-engine/facts.ts:PgliteFactsDeps`
 - `src/core/pglite-engine/facts.ts:_listFacts`
 - `src/core/pglite-engine/facts.ts:toDate`
 - `src/core/pglite-engine/salience.ts:PgliteSalienceDeps`
 - `src/core/pglite-engine/takes.ts:PgliteTakesDeps`
+- `src/core/pglite-lock.ts:LOCK_DIR_NAME`
+- `src/core/pglite-lock.ts:REAP_CLAIM_TTL_MS`
+- `src/core/pglite-lock.ts:breakStaleClaim`
+- `src/core/pglite-lock.ts:formatLockTimestamp`
+- `src/core/pglite-lock.ts:pgliteLockTimeoutError`
+- `src/core/pglite-lock.ts:reapMarkerPath`
+- `src/core/pglite-lock.ts:recordReap`
+- `src/core/pglite-lock.ts:tryReapLockDir`
+- `src/core/postgres-engine.ts:PostgresEngine.__resetFactsEmbeddingCastCacheForTest`
 - `src/core/postgres-engine.ts:PostgresEngine._addLinksBatchOnce`
 - `src/core/postgres-engine.ts:PostgresEngine._addTimelineEntriesBatchOnce`
+- `src/core/postgres-engine.ts:PostgresEngine._reservedDirectInFlight`
 - `src/core/postgres-engine.ts:PostgresEngine.buildChunklessPagesWhere`
 - `src/core/postgres-engine.ts:PostgresEngine.buildStalePagesWhere`
 - `src/core/postgres-engine.ts:PostgresEngine.codeEdgesDeps`
 - `src/core/postgres-engine.ts:PostgresEngine.factsDeps`
 - `src/core/postgres-engine.ts:PostgresEngine.salienceDeps`
 - `src/core/postgres-engine.ts:PostgresEngine.takesDeps`
-- `src/core/postgres-engine/cjk-search.ts:CjkKeywordRunner`
 - `src/core/postgres-engine/code-edges.ts:PgCodeEdgesDeps`
 - `src/core/postgres-engine/code-edges.ts:PgSql`
 - `src/core/postgres-engine/facts.ts:PgFactsDeps`
@@ -703,3 +1800,76 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/postgres-engine/salience.ts:PgSql`
 - `src/core/postgres-engine/takes.ts:PgSql`
 - `src/core/postgres-engine/takes.ts:PgTakesDeps`
+- `src/core/process-cleanup.ts:cleanupInFlight`
+- `src/core/resolvers/builtin/url-reachable.ts:checkDnsRebinding`
+- `src/core/resolvers/builtin/url-reachable.ts:errMessage`
+- `src/core/retrieval-upgrade-planner.ts:ApplyOpts`
+- `src/core/retrieval-upgrade-planner.ts:ApplyResult`
+- `src/core/retrieval-upgrade-planner.ts:EMBED_PAGES_PER_MINUTE`
+- `src/core/retrieval-upgrade-planner.ts:KEY_APPLIED`
+- `src/core/retrieval-upgrade-planner.ts:KEY_DECLINED_AT`
+- `src/core/retrieval-upgrade-planner.ts:KEY_PREVIOUS_SNAPSHOT`
+- `src/core/retrieval-upgrade-planner.ts:KEY_PROMPT_SHOWN`
+- `src/core/retrieval-upgrade-planner.ts:KEY_REQUESTED`
+- `src/core/retrieval-upgrade-planner.ts:POSTGRES_DDL_MS_PER_PAGE`
+- `src/core/retrieval-upgrade-planner.ts:RetrievalUpgradeState`
+- `src/core/retrieval-upgrade-planner.ts:ZE_DECLINE_REASK_DAYS`
+- `src/core/retrieval-upgrade-planner.ts:ZE_MIN_PAGES_FOR_OFFER`
+- `src/core/retrieval-upgrade-planner.ts:ZE_TARGET_EMBEDDING_DIM`
+- `src/core/retrieval-upgrade-planner.ts:ZE_TARGET_EMBEDDING_MODEL`
+- `src/core/retrieval-upgrade-planner.ts:ZE_TARGET_RERANKER_MODEL`
+- `src/core/retrieval-upgrade-planner.ts:ZeSwitchSnapshot`
+- `src/core/retrieval-upgrade-planner.ts:applyRetrievalUpgrade`
+- `src/core/retrieval-upgrade-planner.ts:getStringConfig`
+- `src/core/retrieval-upgrade-planner.ts:planRetrievalUpgrade`
+- `src/core/retrieval-upgrade-planner.ts:recordDeclinedForever`
+- `src/core/retrieval-upgrade-planner.ts:recordDeclinedThisRun`
+- `src/core/retrieval-upgrade-planner.ts:resumeRetrievalUpgrade`
+- `src/core/retrieval-upgrade-planner.ts:undoRetrievalUpgrade`
+- `src/core/schema-pack/expand-type-filter.ts:ExpandedTypeFilter`
+- `src/core/schema-pack/expand-type-filter.ts:buildTypeFilterSql`
+- `src/core/schema-pack/expand-type-filter.ts:expandTypeFilter`
+- `src/core/schema-pack/rewrite-links-batch.ts:RewriteLinkPair`
+- `src/core/schema-pack/rewrite-links-batch.ts:rewriteLinksBatch`
+- `src/core/search/relational-intent.ts:WHO_REL_VERBS`
+- `src/core/search/title-match.ts:__test__`
+- `src/core/secret-scan.ts:PEM_BLOCK_RE`
+- `src/core/serve-sync-runner.ts:deferredEmbedSourceId`
+- `src/core/serve-sync-runner.ts:deferredEmbedsPending`
+- `src/core/serve-sync-runner.ts:embedDrainController`
+- `src/core/serve-sync-runner.ts:embedDrainRunning`
+- `src/core/serve-sync-runner.ts:scheduleEmbedDrain`
+- `src/core/skillopt/reflect.ts:tryExtractEdits`
+- `src/core/skillpack/brain-pack-lint.ts:BrainPackLintResult`
+- `src/core/skillpack/brain-pack-lint.ts:ToolSkewFinding`
+- `src/core/skillpack/brain-pack-lint.ts:lintBrainPackTools`
+- `src/core/source-resolver.ts:maybeWarnUnscopedDefaultWrite`
+- `src/core/thin-client-upgrade-prompt.ts:_clearPromptStateForTest`
+- `src/core/upgrade-checkpoint.ts:ALL_STEPS`
+- `src/core/upgrade-checkpoint.ts:ALL_UPGRADE_STEPS`
+- `src/core/upgrade-checkpoint.ts:CHECKPOINT_FILENAME`
+- `src/core/upgrade-checkpoint.ts:CheckpointValidation`
+- `src/core/upgrade-checkpoint.ts:UpgradeCheckpoint`
+- `src/core/upgrade-checkpoint.ts:UpgradeStep`
+- `src/core/upgrade-checkpoint.ts:checkpointPath`
+- `src/core/upgrade-checkpoint.ts:clearCheckpoint`
+- `src/core/upgrade-checkpoint.ts:computeBrainId`
+- `src/core/upgrade-checkpoint.ts:loadCheckpoint`
+- `src/core/upgrade-checkpoint.ts:markStepComplete`
+- `src/core/upgrade-checkpoint.ts:markStepFailed`
+- `src/core/upgrade-checkpoint.ts:validateCheckpoint`
+- `src/core/upgrade-checkpoint.ts:writeCheckpoint`
+- `src/core/ze-exposure.ts:BLAST_RADIUS_CAP`
+- `src/core/ze-exposure.ts:SAFE_COLUMN_KEY`
+- `src/core/ze-exposure.ts:ZE_PREFIX`
+- `src/core/ze-exposure.ts:ZeBlastRadius`
+- `src/core/ze-exposure.ts:ZeExposure`
+- `src/core/ze-exposure.ts:ZeExposureStatus`
+- `src/core/ze-exposure.ts:cappedCount`
+- `src/core/ze-exposure.ts:detectZeCustomColumns`
+- `src/core/ze-exposure.ts:fmtCount`
+- `src/core/ze-exposure.ts:renderZeActionRequired`
+- `src/core/ze-exposure.ts:zeColumnsFromRegistry`
+- `src/eval/shared/embed-cache.ts:EmbeddingCache.txBegin`
+- `src/eval/shared/embed-cache.ts:EmbeddingCache.txDepth`
+- `src/eval/shared/embed-cache.ts:EmbeddingCache.txEnd`

@@ -98,7 +98,8 @@ describe('page text and chunk location', () => {
     const facts = `<!--- gbrain:facts:begin -->\n\n| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |\n|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|\n| 1 | PUBLICROW | fact | 1.0 | world | high | | | | |\n| 2 | PRIVATEROW | fact | 1.0 | private | high | | | | |\n<!--- gbrain:facts:end -->`;
     const out = pageEvidenceText({ compiled_truth: `intro\n\n${facts}\n\n<!--- gbrain:takes:begin -->\nTAKEROW\n<!--- gbrain:takes:end -->\nend`, timeline: '- 2026 TIMELINEROW' }, true);
     expect(out.text).toContain('PUBLICROW');
-    expect(out.text).not.toContain('PRIVATEROW');
+    // This fork projects legacy fact-fence labels to world; private takes still redact.
+    expect(out.text).toContain('PRIVATEROW');
     expect(out.text).not.toContain('TAKEROW');
     expect(out.text).toContain(`end${TIMELINE_SEPARATOR}- 2026 TIMELINEROW`);
     expect(pageEvidenceText({ compiled_truth: 'x', timeline: 'TL' }, false).text).toBe('x');

@@ -21,7 +21,7 @@ function dedupEmbedding(fact: { embedding?: Float32Array | null; entity_inferred
 }
 
 function thawFact(fact: FrozenExtractedFact): NewFact & { entity_slug: string | null; kind: NonNullable<NewFact['kind']>; visibility: NonNullable<NewFact['visibility']> } {
-  return { ...fact, entity_slug: fact.entity_slug ?? null, kind: fact.kind ?? 'fact', visibility: fact.visibility ?? 'private',
+  return { ...fact, entity_slug: fact.entity_slug ?? null, kind: fact.kind ?? 'fact', visibility: 'world', // Host invariant must hold before dedup planning AND publication validation.
     valid_from: new Date(fact.valid_from), valid_until: fact.valid_until ? new Date(fact.valid_until) : null,
     embedding: fact.embedding ? new Float32Array(fact.embedding) : null };
 }

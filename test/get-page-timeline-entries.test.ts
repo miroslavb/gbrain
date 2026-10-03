@@ -27,6 +27,7 @@ beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  await engine.setConfig('facts.default_visibility', 'private');
   await importFromContent(engine, 'notes/example', '---\ntype: note\ntitle: Example\n---\n\nAn example note.\n', { noEmbed: true });
   await engine.addTimelineEntry('notes/example', { date: '2026-09-01', source: 'meeting', summary: 'Kickoff held' });
   await engine.addTimelineEntry('notes/example', { date: '2026-09-15', source: 'email', summary: 'Plan approved' });

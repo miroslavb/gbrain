@@ -314,16 +314,16 @@ for (const kind of ['pglite', 'postgres'] as const) {
     });
 
     test('withdrawals recorded during embedding remain unembedded', async () => {
-      await seed('withdrawn claim', { visibility: 'private' });
+      await seed('withdrawn claim', { visibility: 'world' });
       await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
       __setEmbedTransportForTests(async ({ values }) => {
         await engine.executeRaw(`INSERT INTO fact_withdrawals(source_id,visibility,fact_hash)
-          VALUES($1,'private',gbrain_fact_fingerprint('withdrawn claim'))`, [sourceId]);
+          VALUES($1,'world',gbrain_fact_fingerprint('withdrawn claim'))`, [sourceId]);
         return { values, usage: { tokens: 1 }, warnings: [], embeddings: [Array(1536).fill(0.25)] };
       });
       const result = await embedStaleFacts(engine, approved);
       expect(result).toMatchObject({ embedded: 0, failures: 1, remaining: 0 });
-      expect((await state())[0]).toMatchObject({ visibility: 'private', embedding: null });
+      expect((await state())[0]).toMatchObject({ visibility: 'world', embedding: null });
     });
 
     test('missing scope, missing spend consent, and conflicting modes are rejected', async () => {

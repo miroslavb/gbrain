@@ -169,6 +169,7 @@ for (const backend of backends) describe(`search transport safety matrix (${back
       await engine.connect(config);
       await engine.initSchema();
     }
+    await engine.setConfig('facts.default_visibility', 'private');
     config = { ...config, embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: 1536 };
     mkdirSync(join(home, '.gbrain'));
     writeFileSync(join(home, '.gbrain/config.json'), JSON.stringify(config));

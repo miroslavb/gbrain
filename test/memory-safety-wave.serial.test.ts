@@ -86,6 +86,7 @@ test('sync, remember, withdraw, metadata repair, migration, export and HTTP MCP 
       database = { engine: 'postgres', database_url: url.toString() };
     }
     await runSchemaTransition(engine, dimensions);
+    await engine.setConfig('facts.default_visibility', 'private');
     await engine.setConfig('embedding_model', originalModel);
     await engine.setConfig('embedding_dimensions', String(dimensions));
     resetGateway();

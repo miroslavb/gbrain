@@ -33,6 +33,7 @@ beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  await engine.setConfig('facts.default_visibility', 'private');
   await seedFederatedLinkFixture(engine);
 }, 60_000);
 

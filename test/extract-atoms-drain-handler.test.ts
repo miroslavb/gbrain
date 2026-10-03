@@ -96,7 +96,7 @@ describe('extract-atoms-drain handler', () => {
     signal, deadlineAtMs, shutdownSignal: new AbortController().signal,
   }) as unknown as MinionJobContext;
   const seedEligiblePage = (slug: string) => engine.putPage(slug, {
-    type: 'note', title: slug, compiled_truth: 'A durable decision recorded in prose. '.repeat(20),
+    type: 'note', title: slug, frontmatter: { atom_extract: true }, compiled_truth: 'A durable decision recorded in prose. '.repeat(20),
   } as never, { sourceId: 'default' });
   const lockRows = () => engine.executeRaw(`SELECT id FROM gbrain_cycle_locks WHERE id = 'gbrain-cycle:default'`);
 

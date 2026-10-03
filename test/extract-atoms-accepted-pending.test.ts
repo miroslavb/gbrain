@@ -28,7 +28,7 @@ test('#5601: extract_atoms with a slow owner reports accepted-pending, not faile
   const root = join(home, 'repo'); mkdirSync(root);
   await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
   await engine.executeRaw('INSERT INTO sources(id,name,local_path) VALUES($1,$1,$2)', [sourceId, root]);
-  await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'A durable project record. '.repeat(40) }, { sourceId });
+  await engine.putPage('notes/2026-01-01-example', { type: 'source', title: 'Example', compiled_truth: 'Atlas measures progress against explicit exit criteria. '.repeat(20) }, { sourceId });
   const page = (await engine.getPage('notes/2026-01-01-example', { sourceId }))!;
   await registerLocalWriter(engine, 'cli');
   const binding = await claimWorktree(engine, sourceId, root);
@@ -39,7 +39,7 @@ test('#5601: extract_atoms with a slow owner reports accepted-pending, not faile
     calls++;
     // The owner stalls after admission: the batch is accepted and stays queued.
     await engine.executeRaw("UPDATE persistence_worktrees SET state='draining' WHERE id=$1::uuid", [binding.worktree_id]);
-    return { text: '[{"title":"Measured progress","atom_type":"insight","body":"Measure progress against clear exit criteria."}]',
+    return { text: '[{"title":"Measured progress","atom_type":"insight","body":"Atlas measures progress against explicit exit criteria.","source_quote":"Atlas measures progress against explicit exit criteria."}]',
       blocks: [], stopReason: 'end', usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
   };
   const run = () => runPhaseExtractAtoms(engine, { sourceId, _chat: chat, _transcripts: [], _pages: [{ slug: page.slug, content: page.compiled_truth, contentHash: page.content_hash! }] });

@@ -169,7 +169,7 @@
             "audience_reasons": [
               "no shared declaration; 0 non-automation client(s) active in 30d"
             ],
-            "backstop_visibility": "private",
+            "backstop_visibility": "world",
             "counters_note": "local, append-only, loss-tolerant observability over the last 7d — never a source of truth",
             "instruction_visibility": "world",
             "mode": "off",
@@ -224,7 +224,7 @@
           "category": "brain",
           "details": {
             "kinds": [],
-            "schema_version": 1
+            "schema_version": 2
           },
           "message": "no extractions in last 7 days",
           "name": "extract_health",
@@ -241,7 +241,7 @@
           "details": {
             "backlog": 0,
             "known_approximation": "page backlog only; transcript corpus not counted",
-            "pack_declares_phase": false
+            "pack_declares_phase": true
           },
           "message": "no pages awaiting atom extraction",
           "name": "extract_atoms_backlog",
@@ -381,19 +381,19 @@
         },
         {
           "category": "ops",
-          "message": "RLS enabled on 100/100 public tables",
+          "message": "RLS enabled on 102/102 public tables",
           "name": "rls",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "Version 189 (latest: 189)",
+          "message": "Version 197 (latest: 197)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "816 column(s) verified against live schema",
+          "message": "831 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -443,6 +443,69 @@
           "category": "brain",
           "message": "Brain score 100/100",
           "name": "brain_score",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "curated_excluded_pages": 0,
+            "curated_islands": 0,
+            "curated_link_endpoints": 0,
+            "curated_no_inbound": 0,
+            "curated_pages": 0,
+            "curated_timeline_pages": 0,
+            "session_islands": 0,
+            "session_pages": 0,
+            "session_parents": 0,
+            "session_parents_entity_eligible": 0,
+            "session_parents_entity_hinted": 0,
+            "session_parents_entity_linked": 0,
+            "typed_curated_pages": 0
+          },
+          "message": "Canonical curated graph: 0/0 islands (0%), 0/0 without inbound links (0%); 0/0 typed generated/raw page(s) excluded.",
+          "name": "curated_graph_health",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "curated_excluded_pages": 0,
+            "curated_islands": 0,
+            "curated_link_endpoints": 0,
+            "curated_no_inbound": 0,
+            "curated_pages": 0,
+            "curated_timeline_pages": 0,
+            "session_islands": 0,
+            "session_pages": 0,
+            "session_parents": 0,
+            "session_parents_entity_eligible": 0,
+            "session_parents_entity_hinted": 0,
+            "session_parents_entity_linked": 0,
+            "typed_curated_pages": 0
+          },
+          "message": "Session archive: 0/0 islands (0%); excluded from brain-score graph denominators.",
+          "name": "session_archive_isolation",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "curated_excluded_pages": 0,
+            "curated_islands": 0,
+            "curated_link_endpoints": 0,
+            "curated_no_inbound": 0,
+            "curated_pages": 0,
+            "curated_timeline_pages": 0,
+            "session_islands": 0,
+            "session_pages": 0,
+            "session_parents": 0,
+            "session_parents_entity_eligible": 0,
+            "session_parents_entity_hinted": 0,
+            "session_parents_entity_linked": 0,
+            "typed_curated_pages": 0
+          },
+          "message": "Eligible parent-session curated links: 0/0 (0%); 0 raw parent session(s), 0 with independently resolvable project metadata.",
+          "name": "parent_session_entity_coverage",
           "status": "ok"
         },
         {
@@ -816,6 +879,14 @@
         },
         {
           "category": "brain",
+          "details": {
+            "accepted": 0,
+            "accepted_by_reason": {},
+            "actionable": 0,
+            "active_embedding_column": "embedding",
+            "inventory": [],
+            "total": 0
+          },
           "message": "No flagged pages",
           "name": "flagged_pages",
           "status": "ok"
@@ -990,7 +1061,7 @@
         },
         {
           "category": "brain",
-          "message": "All code-page chunks carry symbol metadata",
+          "message": "All active code-page chunks carry language metadata; verify known definitions separately",
           "name": "code_chunk_metadata",
           "status": "ok"
         },
@@ -1053,7 +1124,8 @@
             "prefixes": [
               "test/",
               "attachments/",
-              ".raw/"
+              ".raw/",
+              "docs/inbox/"
             ]
           },
           "message": "No pages hidden by search-exclude policy.",
@@ -1232,13 +1304,13 @@
         },
         {
           "category": "meta",
-          "message": "Active pack gbrain-base-v2@1.2.0+1a2aee67 is current (no successor declared)",
+          "message": "Active pack gbrain-base-v2@1.2.1+99de63c4 is current (no successor declared)",
           "name": "pack_upgrade_available",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "0 distinct typed values (pack declares 19)",
+          "message": "0 taxonomy-relevant types; pack declares 20",
           "name": "type_proliferation",
           "status": "ok"
         },

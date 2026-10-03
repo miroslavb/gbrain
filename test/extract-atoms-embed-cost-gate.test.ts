@@ -12,7 +12,7 @@
  * fix its own error message advertised did nothing here.
  *
  * Pure-helper cases first; the final describe is a PGLite round-trip that
- * pins the actual defect (an unpriced embed model no longer zeroes the run).
+ * pins preflight refusal before any spend and recovery through explicit pricing overrides.
  * No model calls anywhere — chat is stubbed via the `_chat` seam and the embed
  * transport via __setEmbedTransportForTests.
  */
@@ -47,7 +47,7 @@ describe('resolveExtractAtomsCostGate', () => {
     expect(resolveExtractAtomsCostGate(FREE_CHAT, 'ollama:nomic-embed-text')).toEqual({ enforceCap: true });
   });
 
-  test('unpriced chat model disables the cap and names the chat model', () => {
+  test('unpriced chat model cannot enforce a cap and names the chat model', () => {
     expect(resolveExtractAtomsCostGate('groq:llama-3.3-70b', 'openai:text-embedding-3-large')).toEqual({
       enforceCap: false,
       unpricedModel: 'groq:llama-3.3-70b',
@@ -55,7 +55,7 @@ describe('resolveExtractAtomsCostGate', () => {
     });
   });
 
-  test('free local chat + UNPRICED embed disables the cap and names the embed model (the defect)', () => {
+  test('free local chat + UNPRICED embed cannot enforce a cap and names the embed model (the defect)', () => {
     expect(resolveExtractAtomsCostGate(FREE_CHAT, UNPRICED_EMBED)).toEqual({
       enforceCap: false,
       unpricedModel: UNPRICED_EMBED,
@@ -74,44 +74,13 @@ describe('resolveExtractAtomsCostGate', () => {
     expect(resolveExtractAtomsCostGate(FREE_CHAT, UNPRICED_EMBED, overrides)).toEqual({ enforceCap: true });
   });
 
-  // An operator who SET `cycle.extract_atoms.budget_usd` asked for a ceiling.
-  // Dropping the cap because the embed route is unpriced silently turns that
-  // ceiling off (Codex P1); the cap stays and the unpriced embed bills at $0.
-  test('an explicit operator budget keeps the cap on over an unpriced embed route, priced at $0', () => {
-    expect(resolveExtractAtomsCostGate(FREE_CHAT, UNPRICED_EMBED, undefined, { explicitBudget: true })).toEqual({
-      enforceCap: true,
-      zeroPricedEmbedModel: UNPRICED_EMBED,
-      pricingOverrides: { [UNPRICED_EMBED.toLowerCase()]: { input: 0, output: 0 } },
-    });
+  test.each([false, true])('unknown embed price blocks both default and explicit budget (explicit=%s)', (explicitBudget) => {
+    const overrides = parsePricingOverrides('{"litellm:gpt-4o":{"input":2.5,"output":10}}')!;
+    expect(resolveExtractAtomsCostGate(FREE_CHAT, UNPRICED_EMBED, overrides, { explicitBudget }))
+      .toEqual({ enforceCap: false, unpricedModel: UNPRICED_EMBED, unpricedKind: 'embed' });
+    expect(overrides[UNPRICED_EMBED]).toBeUndefined();
   });
 
-  test('the $0 embed row merges into existing operator overrides without clobbering them', () => {
-    const overrides = parsePricingOverrides(JSON.stringify({ 'litellm:gpt-4o': { input: 2.5, output: 10 } }))!;
-    const gate = resolveExtractAtomsCostGate(FREE_CHAT, UNPRICED_EMBED, overrides, { explicitBudget: true });
-    expect(gate.enforceCap).toBe(true);
-    expect(gate.pricingOverrides).toEqual({
-      'litellm:gpt-4o': { input: 2.5, output: 10 },
-      [UNPRICED_EMBED.toLowerCase()]: { input: 0, output: 0 },
-    });
-  });
-
-  test('an explicit budget never zero-prices an unpriced CHAT model — the cap still drops', () => {
-    // The chat model is the billable call the cap exists for; assuming $0 for
-    // it would enforce a fiction. Only the embed route gets the $0 treatment.
-    expect(resolveExtractAtomsCostGate('groq:llama-3.3-70b', UNPRICED_EMBED, undefined, { explicitBudget: true })).toEqual({
-      enforceCap: false,
-      unpricedModel: 'groq:llama-3.3-70b',
-      unpricedKind: 'chat',
-    });
-  });
-
-  test('without an explicit budget the unpriced embed still drops the (default) cap', () => {
-    expect(resolveExtractAtomsCostGate(FREE_CHAT, UNPRICED_EMBED, undefined, { explicitBudget: false })).toEqual({
-      enforceCap: false,
-      unpricedModel: UNPRICED_EMBED,
-      unpricedKind: 'embed',
-    });
-  });
 });
 
 describe('extract_atoms with a $0 chat model and an unpriced embedding model (PGLite round-trip)', () => {
@@ -148,29 +117,33 @@ describe('extract_atoms with a $0 chat model and an unpriced embedding model (PG
     await engine.unsetConfig('cycle.extract_atoms.budget_usd');
   });
 
-  const chat = async (_o: ChatOpts): Promise<ChatResult> => ({
-    text: `[{"title":"Embedded atom","atom_type":"insight","body":"Local inference costs electricity, not tokens."}]`,
+  let chatCalls = 0;
+  const EVIDENCE = 'Atlas runs inference on local hardware.';
+  const chat = async (_o: ChatOpts): Promise<ChatResult> => { chatCalls++; return ({
+    text: JSON.stringify([{title:"Embedded atom",atom_type:"insight",body:EVIDENCE,source_quote:EVIDENCE}]),
     blocks: [{ type: 'text', text: '' }],
     stopReason: 'end',
     usage: { input_tokens: 500, output_tokens: 200, cache_read_tokens: 0, cache_creation_tokens: 0 },
     model: FREE_CHAT,
     providerId: 'llama-server',
-  });
+  }); };
 
-  test('the unpriced embed no longer zeroes the run: 1 atom, budget not exhausted', async () => {
+  test('unpriced embed blocks before spending or publication', async () => {
     expect(isAvailable('embedding')).toBe(true);
+    const beforeCalls = chatCalls;
     const result = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: '/fake/meeting-a.txt', content: 'transcript content a', contentHash: 'a1b2c3d4e5f60718' }],
+      _transcripts: [{ filePath: '/fake/meeting-a.txt', content: EVIDENCE, contentHash: 'a1b2c3d4e5f60718' }],
       _pages: [],
       _chat: chat,
     });
-    expect(result.status).toBe('ok');
-    expect(result.details?.atoms_extracted).toBe(1);
-    expect(result.details?.budget_exhausted).toBe(false);
-    expect(result.details?.transcripts_skipped_budget).toBe(0);
+    expect(result.status).toBe('warn');
+    expect(result.details?.atoms_extracted).toBe(0);
+    expect(result.details?.pricing_blocked).toBe(true);
+    expect(result.details?.unpriced_models).toContain(UNPRICED_EMBED);
+    expect(chatCalls).toBe(beforeCalls);
   }, 60000);
 
-  test('an explicit cycle.extract_atoms.budget_usd keeps the cap enforced over the unpriced embed (Codex P1)', async () => {
+  test('an explicit budget never fabricates a zero price', async () => {
     await engine.setConfig('cycle.extract_atoms.budget_usd', '0.05');
     const stderr: string[] = [];
     const savedError = console.error;
@@ -178,29 +151,25 @@ describe('extract_atoms with a $0 chat model and an unpriced embedding model (PG
     let result;
     try {
       result = await runPhaseExtractAtoms(engine, {
-        _transcripts: [{ filePath: '/fake/meeting-c.txt', content: 'transcript content c', contentHash: 'c1b2c3d4e5f60718' }],
+        _transcripts: [{ filePath: '/fake/meeting-c.txt', content: EVIDENCE, contentHash: 'c1b2c3d4e5f60718' }],
         _pages: [],
         _chat: chat,
       });
     } finally {
       console.error = savedError;
     }
-    expect(result.status).toBe('ok');
-    expect(result.details?.atoms_extracted).toBe(1);
-    expect(result.details?.budget_exhausted).toBe(false);
+    expect(result.status).toBe('warn');
+    expect(result.details?.atoms_extracted).toBe(0);
+    expect(result.details?.pricing_blocked).toBe(true);
     expect(result.details?.budget_usd).toBe(0.05);
-    const joined = stderr.join('\n');
-    // The cap was NOT dropped — the operator asked for one.
-    expect(joined).not.toContain('running without a cost gate');
-    // ...and the run says so, naming the embed model it bills at $0.
-    expect(joined).toContain(UNPRICED_EMBED);
-    expect(joined).toContain('$0');
+    expect(stderr.join('\n')).toContain(UNPRICED_EMBED);
+    expect(stderr.join('\n')).not.toContain('$0');
   }, 60000);
 
   test('with a $0 pricing override for the embed model the cap stays on and the run still extracts', async () => {
     await engine.setConfig('pricing.overrides', JSON.stringify({ [UNPRICED_EMBED]: 0 }));
     const result = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: '/fake/meeting-b.txt', content: 'transcript content b', contentHash: 'b1b2c3d4e5f60718' }],
+      _transcripts: [{ filePath: '/fake/meeting-b.txt', content: EVIDENCE, contentHash: 'b1b2c3d4e5f60718' }],
       _pages: [],
       _chat: chat,
     });

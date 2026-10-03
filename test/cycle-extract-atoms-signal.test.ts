@@ -50,7 +50,7 @@ const atomsAnswer = (): ChatResult => {
 async function cycleWithSignal(signal: AbortSignal, onFirstCall: () => void): Promise<{ calls: number; failCounts: number[] }> {
   for (const slug of ['notes/xa-one', 'notes/xa-two', 'notes/xa-three']) {
     await engine.putPage(slug, {
-      type: 'note', title: slug, compiled_truth: 'A durable decision recorded in prose. '.repeat(20),
+      type: 'note', title: slug, frontmatter: { atom_extract: true }, compiled_truth: 'A durable decision recorded in prose. '.repeat(20),
     } as never, { sourceId: 'default' });
   }
   let calls = 0;

@@ -70,6 +70,41 @@ function recordedReconcilePath(root: string, page: { slug: string; source_path?:
   const recorded = recordedPathFromFileUri(page.source_uri, root);
   return recorded ? join(root, recorded) : null;
 }
+/** Verify every matching basename in bounded pages; unrelated directories are not collisions.
+ * The total scan ceiling still fails closed. A LIMIT on the first 101 rows alone
+ * rejected ordinary repeated filenames and could not tell them from true aliases.
+ */
+async function assertUniqueReconcileOrigin(engine: BrainEngine, sourceId: string, pageId: number,
+  root: string, path: string, mode: 'git-root' | 'source-root', recordedUri: string | null | undefined): Promise<void> {
+  const fileName = basename(path), uriName = pathToFileURL(path).pathname.split('/').pop()!;
+  const canonicalPath = realpathSync(path);
+  let afterId = 0, checked = 0;
+  for (;;) {
+    const candidates = await engine.executeRaw<{ id: number; slug: string; source_path: string | null; source_uri: string | null }>(
+      `SELECT id,slug,source_path,source_uri FROM pages WHERE source_id=$1 AND id<>$2 AND id>$8 AND (
+        regexp_replace(CASE WHEN $7::boolean THEN replace(btrim(source_path),chr(92),'/') ELSE btrim(source_path) END,'^.*/','')=$3
+        OR source_uri LIKE 'file:%' AND (right(source_uri,length($4::text))=$4 OR right(source_uri,length($5::text))=$5)
+        OR source_uri=$6) ORDER BY id LIMIT 100`,
+      [sourceId, pageId, fileName, `/${fileName}`, `/${uriName}`, recordedUri ?? null, process.platform === 'win32', afterId]);
+    if (!candidates.length) return;
+    checked += candidates.length;
+    if (checked > 10_000) throw new OperationError('source_changed', 'Too many candidate page origins to verify this exact file safely.',
+      'Review the recorded source paths before retrying this exact-page reconciliation.');
+    for (const candidate of candidates) {
+      const candidatePath = recordedReconcilePath(root, candidate, mode);
+      if (!candidatePath || !isWriteTargetContained(candidatePath, root)) continue;
+      let canonicalCandidate: string;
+      try { canonicalCandidate = realpathSync(candidatePath); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw new OperationError('source_changed', 'A candidate canonical file origin could not be verified.');
+      }
+      if (canonicalCandidate === canonicalPath) throw new OperationError('source_changed', 'Several pages claim the recorded canonical file.');
+    }
+    afterId = Number(candidates[candidates.length - 1].id);
+    if (candidates.length < 100) return;
+  }
+}
 export async function readReconcileState(engine: BrainEngine, sourceId: string, slug: string, assessmentAt = new Date().toISOString()): Promise<ReconcileState> {
   const binding = await getWorktreeBinding(engine, sourceId);
   if (!binding?.local_path || binding.owner_host_id !== localHostId() || binding.state !== 'active') {
@@ -101,27 +136,8 @@ export async function readReconcileState(engine: BrainEngine, sourceId: string, 
   if (size > Math.min(limits.principalIntentBytes, limits.brainIntentBytes, limits.worktreeRecoveryBytes)) {
     throw new OperationError('request_too_large', 'The canonical file exceeds reconciliation capacity.');
   }
-  const fileName = basename(path), uriName = pathToFileURL(path).pathname.split('/').pop()!;
-  const candidates = await engine.executeRaw<{ slug: string; source_path: string | null; source_uri: string | null }>(
-    `SELECT slug,source_path,source_uri FROM pages WHERE source_id=$1 AND id<>$2 AND (
-      regexp_replace(CASE WHEN $7::boolean THEN replace(btrim(source_path),chr(92),'/') ELSE btrim(source_path) END,'^.*/','')=$3
-      OR source_uri LIKE 'file:%' AND (right(source_uri,length($4::text))=$4 OR right(source_uri,length($5::text))=$5)
-      OR source_uri=$6) ORDER BY id LIMIT 101`,
-    [sourceId, snapshot.page.id, fileName, `/${fileName}`, `/${uriName}`, recorded ? snapshot.page.source_uri : null, process.platform === 'win32']);
-  if (candidates.length > 100) throw new OperationError('source_changed', 'Too many candidate page origins to verify this exact file safely.',
-    'Review the recorded source paths before retrying this exact-page reconciliation.');
-  const canonicalPath = realpathSync(path);
-  for (const candidate of candidates) {
-    const candidatePath = recordedReconcilePath(root, candidate, mode);
-    if (!candidatePath || !isWriteTargetContained(candidatePath, root)) continue;
-    let canonicalCandidate: string;
-    try { canonicalCandidate = realpathSync(candidatePath); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      throw new OperationError('source_changed', 'A candidate canonical file origin could not be verified.');
-    }
-    if (canonicalCandidate === canonicalPath) throw new OperationError('source_changed', 'Several pages claim the recorded canonical file.');
-  }
+  await assertUniqueReconcileOrigin(engine, sourceId, snapshot.page.id, root, path, mode,
+    recorded ? snapshot.page.source_uri : null);
   const raw = readFileSync(path), text = raw.toString('utf8');
   if (!Buffer.from(text).equals(raw)) throw new OperationError('invalid_params', 'The canonical file must contain valid UTF-8.');
   try { parseDataFrontmatter(text); }
@@ -132,7 +148,7 @@ export async function readReconcileState(engine: BrainEngine, sourceId: string, 
     throw new OperationError('invalid_params', 'Canonical file metadata cannot be parsed losslessly; repair its syntax before previewing.');
   }
   const pins: ReconcilePins = { brain_id: brain.brain_id, source_id: sourceId, source_incarnation: snapshot.sourceIncarnation, slug,
-    page_id: snapshot.page.id, worktree_id: binding.worktree_id, binding_digest: digest({ binding, root, path: canonicalPath }), owner_epoch: String(binding.owner_epoch),
+    page_id: snapshot.page.id, worktree_id: binding.worktree_id, binding_digest: digest({ binding, root, path: realpathSync(path) }), owner_epoch: String(binding.owner_epoch),
     revision: snapshot.revision, raw_file_hash: sha256(raw), relative_path: relative(root, path),
     policy_digest: await reconcilePolicyDigest(engine, sourceId), withdrawals_digest: digest(snapshot.withdrawals), assessment_at: assessmentAt };
   // Match the ordinary write guard: compare canonical host visibility and

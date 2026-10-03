@@ -26,9 +26,11 @@ import { performManagedSync } from '../src/core/persistence/sync-run.ts';
 import { loadSyncFailures } from '../src/core/sync-failure-ledger.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
+
+const fixtureClaims: Record<string,string> = {"Patience compounds": "The Atlas team waits for three completed reviews before expanding a project.", "Hire slowly": "The Atlas team interviews three candidates before making a hiring decision.", "Patience compounds over years": "The Atlas team reviews progress over several years before expanding a project."};
 import { withEnv } from './helpers/with-env.ts';
 
-const note = (text: string) => `---\ntitle: Example note\ntype: source\n---\n${`${text} `.repeat(40).trim()}\n`;
+const note = (text: string) => `---\ntitle: Example note\ntype: source\n---\n${`${text} `.repeat(40).trim()}\n${Object.values(fixtureClaims).join(' ')}\n`;
 
 for (const kind of testBackends()) {
   describe(`#5770 with #5777 (${kind})`, () => {
@@ -69,7 +71,7 @@ for (const kind of testBackends()) {
       let calls = 0;
       const chat = async (): Promise<ChatResult> => {
         calls++;
-        return { text: JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: `Body for ${title}.` }))),
+        return { text: JSON.stringify(titles.map(title => ({ title, atom_type: 'insight', body: fixtureClaims[title], source_quote: fixtureClaims[title] }))),
           blocks: [], stopReason: 'end', usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
           model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
       };

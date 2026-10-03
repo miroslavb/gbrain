@@ -57,7 +57,7 @@ afterAll(() => {
 });
 
 const GOOD_JSON =
-  '[{"claim_text":"Acme doubles ARR by Q4","kind":"bet","holder":"brain","weight":0.7}]';
+  '[{"claim_text":"Acme doubles ARR by Q4","kind":"bet","holder":"brain","weight":0.7,"evidence_span":"I bet Acme doubles ARR by Q4."}]';
 
 function chatResult(text: string, model: string): ChatResult {
   return {
@@ -76,6 +76,8 @@ function buildMockEngine(): { engine: BrainEngine; captured: CapturedSql[] } {
   const captured: CapturedSql[] = [];
   const engine = {
     kind: 'pglite',
+    async getConfig(key: string) { return key === 'cycle.propose_takes.enabled' ? 'true' : null; },
+    async transaction<T>(fn: (tx: BrainEngine) => Promise<T>): Promise<T> { return fn(this as unknown as BrainEngine); },
     async executeRaw<T>(sql: string, params?: unknown[]): Promise<T[]> {
       captured.push({ sql, params: params ?? [] });
       if (sql.includes('SELECT slug, source_id, compiled_truth')) {
@@ -149,8 +151,8 @@ describe('runPhaseProposeTakes model_id provenance (#4737)', () => {
       (c) => c.sql.includes('INSERT INTO take_proposals') && !c.sql.includes("'rejected'"),
     );
     expect(inserts).toHaveLength(1);
-    expect(inserts[0]!.params[11]).toBe(CONFIGURED_MODEL);
-    expect(inserts[0]!.params[11]).not.toBe('');
+    expect(inserts[0]!.params[12]).toBe(CONFIGURED_MODEL);
+    expect(inserts[0]!.params[12]).not.toBe('');
   });
 
   test('default extractor: model_id comes from the response, not the configured model', async () => {
@@ -165,15 +167,15 @@ describe('runPhaseProposeTakes model_id provenance (#4737)', () => {
       (c) => c.sql.includes('INSERT INTO take_proposals') && !c.sql.includes("'rejected'"),
     );
     expect(inserts).toHaveLength(1);
-    // Param 12 (index 11) is model_id.
-    expect(inserts[0]!.params[11]).toBe(SERVED_MODEL);
-    expect(inserts[0]!.params[11]).not.toBe(CONFIGURED_MODEL);
+    // Param 13 (index 12) is model_id.
+    expect(inserts[0]!.params[12]).toBe(SERVED_MODEL);
+    expect(inserts[0]!.params[12]).not.toBe(CONFIGURED_MODEL);
   });
 
   test('injected extractor without served_model: requested-model fallback unchanged', async () => {
     const { engine, captured } = buildMockEngine();
     const extractor: ProposeTakesExtractor = async () => [
-      { claim_text: 'one good claim', kind: 'take', holder: 'brain', weight: 0.6 },
+      { claim_text: 'Acme doubles ARR by Q4', kind: 'bet', holder: 'brain', weight: 0.6, evidence_span: 'I bet Acme doubles ARR by Q4.' },
     ];
     await runPhaseProposeTakes(buildCtx(engine), { extractor, model: 'test:injected-model' });
 
@@ -181,6 +183,6 @@ describe('runPhaseProposeTakes model_id provenance (#4737)', () => {
       (c) => c.sql.includes('INSERT INTO take_proposals') && !c.sql.includes("'rejected'"),
     );
     expect(inserts).toHaveLength(1);
-    expect(inserts[0]!.params[11]).toBe('test:injected-model');
+    expect(inserts[0]!.params[12]).toBe('test:injected-model');
   });
 });

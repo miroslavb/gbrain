@@ -313,6 +313,8 @@ describeBoth('Engine parity — mergeOntologyFact matrix (D7)', () => {
     for (const eng of [pgEngine, pgliteEngine]) {
       await eng.mergeOntologyFact({ entitySlug: VIS, dimension: 'role', value: 'private-founder', source: 'notes/p', validFrom: '2026-01-01T00:00:00.000Z', visibility: 'private' });
       await eng.mergeOntologyFact({ entitySlug: VIS, dimension: 'role', value: 'world-advisor', source: 'notes/w', validFrom: '2025-01-01T00:00:00.000Z', visibility: 'world' });
+      // Install a legacy private observation: canonical new writes normalize to world.
+      await eng.executeRaw("UPDATE facts SET visibility = 'private' WHERE entity_slug = $1 AND fact LIKE '%private-founder%'", [VIS]);
       expect((await eng.getOntology(VIS, { sourceId: 'default', visibility: ['world'] })).map(r => r.value)).toEqual(['world-advisor']);
       expect((await eng.getOntology(VIS, { sourceId: 'default' })).map(r => r.value)).toEqual(['private-founder']);
       const conflicts = (all: Awaited<ReturnType<BrainEngine['findOntologyConflicts']>>) => all.filter(c => c.entity_slug === VIS);

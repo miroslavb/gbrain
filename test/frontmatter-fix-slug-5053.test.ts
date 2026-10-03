@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { writeBrainPage } from '../src/core/brain-writer.ts';
 
 // A NESTED_QUOTES error gives --fix something to repair, so the fixer runs.
@@ -22,7 +22,8 @@ let brain: string;
 beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), 'fm-5053-'));
   brain = join(scratch, 'brain');
-  mkdirSync(join(brain, '.git'), { recursive: true });
+  mkdirSync(brain, { recursive: true });
+  execFileSync('git', ['init', '-q', brain]);
   mkdirSync(join(brain, 'notes'), { recursive: true });
 });
 

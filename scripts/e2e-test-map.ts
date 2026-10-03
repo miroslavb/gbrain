@@ -15,6 +15,7 @@
 // No brace expansion, no ?, no [ ].
 
 const MIGRATION_WAVE_TESTS = [
+  "test/e2e/v0_30_3-fix-wave.test.ts",
   "test/e2e/migration-wave-budget-crash.test.ts",
   "test/e2e/migration-wave-healing-fence.test.ts",
   "test/e2e/migration-wave-intermediate-retrieval.test.ts",

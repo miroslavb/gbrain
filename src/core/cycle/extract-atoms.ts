@@ -1,3 +1,4 @@
+import { resolveExtractAtomsCostGate, resolveEmbedModelForCostGate } from './extract-atoms-cost-gate.ts';
 import { atomSlug } from './atom-slug.ts';
 // v0.41.2.1 — extract_atoms cycle phase, post-fix-wave rebuild.
 //
@@ -323,11 +324,9 @@ export async function resolveExtractAtomsBudgetPricingPolicy(
   const pricingOverrides = await loadPricingOverrides(engine);
   const unpricedModels = [...new Set([extractModel, validatorModel])]
     .filter((model) => !isModelPriceable(model, 'chat', pricingOverrides));
-  return {
-    pricingOverrides,
-    unpricedModels,
-    enforceCostCap: unpricedModels.length === 0,
-  };
+  const embedGate = resolveExtractAtomsCostGate(extractModel, resolveEmbedModelForCostGate(), pricingOverrides);
+  if (embedGate.unpricedModel && !unpricedModels.includes(embedGate.unpricedModel)) unpricedModels.push(embedGate.unpricedModel);
+  return { pricingOverrides, unpricedModels, enforceCostCap: unpricedModels.length === 0 };
 }
 
 interface ExtractedAtom {
@@ -1107,14 +1106,16 @@ export async function runPhaseExtractAtoms(
     validatorModel,
   );
   if (!budgetPricing.enforceCostCap) {
-    console.error(
-      `[extract_atoms] model(s) ${budgetPricing.unpricedModels.map((m) => `"${m}"`).join(', ')} ` +
-        `are not in the pricing maps; ` +
-        `running without a cost gate (a cap cannot be enforced on an unpriced model).`,
-    );
+    const warning = `Unpriced extraction route(s): ${budgetPricing.unpricedModels.join(', ')}. Configure pricing.overrides before retrying; budget remains enforced.`;
+    console.error(`[extract_atoms] ${warning}`);
+    return { phase: 'extract_atoms', status: 'warn', duration_ms: 0, summary: warning,
+      details: { atoms_extracted: 0, budget_exhausted: false, pricing_blocked: true,
+        unpriced_models: budgetPricing.unpricedModels, budget_usd: budgetCap,
+        transcripts_skipped_budget: transcripts.length, pages_skipped_budget: pages.length,
+        failures: [], warnings: [warning], source_id: sourceId } };
   }
   const budgetTracker = new BudgetTracker({
-    maxCostUsd: budgetPricing.enforceCostCap ? budgetCap : undefined,
+    maxCostUsd: budgetCap,
     label: 'cycle.extract_atoms',
     pricingOverrides: budgetPricing.pricingOverrides,
   });

@@ -150,8 +150,8 @@ describe('runPhaseConsolidate', () => {
       const vectors = [unitVec(), cosineVec(0.82), orthogonalVec()];
       for (let i = 0; i < vectors.length; i++) {
         await engine.executeRaw(
-          `INSERT INTO facts (source_id, entity_slug, fact, kind, source, valid_from, embedding, embedded_at)
-           VALUES ('default', $1, $2, 'fact', 'test', $3::timestamptz, $4::vector, $3::timestamptz)`,
+          `INSERT INTO facts (source_id, entity_slug, fact, kind, source, valid_from, embedding, embedded_at, embedding_model, embedded_text_hash)
+           VALUES ('default', $1, $2, 'fact', 'test', $3::timestamptz, $4::vector, $3::timestamptz, 'openai:text-embedding-3-large', md5($2))`,
           [slug, `${slug} fact ${i}`, oldDate(), vectors[i]],
         );
       }

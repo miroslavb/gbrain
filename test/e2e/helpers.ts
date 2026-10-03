@@ -115,7 +115,7 @@ export async function setupDB(options: { replayMigrations?: boolean } = {}): Pro
 
   // Re-seed config (initSchema inserts default config rows)
   await conn.unsafe(`
-    INSERT INTO config (key, value) VALUES ('schema_version', '1')
+    INSERT INTO config (key, value) VALUES ('schema_version', '1'), ('facts.default_visibility', 'world')
     ON CONFLICT (key) DO NOTHING
   `);
   for (const row of embeddingIdentity) {

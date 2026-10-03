@@ -66,13 +66,17 @@ const visibilityOf = async (engine: BrainEngine, slug: string) =>
   (await engine.executeRaw<{ v: string | null }>("SELECT frontmatter->>'visibility' AS v FROM pages WHERE slug=$1 AND source_id='default'", [slug]))[0]?.v ?? null;
 
 async function reset(engine: BrainEngine) {
+  await engine.setConfig('facts.default_visibility', 'private');
   await engine.executeRaw("DELETE FROM links"); await engine.executeRaw("DELETE FROM content_chunks"); await engine.executeRaw("DELETE FROM pages");
   await engine.executeRaw("DELETE FROM op_checkpoints WHERE op='repair'");
 }
 
 const stubChat = async (o: ChatOpts): Promise<ChatResult> => {
   const label = String(o.messages[0]?.content ?? '').split('\n')[0].replace('Source: ', '').replace(/[^a-z0-9]+/gi, ' ').trim();
-  return { text: JSON.stringify([{ title: `Insight from ${label}`, atom_type: 'insight', body: `Quokkaword insight distilled from ${label}.` }]),
+  const raw = String(o.messages[0]?.content ?? '');
+  const source = raw.match(/<transcript>\n([\s\S]*?)\n<\/transcript>/)?.[1] ?? '';
+  const quote = source.match(/^[^.!?]+[.!?]/)?.[0] ?? source.slice(0, 100);
+  return { text: JSON.stringify([{ title: `Insight from ${label}`, atom_type: 'insight', body: quote || `Quokkaword insight distilled from ${label}.`, source_quote: quote }]),
     blocks: [{ type: 'text', text: '' }], stopReason: 'end',
     usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-haiku-4-5', providerId: 'anthropic' };
 };
@@ -112,8 +116,8 @@ describe('#5525 extraction stamps the origin visibility on every atom (managed p
       const dir = mkdtempSync(join(home, 'managed-'));
       try {
         await withEnv({ GBRAIN_HOME: dir }, async () => {
-          await seed(engine, 'notes/managed-world', 'note', {}, 'A public project record. '.repeat(20));
-          await seed(engine, 'notes/managed-private', 'note', { visibility: 'private' }, 'A private project record. '.repeat(20));
+          await seed(engine, 'notes/managed-world', 'note', {}, 'Atlas publishes planning records. '.repeat(20));
+          await seed(engine, 'notes/managed-private', 'note', { visibility: 'private' }, 'Atlas keeps restricted planning records. '.repeat(20));
           await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
           const items = await Promise.all(['notes/managed-world', 'notes/managed-private'].map(async slug => {
             const p = (await engine.getPage(slug, { sourceId: 'default' }))!; return { slug, content: p.compiled_truth, contentHash: p.content_hash! };

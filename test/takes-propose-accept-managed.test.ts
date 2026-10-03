@@ -7,6 +7,7 @@
  * and the proposal is stamped accepted.
  */
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
@@ -19,11 +20,15 @@ import { put } from './helpers/wave-fixture.ts';
 import { testBackends } from './helpers/test-backends.ts';
 
 async function insertProposal(engine: BrainEngine, slug: string, claim: string): Promise<number> {
+  const body = (await engine.readPageSnapshot(slug, { sourceId: 'default' }))!.page.compiled_truth;
+  const hash = createHash('sha256').update(body).digest('hex');
+  await engine.executeRaw(`INSERT INTO proposal_page_runs(source_id,page_slug,source_hash,prompt_version,proposal_run_id,model_id,status,proposal_count,evidence_span_count)
+    VALUES ('default',$1,$2,'test-v1',$3,'test-model','completed',1,1)`, [slug, hash, claim]);
   const rows = await engine.executeRaw<{ id: number }>(
     `INSERT INTO take_proposals (source_id, page_slug, content_hash, prompt_version, proposal_run_id,
-       claim_text, kind, holder, weight, domain, model_id, status)
-     VALUES ('default', $1, md5($2), 'test-v1', 'run-test', $2, 'bet', 'world', 0.7, NULL, 'test-model', 'pending')
-     RETURNING id`, [slug, claim]);
+       claim_text, kind, holder, weight, domain, model_id, status, evidence_span, source_hash)
+     VALUES ('default', $1, md5($2), 'test-v1', $2, $2, 'bet', 'world', 0.7, NULL, 'test-model', 'pending',$2,$3)
+     RETURNING id`, [slug, claim, hash]);
   return Number(rows[0]!.id);
 }
 
@@ -36,7 +41,7 @@ async function proposalStatus(engine: BrainEngine, id: number) {
 for (const backend of testBackends()) test(`${backend}: takes propose --accept promotes through the writer coordinator on a managed brain`, async () => {
   await managedBrain(async ({ engine, ctx, root }) => {
     const slug = 'companies/acme-example';
-    await put(ctx, slug, 'About acme-example.', 'company');
+    await put(ctx, slug, 'Acme ships the widget by Q3. Acme doubles revenue next year. Acme opens a second office. Acme hires a CFO. Acme signs a reseller.', 'company');
 
     const direct = await insertProposal(engine, slug, 'Acme ships the widget by Q3');
     const { rowNum } = await acceptProposal({ engine, brainDir: root, sourceId: 'default', config: ctx.config }, direct);
@@ -66,7 +71,7 @@ for (const backend of testBackends()) test(`${backend}: takes propose --accept p
 for (const backend of testBackends()) test(`${backend}: a stranded accepted claim resumes its own write request and never duplicates the take`, async () => {
   await managedBrain(async ({ engine, ctx, root }) => {
     const slug = 'companies/acme-example';
-    await put(ctx, slug, 'About acme-example.', 'company');
+    await put(ctx, slug, 'Acme ships the widget by Q3. Acme doubles revenue next year. Acme opens a second office. Acme hires a CFO. Acme signs a reseller.', 'company');
     const id = await insertProposal(engine, slug, 'Acme opens a second office');
     const first = await acceptProposal({ engine, brainDir: root, sourceId: 'default', config: ctx.config }, id);
     await engine.executeRaw('UPDATE take_proposals SET promoted_row_num = NULL WHERE id = $1', [id]);
@@ -84,7 +89,7 @@ for (const backend of testBackends()) test(`${backend}: a stranded accepted clai
 for (const backend of testBackends()) test(`${backend}: accept with a --dir that is not the canonical root refuses and leaves the proposal pending`, async () => {
   await managedBrain(async ({ engine, ctx, root }) => {
     const slug = 'companies/acme-example';
-    await put(ctx, slug, 'About acme-example.', 'company');
+    await put(ctx, slug, 'Acme ships the widget by Q3. Acme doubles revenue next year. Acme opens a second office. Acme hires a CFO. Acme signs a reseller.', 'company');
     const id = await insertProposal(engine, slug, 'Acme hires a CFO');
     const elsewhere = join(root, '..');
     await expect(acceptProposal({ engine, brainDir: elsewhere, localDir: elsewhere, sourceId: 'default', config: ctx.config }, id))
@@ -100,7 +105,7 @@ for (const backend of testBackends()) test(`${backend}: accept with a --dir that
 for (const backend of testBackends()) test(`${backend}: a claim whose request belongs to another writer settles from that request, and an in-flight one is never raced`, async () => {
   await managedBrain(async ({ engine, ctx, root }) => {
     const slug = 'companies/acme-example';
-    await put(ctx, slug, 'About acme-example.', 'company');
+    await put(ctx, slug, 'Acme ships the widget by Q3. Acme doubles revenue next year. Acme opens a second office. Acme hires a CFO. Acme signs a reseller.', 'company');
     const target = { engine, brainDir: root, sourceId: 'default', config: ctx.config };
     const id = await insertProposal(engine, slug, 'Acme signs a reseller');
     const first = await acceptProposal(target, id);

@@ -68,6 +68,7 @@ beforeAll(async () => {
   // touching it — an arbitrary hand-written body reads as an "uncoordinated
   // local edit". Write the fixture file to match what putPage recorded.
   const snapshot = (await engine.readPageSnapshot(SLUG))!;
+  mkdirSync(join(repo, 'wiki'), { recursive: true });
   writeFileSync(join(repo, `${SLUG}.md`), serializePageToMarkdown(snapshot.page, snapshot.tags), 'utf-8');
 });
 

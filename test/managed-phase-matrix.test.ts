@@ -179,12 +179,12 @@ const MATRIX: Record<CyclePhase, Entry> = {
   },
   extract_atoms: {
     env: { GBRAIN_SCHEMA_PACK: 'gbrain-creator' },
-    seed: async ({ engine, sourceId }) => put(engine, sourceId, 'notes/atom-source', page('note', 'Atom source', 'A project record about measured progress. '.repeat(40))),
-    reply: () => '[{"title":"Measured progress","atom_type":"insight","body":"Measure progress against clear exit criteria."}]',
+    seed: async ({ engine, sourceId }) => put(engine, sourceId, 'notes/atom-source', page('note', 'Atom source', 'The Atlas team measures progress against three agreed exit criteria. '.repeat(40), 'atom_extract: true\n')),
+    reply: () => '[{"title":"Measured progress","atom_type":"insight","body":"The Atlas team measures progress against three agreed exit criteria.","source_quote":"The Atlas team measures progress against three agreed exit criteria."}]',
     assert: async ({ engine, sourceId }) => {
       const atoms = await engine.executeRaw<{ slug: string; compiled_truth: string }>("SELECT slug,compiled_truth FROM pages WHERE source_id=$1 AND type='atom'", [sourceId]);
       expect(atoms).toHaveLength(1);
-      expect(atoms[0].compiled_truth).toContain('Measure progress against clear exit criteria.');
+      expect(atoms[0].compiled_truth).toContain('The Atlas team measures progress against three agreed exit criteria.');
       expect(await committed(engine, sourceId, atoms[0].slug)).not.toHaveLength(0);
     },
   },
@@ -231,8 +231,8 @@ const MATRIX: Record<CyclePhase, Entry> = {
   },
   propose_takes: {
     config: { 'cycle.propose_takes.enabled': 'true' },
-    seed: async ({ engine, sourceId }) => put(engine, sourceId, 'notes/propose-example', page('note', 'Propose', 'I bet the example market compresses within 18 months.')),
-    reply: () => JSON.stringify([{ claim_text: 'The example market compresses within 18 months', kind: 'bet', holder: 'brain', weight: 0.7, domain: 'macro' }]),
+    seed: async ({ engine, sourceId }) => put(engine, sourceId, 'notes/propose-example', page('concept', 'Propose', 'I bet the example market compresses within 18 months. '.repeat(20))),
+    reply: () => JSON.stringify([{ claim_text: 'the example market compresses within 18 months', kind: 'bet', holder: 'brain', weight: 0.7, domain: 'macro', evidence_span: 'I bet the example market compresses within 18 months.' }]),
     assert: async ({ engine, sourceId }) => {
       expect(await engine.executeRaw('SELECT id FROM take_proposals WHERE source_id=$1', [sourceId])).toHaveLength(1);
     },
@@ -351,6 +351,19 @@ async function runPhase(engine: BrainEngine, phase: CyclePhase, entry: Entry, ch
   const calls: ChatOpts[] = [];
   __setChatTransportForTests(async opts => {
     calls.push(opts);
+    if (String(opts.system).includes('fail-closed atom quality gate')) {
+      const payload = JSON.parse(String(opts.messages[0]?.content));
+      return reply(JSON.stringify({ verdicts: payload.candidates.map((_: unknown, index: number) => ({ index,
+        scores: { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 },
+      })) }), opts.model);
+    }
+    if (String(opts.system).includes('mandatory quality validator for conversation-derived')) {
+      const payload = JSON.parse(String(opts.messages[0]?.content));
+      return reply(JSON.stringify({ decisions: payload.candidates.map((c: { id: string }) => ({
+        id: c.id, action: 'accept', fully_supported: true, exactly_one_proposition: true, self_contained: true,
+        correct_entity_attribution: true, no_hidden_causation: true, no_overgeneralization: true, no_sensitive_content: true,
+      })) }), opts.model);
+    }
     const out = entry.reply?.(opts, calls.length) ?? '{}';
     return typeof out === 'string' ? reply(out, opts.model) : { ...reply('', opts.model), ...out };
   });

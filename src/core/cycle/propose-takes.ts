@@ -622,7 +622,7 @@ export async function defaultExtractor(
     }
   }
   Object.defineProperty(takes, 'modelId', {
-    value: result.model,
+    value: typeof result.model === 'string' && result.model.trim() ? result.model : undefined,
     enumerable: false,
   });
   // #4737: per-take served-model provenance (response-derived, not requested).
@@ -1455,7 +1455,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
                RETURNING id`,
               [sourceId, page.slug, ch, promptVersion, proposalRunId, p.claim_text,
                 p.kind, p.holder, p.weight, p.domain ?? null, p.evidence_span!.trim(),
-                JSON.stringify(existingTakes), actualModelId],
+                JSON.stringify(existingTakes), p.served_model?.trim() || actualModelId],
             );
             insertedForPage += inserted.length;
           }

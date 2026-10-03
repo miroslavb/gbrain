@@ -77,6 +77,8 @@ export async function captureOffPath(engine: BrainEngine): Promise<Record<string
 }
 
 export async function seedOffPath(engine: BrainEngine, pages = OFF_PATH_PAGES): Promise<void> {
+  // This frozen transport fixture exercises historical private-page policy.
+  await engine.setConfig('facts.default_visibility', 'private');
   for (const p of pages) {
     await engine.putPage(p.slug, { type: 'note', title: p.slug, compiled_truth: p.body, timeline: p.timeline ?? '', frontmatter: p.frontmatter ?? {} });
     await installFixtureChunks(engine, p.slug, await prepareMarkdownChunks({ compiled_truth: p.body, timeline: p.timeline ?? '' }));

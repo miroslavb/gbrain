@@ -28,6 +28,7 @@ let engine: PGLiteEngine;
 // Shared real-engine regression: a common symbol must be filterable before
 // LIMIT, and splitting a large function must retain its actual declaration.
 async function assertBoundedCodeLookup(db: BrainEngine): Promise<void> {
+  await db.setConfig('facts.default_visibility', 'world');
   const sourceId = 'code-path-fixture', foreign = 'code-path-foreign';
   for (const id of [sourceId, foreign]) {
     await db.executeRaw("INSERT INTO sources(id,name,config) VALUES ($1,$1,'{}'::jsonb) ON CONFLICT(id) DO NOTHING", [id]);

@@ -5,9 +5,9 @@
  * MCP stdio and MCP HTTP, with public presence controls proving the
  * expansion really delivered neighbor and whole-page text.
  *
- * Canaries: private fact rows, takes (even for trusted local callers:
+ * Canaries: takes (even for trusted local callers:
  * the body is sanitized whole for every caller), withdrawn fact rows, a malformed
- * protected tail, timeline fact rows, a `visibility: private` page, a derived
+ * protected tail, a `visibility: private` page, a derived
  * atom (private by default), and the same slug in an ungranted source. The
  * mid-flight cases re-authorize stale hits: grant revocation, a page turning
  * private, and an edit between ranking and expansion. A conversation page
@@ -61,7 +61,8 @@ const CONVERSATION_PRESENT = ['SESSIONOPENERHERON', 'SESSIONCLOSERHERON'];
 // Protected for remote callers.
 const REMOTE_CANARIES = ['PRIVATEPAGECANARY', 'ATOMCANARY'];
 // Protected for every caller (whole-body sanitizing) plus other-source text.
-const ALWAYS_CANARIES = ['FACTCANARYPRIVATE', 'TAKECANARYPRIVATE', 'WITHDRAWNCANARY', 'MALFORMEDTAILCANARY', 'TIMELINEFACTCANARY', 'FOREIGNSOURCECANARY', 'EDITSECRETCANARY', 'SESSIONTAKECANARY'];
+// Legacy fact labels normalize to world on this fork; takes, withdrawals, documents and grants remain independent.
+const ALWAYS_CANARIES = [ 'TAKECANARYPRIVATE', 'WITHDRAWNCANARY', 'MALFORMEDTAILCANARY', 'FOREIGNSOURCECANARY', 'EDITSECRETCANARY', 'SESSIONTAKECANARY'];
 
 const filler = (n: number) => Array.from({ length: n }, (_, i) => `Heron field notes paragraph ${i} describing ordinary public observations of the marsh and the weather that day.`).join('\n\n');
 
@@ -238,6 +239,7 @@ for (const backend of backends) describe(`evidence delivery leak canaries (${bac
       await engine.connect(config);
       await engine.initSchema();
     }
+    await engine.setConfig('facts.default_visibility', 'private');
     config = { ...config, embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: 1536 };
     mkdirSync(join(home, '.gbrain'));
     writeFileSync(join(home, '.gbrain/config.json'), JSON.stringify(config));

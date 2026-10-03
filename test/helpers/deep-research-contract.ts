@@ -37,6 +37,7 @@ export function deepResearchContract(getEngine: () => BrainEngine): void {
 
   describe('source-qualified deep research contract', () => {
     beforeEach(async () => {
+      await getEngine().setConfig('facts.default_visibility', 'private');
       await getEngine().executeRaw(`INSERT INTO sources (id, name) VALUES ('beta', 'beta') ON CONFLICT (id) DO UPDATE SET archived=false`);
       await getEngine().setConfig('search.mcp_keyword_only', 'true');
       await seed('default', slug, 'Unrelated default material.');
