@@ -2224,3 +2224,16 @@ complete clone and reports must remain private.
 The Docker gate sets `GBRAIN_CI_DISABLE_TEST_ENV_FILE=1` so a bind-mounted
 developer `.env.testing` cannot add credentials or change the isolated test
 database. Explicit local provider E2E runs can continue using that file.
+
+
+### Host finite code refresh
+
+`test/persistence-finite-code.test.ts` and its PostgreSQL twin exercise journaled
+create/update/replay, empty/tombstone/recreate, wrong file/manifest/runtime
+hashes, revisions, source/path authority, captured taxonomy and an actual
+post-import file race. Remote authority is admitted only when strictly false;
+undefined/null/zero must refuse before filesystem access. All test writes use
+enabled managed persistence; a separate fixture seed represents captured
+pre-upgrade taxonomy. No fetch/provider call is allowed. A host-stage
+process-separated SIGKILL probe independently verifies queued admission and a
+fresh consumer; the full13-file canary does not replace these negative cases.

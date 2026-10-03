@@ -12,15 +12,24 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { randomBytes } from 'crypto';
-import { patternSince, redactFindings, scanText } from '../src/core/secret-scan.ts';
+import { patternSince, redactFindings, scanText, shannonEntropy } from '../src/core/secret-scan.ts';
 
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-/** Random alphanumeric string that always carries a digit (entropy rule input). */
+/** Random assembled values with a digit and distinct short-input characters.
+ * The old random-with-replacement helper sometimes produced <3.5 bits/char,
+ * contradicting the high-entropy test precondition (observed 3.4566 for length15).
+ * Keep the scanner threshold; construct the intended fixture class explicitly. */
 function rand(n: number): string {
   const bytes = randomBytes(n);
-  let s = '';
-  for (let i = 0; i < n; i++) s += ALNUM[bytes[i]! % ALNUM.length];
-  return s.slice(0, n - 1) + String(bytes[0]! % 10);
+  const digit = String(bytes[0]! % 10);
+  const alphabet = [...ALNUM].filter(char => char !== digit);
+  let available = [...alphabet], s = '';
+  for (let i = 0; i < n - 1; i++) {
+    if (!available.length) available = [...alphabet];
+    const index = bytes[i]! % available.length;
+    s += available.splice(index, 1)[0]!;
+  }
+  return s + digit;
 }
 const hex = (n: number) => randomBytes(Math.ceil(n / 2)).toString('hex').slice(0, n);
 const PLACEHOLDER_NONCE = 'GSTACK_EXAMPLE_NONCE';
@@ -178,9 +187,16 @@ describe('A5 high_entropy_assignment: punctuated values', () => {
 
   test('unquoted values with password punctuation are claimed whole', () => {
     for (const v of [`!${rand(14)}`, `${rand(10)}!#%${rand(10)}`, `${rand(8)}$*@^~${rand(8)}`, `${rand(8)}.?<>${rand(8)}`]) {
+      expect(shannonEntropy(v)).toBeGreaterThanOrEqual(3.5);
       expect(he(`password=${v}`).text).toBe(`password=${T}`);
       expect(he(`DB_PASSWORD: ${v}`).text).toBe(`DB_PASSWORD: ${T}`);
     }
+  });
+
+  test('punctuation does not override the lower entropy boundary', () => {
+    const v = `!${rand(6).repeat(3)}`;
+    expect(shannonEntropy(v)).toBeLessThan(3.5);
+    expect(he(`password=${v}`).text).toBe(`password=${v}`);
   });
 
   test('quoted values are any run of non-quote, non-whitespace characters', () => {

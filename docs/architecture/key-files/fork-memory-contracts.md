@@ -172,3 +172,12 @@ models, and retain remote safe-chunk admission on the world-only host. Doctor
 structural goldens normalize only recognized clean/dirty Git-drift messages as
 volatile developer state, preserving probe errors and the rest of the report.
 This does not change retrieval labels, thresholds, or runtime search results.
+
+
+The host finite code writer is now an explicit managed maintenance intent,
+not a legacy direct importer transaction. See `finite-code-maintenance.ts` and
+the seven-case PGLite/PostgreSQL contract above. The external host adapter also
+seals page projections after unmanaged metadata writes on newer cores. Host
+manifest8 admission is limited to the existing13files; runtime-specific Bun
+launchers are staged outside this core repository. Neither this commit nor a
+code canary activates production or closes ordinary-answer quality audits.

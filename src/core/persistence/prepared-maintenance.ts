@@ -95,7 +95,9 @@ async function submitMaintenance(engine: BrainEngine, authority: MaintenanceAuth
     return writeResponse(await waitForWrite(engine, prior, loadConfig() ?? { engine: engine.kind }));
   }
   const snapshot = await engine.readPageSnapshot(slug, { sourceId: authority.writer.sourceId, includeDeleted: true });
-  if (snapshot?.page.deleted_at) throw new OperationError('page_not_found', 'Maintenance cannot restore a deleted page.');
+  // A reviewed finite index entry explicitly admits re-creation from exact source bytes;
+  // a repeated tombstone remains a journaled no-op. Its preparer rechecks the manifest.
+  if (snapshot?.page.deleted_at && intent.kind !== 'managed_maintenance_finite_code') throw new OperationError('page_not_found', 'Maintenance cannot restore a deleted page.');
   if ((snapshot?.revision ?? null) !== intent.expected_revision) throw new OperationError('revision_conflict', 'The maintenance target changed before admission.');
   const row = await admitWrite(engine, { principal: authority.writer.principal, requestId, operation: 'submit_job',
     sourceId: authority.writer.sourceId, sourceIncarnation: authority.writer.sourceIncarnation, slug,
@@ -282,6 +284,7 @@ export async function applyPreservingTakeResolutions(tx: BrainEngine, pageId: nu
 
 export async function prepareMaintenanceMutation(engine: BrainEngine, row: WriteRequest, config: GBrainConfig): Promise<PreparedMutation> {
   if (row.authority.remote) throw new OperationError('permission_denied', 'Remote maintenance publication is not supported.');
+  if (row.intent?.kind === 'managed_maintenance_finite_code') return (await import('./finite-code-maintenance.ts')).prepareFiniteCodeMutation(engine, row);
   if (row.intent?.kind === 'managed_maintenance_restore_extractor_facts') return (await import('../repair/extractor-facts.ts')).prepareExtractorFactsRestore(engine, row);
   if (row.intent?.kind === 'managed_maintenance_page') {
     const prepared = await preparePageMutation(engine, row.intent.expected_revision === null

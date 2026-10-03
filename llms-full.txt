@@ -1646,10 +1646,24 @@ Large declaration splits preserve the original contiguous declaration/header.
 The exact code_refs file predicate precedes LIMIT and composes with the upstream
 source resolver; --file must be skipped by positional argument parsing.
 Chunker version migration needs a reviewed finite admission, never a global rewalk.
-CHUNKER_VERSION=7 describes new chunks; AUTOMATIC_CODE_CHUNKER_VERSION=6
+CHUNKER_VERSION=8 describes new chunks; AUTOMATIC_CODE_CHUNKER_VERSION=6
 retains the admitted source recovery floor in sync, cost planning and doctor.
 Each imported code page stamps frontmatter.code_chunker_version. A source stamp
-is not proof that every file uses v7; the finite host manifest owns that check.
+is not proof that every file uses v8; the finite host manifest owns that check.
+
+## Managed finite code maintenance
+
+The host's reviewed 13-file/3-source refresh uses `publishFiniteCodeFile` and
+its durable database-only maintenance journal. Keep explicit local CLI
+`remote=false`, source-wide grants, active pathless nonfederated sources,
+manifest/file/runtime hashes, exact revisions and no-symlink reads. Publication
+revalidates the same inputs inside one transaction, preserves taxonomy,
+installs lexical-only metadata and seals safe text projections. A changed
+source file rolls back page/chunks/metadata; a tombstone requires the exact
+prior hash. Re-creation is admitted only by an explicit index manifest entry.
+No model calls, background extraction, whole-repo sync or global chunker
+readmission belong in this path. Stage host runtime/adapter changes separately;
+production activation remains a separate operator decision.
 
 ## Source-fork upgrade contract
 
@@ -1774,7 +1788,9 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   explicit scratch root. Changing `HOME` alone is insufficient under Bun because
   `os.homedir()` can remain cached. Never let an install test resolve
   `$GBRAIN_HOME/.gbrain/autopilot-run.sh` to the operator's live wrapper.
-- **Test-fixture determinism:** permission-error tests must not depend on
+- **Test-fixture determinism:** entropy-based secret scanner positives must
+  construct and assert their intended entropy class; never lower a scanner
+  threshold to admit a randomly invalid positive fixture. Permission-error tests must not depend on
   `chmod 000` failing under the current UID; root can still read those paths.
   Use a deterministic reject/test seam, and pass scratch `GBRAIN_HOME` plus
   `GBRAIN_AUDIT_DIR` explicitly to subprocesses that assert empty local state.
