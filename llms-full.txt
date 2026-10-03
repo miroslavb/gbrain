@@ -2308,6 +2308,10 @@ Restart all staging consumers together after a persistence code change; inspect
 journal state before resubmitting any timed-out or apparently refused write.
 Doctor and catalog goldens reflect schema197 and the fork's existing world,
 extraction-provenance and graph contracts; they do not replace retrieval gold.
+Atom output parsing and exact-quote grounding live in extract-atoms-output.ts;
+extract-atoms.ts re-exports its existing public parser API. Empty-scan health
+publication and input clipping are named helpers. Preserve the existing module
+and function ceilings when changing this phase.
 
 ---
 

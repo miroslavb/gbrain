@@ -1,3 +1,5 @@
+import { parseAtomsOutcome, MIN_PAGE_CHARS_FOR_EXTRACTION, type ExtractedAtom } from './extract-atoms-output.ts';
+export { parseAtomsOutcome, parseAtomsResponse, locateQuote, type AtomsParseOutcome } from './extract-atoms-output.ts';
 import { resolveExtractAtomsCostGate, resolveEmbedModelForCostGate } from './extract-atoms-cost-gate.ts';
 import { atomSlug } from './atom-slug.ts';
 // v0.41.2.1 — extract_atoms cycle phase, post-fix-wave rebuild.
@@ -53,7 +55,6 @@ import { atomSlug } from './atom-slug.ts';
 // which made the NOT EXISTS guard ineffective on federated brains.
 
 import type { BrainEngine, LinkBatchInput } from '../engine.ts';
-import { stripReasoningBlocks } from '../llm-json.ts';
 import type { PhaseResult } from '../cycle.ts';
 import type { GBrainConfig } from '../config.ts';
 import { isConfigTruthy } from '../config.ts';
@@ -93,7 +94,6 @@ import { abortableSleep } from '../retry.ts';
 import { throwIfAborted } from '../abort-check.ts';
 import { isUndefinedTableError, warnOncePerProcess } from '../utils.ts';
 import { utcDate } from './cycle-date.ts';
-import { normalizeForGrounding } from './synthesize-verify.ts';
 import type { TranscriptPageIndex } from '../transcripts/discover.ts';
 import { createHash } from 'crypto';
 import { slugifySegment } from '../sync.ts';
@@ -197,7 +197,6 @@ async function resolveAtomOptInPolicySql(engine: BrainEngine): Promise<string> {
 }
 
 const PAGE_DISCOVERY_BUDGET = 50;
-const MIN_PAGE_CHARS_FOR_EXTRACTION = 500;
 // Source pages whose frontmatter declares a `raw` payload pointer hold raw
 // import data, not extractable prose. Extraction on them yields zero atoms,
 // so no atom row is ever written and they re-enter discovery + the doctor
@@ -327,106 +326,6 @@ export async function resolveExtractAtomsBudgetPricingPolicy(
   const embedGate = resolveExtractAtomsCostGate(extractModel, resolveEmbedModelForCostGate(), pricingOverrides);
   if (embedGate.unpricedModel && !unpricedModels.includes(embedGate.unpricedModel)) unpricedModels.push(embedGate.unpricedModel);
   return { pricingOverrides, unpricedModels, enforceCostCap: unpricedModels.length === 0 };
-}
-
-interface ExtractedAtom {
-  title: string;
-  atom_type: typeof ATOM_TYPES[number];
-  body: string;
-  source_quote?: string;
-  lesson?: string;
-  /**
-   * 1-3 kebab-case topic labels for concept clustering. Consumed by
-   * synthesize_concepts (groups atoms by `frontmatter.concepts`; only
-   * labels shared by >=2 atoms materialize a concept page, so the prompt
-   * biases reuse-over-coinage). #2123.
-   */
-  concepts?: string[];
-  virality_score?: number;
-  emotional_register?: string;
-}
-
-/** kebab-case validator for concept labels ("captive-portal", "channel-pricing"). */
-const CONCEPT_LABEL_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const MAX_GROUNDED_BODY_CHARS = 280;
-const COMPOUND_CLAIM_JOIN_RE = /(?:\b(?:and|but|while|whereas|therefore|so)\b|(?:^|[\s,])(?:и|но|а также|тогда как|поэтому)(?=$|[\s,]))/iu;
-const DEICTIC_START_RE = /^(?:this|that|it|they|these|those|such)\b/i;
-const RU_DEICTIC_OR_VAGUE_START_RE = /^(?:это|этот|эта|эти|он|она|оно|они|такой|такая|такие|значение|значения|параметр|параметры|данные)(?=$|[\s,:;.!?-])/iu;
-// A title cannot repair an evidence quote whose grammatical subject is only
-// meaningful inside the source page. Production sampling found that the
-// semantic validator still accepted bare subjects such as "Buttons ...",
-// "Dark theme ...", and a post-comma "the system ...". Keep this fence
-// precision-biased: named subjects before these nouns do not match.
-const CONTEXTLESS_GENERIC_SUBJECT_RE =
-  /(?:^|[,\u2013\u2014]\s+)(?:(?:the|a|an)\s+)?(?:system|site|website|app|application|model|workflow|pipeline|configuration|config|process|phase|buttons?|themes?|endpoints?|hover\s+states?|override|values?|data|operations?|ops|ratios?)\b/iu;
-const CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE =
-  /^(?:(?:current|existing|default|dark|light|different|several|multiple)\s+)(?:buttons?|themes?|operations?|ops|ratios?)\b|^(?:four|\d+)\s+[a-z0-9-]+\s+(?:operations?|ops)\b|^different\s+feed\/kill\s+ratios?\b/iu;
-const RU_CONTEXTLESS_GENERIC_SUBJECT_RE =
-  /(?:^|[,\u2013\u2014]\s+)(?:(?:эта|этот|эти)\s+)?(?:система|сайт|приложение|проект|репозиторий|сервис|платформа|модель|процесс|этап|кнопки?|тема|эндпоинт|воркфлоу|пайплайн)(?=$|[\s,:;.!?-])/iu;
-const INLINE_ENUMERATION_RE = /(?:\s\/\s|\([^)]*(?:,|\/|\b(?:including|included|incl\.?)\b|(?:включая|в\s+т\.?\s*ч\.?)(?=$|[\s,]))[^)]*\))/iu;
-
-function isSingleAtomicSentence(value: string, maxChars: number): boolean {
-  const text = value.trim();
-  if (!text || text.length > maxChars) return false;
-  if (/[\n\r;]/.test(text) || /^[-*]\s/m.test(text)) return false;
-  const boundaries = text.match(/[.!?](?=\s|$)/g) ?? [];
-  return boundaries.length <= 1;
-}
-
-function isSelfContainedAtomicEvidence(value: string): boolean {
-  const text = value.trim();
-  return !COMPOUND_CLAIM_JOIN_RE.test(text)
-    && !DEICTIC_START_RE.test(text)
-    && !RU_DEICTIC_OR_VAGUE_START_RE.test(text)
-    && !CONTEXTLESS_GENERIC_SUBJECT_RE.test(text)
-    && !CONTEXTLESS_MODIFIED_GENERIC_SUBJECT_RE.test(text)
-    && !RU_CONTEXTLESS_GENERIC_SUBJECT_RE.test(text)
-    && !INLINE_ENUMERATION_RE.test(text);
-}
-
-export function locateQuote(
-  content: string,
-  quote: string,
-): { start: number; end: number } | null {
-  if (!quote || !content) return null;
-  const c = normalizeForGrounding(content);
-  const q = normalizeForGrounding(quote);
-  if (!q.norm) return null;
-
-  // Enumerate every folded hit, keep those that survive the round-trip
-  // boundary check, THEN judge ambiguity. Order matters: rejecting on raw
-  // hit-count first would let an INVALID partial-character match veto a
-  // genuinely unique valid one ("No. First. No… not ever" has two folded
-  // hits for "no." but only the first is character-aligned).
-  const valid: Array<{ start: number; end: number }> = [];
-  const MAX_CANDIDATES = 8; // pathological input shouldn't scan a whole book
-  let at = c.norm.indexOf(q.norm);
-  let seen = 0;
-  while (at !== -1 && seen < MAX_CANDIDATES) {
-    seen++;
-    const start = c.map[at]!;
-    // map[] names the FIRST code unit of the original character; advance the
-    // end by the whole code point, not +1 — a bare +1 splits the surrogate
-    // pair when the quote ends with a non-BMP char ('ship it 🚀'), and the
-    // half-pair slice then fails the round-trip re-fold below.
-    const lastOrig = c.map[at + q.norm.length - 1]!;
-    const lastCp = content.codePointAt(lastOrig);
-    const end = lastOrig + (lastCp !== undefined && lastCp > 0xffff ? 2 : 1);
-    if (
-      normalizeForGrounding(content.slice(start, end)).norm === q.norm &&
-      !valid.some(v => v.start === start && v.end === end)
-    ) {
-      valid.push({ start, end });
-    }
-    // Step by one, not by length: overlapping hits are distinct passages
-    // for ambiguity purposes.
-    at = c.norm.indexOf(q.norm, at + 1);
-  }
-  // Cap exhausted with hits still pending: uniqueness UNPROVEN → fail closed.
-  if (at !== -1) return null;
-  // Exactly one surviving passage, or we cannot say which the atom used.
-  if (valid.length !== 1) return null;
-  return valid[0]!;
 }
 
 /** #5705: wrap the transcript as data (an inner closing tag is escaped) so a chat export is not read as a turn to answer. */
@@ -951,68 +850,7 @@ export async function runPhaseExtractAtoms(
 
   // Phase-level no-op: nothing to extract today.
   if (work.length === 0 && transcripts.length === 0 && pages.length === 0) {
-    // A successful full-source empty scan is a current completion, not a new
-    // historical extraction round. Publish only extract_health_state so stale
-    // migration-seeded unknown/halt rows can recover without diluting the
-    // immutable seven-day rollup. Targeted/test-seam empties prove nothing
-    // about the rest of the source and must not update current health.
-    const fullSourceScan =
-      opts._pages === undefined
-      && (!Array.isArray(opts.affectedSlugs) || opts.affectedSlugs.length === 0);
-    let currentStateError: string | null = null;
-    let currentStateWritten = false;
-    if (!opts.dryRun && fullSourceScan) {
-      if (transcriptDiscoveryFailed) {
-        currentStateError = 'transcript_discovery_failed';
-      } else {
-        const pageBacklog = await countExtractAtomsBacklog(engine, sourceId);
-        if (pageBacklog === null) {
-          currentStateError = 'page_backlog_unavailable';
-        } else if (pageBacklog === 0) {
-          const state = await updateExtractHealthState(engine, {
-            kind: 'atoms',
-            source_id: sourceId,
-            outcome: 'completed',
-          });
-          currentStateWritten = state.ok;
-          if (!state.ok) currentStateError = 'current_state_write_failed';
-        } else {
-          currentStateError = 'discovery_backlog_mismatch';
-        }
-      }
-    }
-    return {
-      phase: 'extract_atoms',
-      status: currentStateError ? 'warn' : 'skipped',
-      duration_ms: 0,
-      summary: currentStateError
-        ? `extract_atoms: empty scan could not publish current health (${currentStateError})`
-        : 'extract_atoms: no transcripts or pages to process',
-      details: {
-        reason: currentStateError ?? 'no_work',
-        source_id: sourceId,
-        current_state_written: currentStateWritten,
-        atoms_extracted: 0,
-        transcripts_processed: 0,
-        transcripts_total: 0,
-        transcripts_skipped_budget: 0,
-        pages_processed: 0,
-        pages_total: 0,
-        duplicates_skipped: 0,
-        candidates: 0,
-        accepted: 0,
-        rejected: 0,
-        rejected_by_reason: {},
-        failures: [],
-        estimated_spend_usd: 0,
-        budget_usd: DEFAULT_BUDGET_USD,
-        dry_run: opts.dryRun ?? false,
-        dry_run_limit: opts.dryRun ? MAX_DRY_RUN_WORK_ITEMS : null,
-        dry_run_omitted_items: 0,
-        actual_models: { extraction: [], semantic_validator: [] },
-        actual_routes: { extraction: [], semantic_validator: [] },
-      },
-    };
+    return emptyAtomScanResult(engine, sourceId, opts, transcriptDiscoveryFailed);
   }
 
   // 4. Per work-item: extract atoms via the configured extract_atoms model
@@ -1295,12 +1133,7 @@ export async function runPhaseExtractAtoms(
     if (observePage) await recordProcessing({ attempted_scans: 1 });
     const itemRejectedByReason: Record<string, number> = {};
     let itemGateOperationalFailure = false;
-    // #4706: bind the cut ONCE. This is the exact text the model receives,
-    // and quote provenance is verified against THIS rather than the full
-    // item, so a quote can only verify against text the model actually saw.
-    // #4529/#4540: configurable input cap, cut UTF-8-safely (a bare .slice()
-    // can split a surrogate pair at the boundary); #5812 strips pastes first.
-    const promptContent = truncateUtf8(item.kind === 'transcript' ? corpusTextForExtraction(item.filePath, item.content) : item.content, maxInputChars);
+    const promptContent = atomEvidenceContent(item.kind === 'transcript' ? item.filePath : null, item.content, maxInputChars);
     try {
       const origin: AtomOrigin | null = managed ? await readAtomOrigin(engine, managed, item) : null;
       const visibility = origin?.visibility ?? effectiveVisibility(item.kind === 'transcript' ? { kind: 'transcript' } // #5525
@@ -1794,182 +1627,6 @@ export async function runPhaseExtractAtoms(
 }
 
 /**
- * gbrain#4148 — typed parse outcome. Malformed model output and a legitimate
- * zero-yield extraction both used to collapse into `[]`, so malformed output
- * was tombstoned as success (the page never retried, its atoms silently
- * lost). `ok: false` means the response was not parseable as an atoms array
- * AT ALL — a content-deterministic failure class the caller counts toward a
- * bounded tombstone; `ok: true, atoms: []` means the model genuinely
- * extracted nothing.
- */
-export type AtomsParseOutcome =
-  | { ok: true; atoms: ExtractedAtom[] }
-  | { ok: false; reason: string };
-
-export function parseAtomsOutcome(raw: string, sourceText?: string): AtomsParseOutcome {
-  const direct = parseAtomsOutcomeInner(raw, sourceText);
-  if (direct.ok) return direct;
-  // Same reasoning-block hazard as the facts extractor: `indexOf('[')` below
-  // finds a bracket inside <think> when the model drafts its array while
-  // reasoning, so the parse fails and the page is halted. Ladder, not a
-  // pre-filter: raw first, stripped only on failure — and the ORIGINAL
-  // outcome is returned when the retry also fails, so error reasons are
-  // unchanged for non-reasoning models.
-  const stripped = stripReasoningBlocks(raw);
-  if (stripped && stripped !== raw.trim()) {
-    const retry = parseAtomsOutcomeInner(stripped, sourceText);
-    if (retry.ok) return retry;
-  }
-  return direct;
-}
-
-const MAX_ARRAY_ANCHOR_CANDIDATES = 64;
-
-/**
- * Parse the JSON array anchored at ONE `[` offset, reproducing the historical
- * two-step exactly: whole-slice parse, then a trim-back to the last `]` to
- * recover from trailing prose. Split out of parseAtomsOutcomeInner so the
- * anchor scan can try successive offsets without duplicating the reason
- * strings — those are asserted by tests and ride the drain's `last_error`.
- */
-function parseArrayAtOffset(
-  cleaned: string,
-  start: number,
-): { ok: true; parsed: unknown[] } | { ok: false; reason: string } {
-  const slice = cleaned.slice(start);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(slice);
-  } catch {
-    // Try trimming back from the end to recover from trailing prose.
-    const arrayEnd = slice.lastIndexOf(']');
-    if (arrayEnd === -1) return { ok: false, reason: 'unterminated JSON array' };
-    try {
-      parsed = JSON.parse(slice.slice(0, arrayEnd + 1));
-    } catch {
-      return { ok: false, reason: 'unparseable JSON array' };
-    }
-  }
-  if (!Array.isArray(parsed)) return { ok: false, reason: 'JSON value is not an array' };
-  return { ok: true, parsed };
-}
-
-function parseAtomsOutcomeInner(raw: string, sourceText?: string): AtomsParseOutcome {
-  // Strip markdown code fences if the LLM wrapped JSON in them.
-  let cleaned = raw.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) cleaned = fenceMatch[1].trim();
-
-  const firstStart = cleaned.indexOf('[');
-  if (firstStart === -1) return { ok: false, reason: 'no JSON array in response' };
-
-  // ANCHOR SCAN. Pre-fix this committed to `indexOf('[')` — the FIRST bracket
-  // anywhere in the response. Any bracket in a preamble hijacked the anchor,
-  // and a brain whose house style mandates inline `[Source: …]` citations and
-  // `[[wikilink]]` backlinks (or whose transcripts carry `[user]` / `[tool: …]`
-  // role markers) makes the model echo one while narrating, so a response
-  // carrying a perfectly good array was reported `unparseable JSON array`.
-  //
-  // Acceptance requires the candidate to parse AND to yield >= 1 atom-shaped
-  // element (`atomsFromParsedArray` is the single source of truth for
-  // "atom-shaped"). Parseability alone is NOT enough: a zero-yield result is
-  // exactly what TOMBSTONES an item (#2144), so only ONE parseable shape may
-  // produce it — the literal `[]` the #4948 prompt asks for when nothing is
-  // extractable, accepted at ANY offset (a model that echoes a `[Source: …]`
-  // citation before obeying must not lose its honest `[]` to this gate and
-  // burn three strikes into a tombstone + halt). A NON-empty array whose
-  // elements all fail the shape gate is malformed output: it rides the
-  // failure streak like every other parse failure instead of tombstoning the
-  // item forever on the first try.
-  let firstAttempt: ReturnType<typeof parseArrayAtOffset> | null = null;
-  let sawEmptyArray = false;
-  let candidates = 0;
-  for (
-    let start = firstStart;
-    start !== -1 && candidates < MAX_ARRAY_ANCHOR_CANDIDATES;
-    start = cleaned.indexOf('[', start + 1)
-  ) {
-    candidates++;
-    const attempt = parseArrayAtOffset(cleaned, start);
-    // Captured on the FIRST iteration only — every reason string this function
-    // can return still describes the first bracket, unchanged.
-    if (firstAttempt === null) firstAttempt = attempt;
-    if (attempt.ok) {
-      if (attempt.parsed.length === 0) { sawEmptyArray = true; continue; }
-      const atoms = atomsFromParsedArray(attempt.parsed, sourceText);
-      if (atoms.length > 0) return { ok: true, atoms };
-    }
-  }
-
-  // Nothing yielded a real atom. An honest `[]` anywhere is the zero-yield
-  // success (#4148 keeps "found nothing" distinct from "malformed"); otherwise
-  // fall back to the FIRST offset's outcome — never a later one — so the
-  // failure reason the drain surfaces as `last_error` still describes the
-  // first bracket.
-  if (sawEmptyArray) return { ok: true, atoms: [] };
-  if (firstAttempt === null) return { ok: false, reason: 'no JSON array in response' };
-  if (firstAttempt.ok) return { ok: false, reason: 'array had no atom-shaped elements' };
-  return firstAttempt;
-}
-
-/**
- * Back-compat wrapper: parse the response into ExtractedAtom[], returning []
- * for BOTH malformed output and a legitimate zero-yield (legacy callers/tests
- * that don't need the typed distinction — new code uses parseAtomsOutcome).
- */
-export function parseAtomsResponse(raw: string, sourceText?: string): ExtractedAtom[] {
-  const outcome = parseAtomsOutcome(raw, sourceText);
-  return outcome.ok ? outcome.atoms : [];
-}
-
-function atomsFromParsedArray(parsed: unknown[], sourceText?: string): ExtractedAtom[] {
-
-  const atoms: ExtractedAtom[] = [];
-  for (const item of parsed) {
-    if (typeof item !== 'object' || item === null) continue;
-    const obj = item as Record<string, unknown>;
-    const title = typeof obj.title === 'string' ? obj.title.slice(0, 80) : null;
-    const atomType = typeof obj.atom_type === 'string' ? obj.atom_type.trim().toLowerCase() : null;
-    let body = typeof obj.body === 'string' ? obj.body.trim() : null;
-    const sourceQuote = typeof obj.source_quote === 'string' ? obj.source_quote.trim() : null;
-    if (!title || !atomType || !body) continue;
-    if (!ATOM_TYPES.includes(atomType as typeof ATOM_TYPES[number])) continue;
-    const requireGrounding = typeof sourceText === 'string'
-      && sourceText.length >= MIN_PAGE_CHARS_FOR_EXTRACTION;
-    if (requireGrounding) {
-      if (!sourceQuote || sourceQuote.length > 200 || !sourceText.includes(sourceQuote)) continue;
-      if (!isSingleAtomicSentence(body, MAX_GROUNDED_BODY_CHARS)) continue;
-      if (!isSingleAtomicSentence(sourceQuote, 200)) continue;
-      if (!isSelfContainedAtomicEvidence(sourceQuote)) continue;
-      body = sourceQuote;
-    }
-    atoms.push({
-      title,
-      atom_type: atomType as typeof ATOM_TYPES[number],
-      body,
-      source_quote: sourceQuote ? sourceQuote.slice(0, 200) : undefined,
-      lesson: requireGrounding ? undefined : (typeof obj.lesson === 'string' ? obj.lesson : undefined),
-      concepts: (() => {
-        if (!Array.isArray(obj.concepts)) return undefined;
-        const labels = obj.concepts
-          .filter((c): c is string => typeof c === 'string' && CONCEPT_LABEL_RE.test(c))
-          .slice(0, 3);
-        return labels.length > 0 ? labels : undefined;
-      })(),
-      virality_score:
-        typeof obj.virality_score === 'number' &&
-        obj.virality_score >= 0 &&
-        obj.virality_score <= 100
-          ? obj.virality_score
-          : undefined,
-      emotional_register:
-        typeof obj.emotional_register === 'string' ? obj.emotional_register : undefined,
-    });
-  }
-  return atoms;
-}
-
-/**
  * Soft-delete a source's atoms from earlier extractions (a different or
  * provisional source_hash) that the current, completed extraction did not
  * re-produce. Imported atoms (`imported_from`) and managed atoms are left
@@ -2078,4 +1735,78 @@ async function assertAtomImportBinding(
     `atom identity conflict for ${slug}: existing page is bound to a different source; ` +
     'refusing to overwrite it',
   );
+}
+
+async function emptyAtomScanResult(engine: BrainEngine, sourceId: string, opts: ExtractAtomsOpts, transcriptDiscoveryFailed: boolean): Promise<PhaseResult> {
+  // A successful full-source empty scan is a current completion, not a new
+  // historical extraction round. Publish only extract_health_state so stale
+  // migration-seeded unknown/halt rows can recover without diluting the
+  // immutable seven-day rollup. Targeted/test-seam empties prove nothing
+  // about the rest of the source and must not update current health.
+  const fullSourceScan =
+    opts._pages === undefined
+    && (!Array.isArray(opts.affectedSlugs) || opts.affectedSlugs.length === 0);
+  let currentStateError: string | null = null;
+  let currentStateWritten = false;
+  if (!opts.dryRun && fullSourceScan) {
+    if (transcriptDiscoveryFailed) {
+      currentStateError = 'transcript_discovery_failed';
+    } else {
+      const pageBacklog = await countExtractAtomsBacklog(engine, sourceId);
+      if (pageBacklog === null) {
+        currentStateError = 'page_backlog_unavailable';
+      } else if (pageBacklog === 0) {
+        const state = await updateExtractHealthState(engine, {
+          kind: 'atoms',
+          source_id: sourceId,
+          outcome: 'completed',
+        });
+        currentStateWritten = state.ok;
+        if (!state.ok) currentStateError = 'current_state_write_failed';
+      } else {
+        currentStateError = 'discovery_backlog_mismatch';
+      }
+    }
+  }
+  return {
+    phase: 'extract_atoms',
+    status: currentStateError ? 'warn' : 'skipped',
+    duration_ms: 0,
+    summary: currentStateError
+      ? `extract_atoms: empty scan could not publish current health (${currentStateError})`
+      : 'extract_atoms: no transcripts or pages to process',
+    details: {
+      reason: currentStateError ?? 'no_work',
+      source_id: sourceId,
+      current_state_written: currentStateWritten,
+      atoms_extracted: 0,
+      transcripts_processed: 0,
+      transcripts_total: 0,
+      transcripts_skipped_budget: 0,
+      pages_processed: 0,
+      pages_total: 0,
+      duplicates_skipped: 0,
+      candidates: 0,
+      accepted: 0,
+      rejected: 0,
+      rejected_by_reason: {},
+      failures: [],
+      estimated_spend_usd: 0,
+      budget_usd: DEFAULT_BUDGET_USD,
+      dry_run: opts.dryRun ?? false,
+      dry_run_limit: opts.dryRun ? MAX_DRY_RUN_WORK_ITEMS : null,
+      dry_run_omitted_items: 0,
+      actual_models: { extraction: [], semantic_validator: [] },
+      actual_routes: { extraction: [], semantic_validator: [] },
+    },
+  };
+}
+
+function atomEvidenceContent(filePath: string | null, content: string, maxInputChars: number): string {
+  // #4706: bind the cut ONCE. This is the exact text the model receives,
+  // and quote provenance is verified against THIS rather than the full
+  // item, so a quote can only verify against text the model actually saw.
+  // #4529/#4540: configurable input cap, cut UTF-8-safely (a bare .slice()
+  // can split a surrogate pair at the boundary); #5812 strips pastes first.
+  return truncateUtf8(filePath === null ? content : corpusTextForExtraction(filePath, content), maxInputChars);
 }
