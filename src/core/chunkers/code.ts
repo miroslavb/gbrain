@@ -20,7 +20,7 @@
 
 import { chunkText as recursiveChunk } from './recursive.ts';
 import { buildQualifiedName } from './qualified-names.ts';
-import { MERGE_PROTECTED_SYMBOL_TYPES } from './def-types.ts';
+import { MERGE_PROTECTED_SYMBOL_TYPES, declaresFunctionValue } from './def-types.ts';
 import { estimateTokens, estimateEmbedTokens, estimateEmbedTokensCeiling, DEFAULT_MAX_CHUNK_TOKENS } from './token-estimate.ts';
 import { safeSplitIndex } from '../text-safe.ts';
 import {
@@ -136,16 +136,9 @@ import G_ZIG from '../../assets/wasm/grammars/tree-sitter-zig.wasm' with { type:
 // top-level defs indexed to ZERO symbols). Chunk boundaries change for every
 // previously-merged file, so the bump forces a re-chunk that recovers the
 // erased symbols.
-// v7: large-node splitting retains declaration/decorator text and its source
-// range before the first body child (fork 1812e5a8f); upstream v0.50.2 also
-// shipped the checksum-verified tree-sitter-bash v0.23.3 grammar under v7.
-// Existing affected chunks require recovery.
-export const CHUNKER_VERSION = 7;
-// Version 7 is admitted per file on the host. Do not turn this release into
-// an automatic full-source recovery walk. New/changed files still use v7.
-// Historical Bash sources are recovered explicitly with a source-scoped
-// `sync --full --no-embed` / `reindex-code --force --no-embed`, not by a
-// global sources.chunker_version gate.
+// v8 (N13-1): `const f = () => …` definitions keep their own named chunk.
+export const CHUNKER_VERSION = 8;
+// Host: newer chunkers are admitted per file; never globally rewalk unchanged sources.
 export const AUTOMATIC_CODE_CHUNKER_VERSION = 6;
 
 // Lazy-loaded tree-sitter module (v0.22.x API: Parser is default export)
@@ -190,6 +183,8 @@ export interface CodeChunkMetadata {
    * Null when symbolName is missing (merged chunks, module-level fallback).
    */
   symbolNameQualified?: string | null;
+  /** N13-1: a const/let/var whose value is a function — merge-protected (def-types.ts). */
+  definesFunction?: boolean;
 }
 
 export interface CodeChunk {
@@ -841,13 +836,15 @@ async function chunkParsedLanguage(
       }
 
       if (estimateTokens(nodeText) <= largeThreshold) {
-        chunks.push(buildChunk({
+        const chunk = buildChunk({
           body: nodeText, filePath, language, symbolName, symbolType,
           startLine: node.startPosition.row + 1,
           endLine: endNode.endPosition.row + 1,
           index: chunks.length,
           parentSymbolPath: [],
-        }));
+        });
+        if (declaresFunctionValue(typeNode)) chunk.metadata.definesFunction = true;
+        chunks.push(chunk);
         continue;
       }
 
@@ -953,7 +950,8 @@ function mergeSmallSiblings(chunks: CodeChunk[], chunkTarget: number): CodeChunk
   // accumulated into one. The set is a derived view of code-def's DEF_TYPES
   // (def-types.ts), so the lookup allowlist and this guard cannot drift.
   const isDefChunk = (c: CodeChunk): boolean =>
-    c.metadata.symbolName != null && MERGE_PROTECTED_SYMBOL_TYPES.has(c.metadata.symbolType);
+    c.metadata.symbolName != null &&
+    (MERGE_PROTECTED_SYMBOL_TYPES.has(c.metadata.symbolType) || c.metadata.definesFunction === true);
   const merged: CodeChunk[] = [];
   let i = 0;
   while (i < chunks.length) {

@@ -43,12 +43,15 @@ beforeEach(async () => {
 function addGroundingQuote(text: string, opts: ChatOpts): string {
   const user = opts.messages.find(message => message.role === 'user');
   const raw = typeof user?.content === 'string' ? user.content : '';
-  const source = raw.split('\n\n---\n\n').slice(1).join('\n\n---\n\n');
-  if (source.length < 500) return text;
+  const source = raw.match(/<transcript>\n([\s\S]*?)\n<\/transcript>/)?.[1] ?? '';
+  if (!source) return text;
   try {
     const parsed = JSON.parse(text) as Array<Record<string, unknown>>;
     for (const atom of parsed) {
-      if (typeof atom.source_quote !== 'string') atom.source_quote = source.slice(0, 50);
+      if (typeof atom.source_quote !== 'string') {
+        atom.source_quote = source.match(/^[^.!?]+[.!?]/)?.[0] ?? source.slice(0, 100);
+        atom.body = atom.source_quote;
+      }
     }
     return JSON.stringify(parsed);
   } catch {
@@ -94,7 +97,7 @@ function stubChatUnique(): (o: ChatOpts) => Promise<ChatResult> {
   };
 }
 
-const LONG_CONTENT = 'a'.repeat(800); // > MIN_PAGE_CHARS_FOR_EXTRACTION (500)
+const LONG_CONTENT = 'Atlas preserves the original transcript.'.padEnd(800, ' '); // > MIN_PAGE_CHARS_FOR_EXTRACTION (500)
 
 async function seedPage(opts: {
   slug: string;
@@ -685,9 +688,9 @@ describe('local extract-atoms config knobs', () => {
     // Discovery honored the configured budget: 2 eligible pages, 1 processed.
     expect(result.details.pages_processed).toBe(1);
     expect(captured.length).toBe(1);
-    // Payload after the "Source: ...\n\n---\n\n" preamble is sliced to the
+    // Payload inside the <transcript> wrapper is sliced to the
     // configured max_source_chars (default would have been 50_000 → 2000 z's).
-    const body = captured[0].split('\n\n---\n\n')[1] ?? '';
+    const body = /<transcript>\n([\s\S]*)\n<\/transcript>/.exec(captured[0])?.[1] ?? '';
     expect(body).toBe('z'.repeat(600));
   }, 30_000);
 });
@@ -759,7 +762,7 @@ describe('local extract-atoms config knobs — invalid-value fallbacks', () => {
     const captured: string[] = [];
     await runPhaseExtractAtoms(engine, { _transcripts: [], _chat: capturingChat(captured) as never });
     expect(captured.length).toBe(1);
-    const body = captured[0].split('\n\n---\n\n')[1] ?? '';
+    const body = /<transcript>\n([\s\S]*)\n<\/transcript>/.exec(captured[0])?.[1] ?? '';
     expect(body).toBe('z'.repeat(2000)); // default 50_000 → no truncation
   }, 30_000);
 
@@ -769,7 +772,7 @@ describe('local extract-atoms config knobs — invalid-value fallbacks', () => {
     const captured: string[] = [];
     await runPhaseExtractAtoms(engine, { _transcripts: [], _chat: capturingChat(captured) as never });
     expect(captured.length).toBe(1);
-    const body = captured[0].split('\n\n---\n\n')[1] ?? '';
+    const body = /<transcript>\n([\s\S]*)\n<\/transcript>/.exec(captured[0])?.[1] ?? '';
     expect(body).toBe('z'.repeat(500));
   }, 30_000);
 });

@@ -14,6 +14,8 @@ export async function sharedSkillSourcePolicy(engine: BrainEngine, sourceId: str
   const [source] = await engine.executeRaw<{ config: unknown }>('SELECT config FROM sources WHERE id=$1 AND NOT archived', [sourceId]);
   if (!source) throw new OperationError('source_changed', 'The selected content source is missing or archived.');
   const config = parseSourceConfig(source.config);
+  if (config.mirror_read_only === true) return { mode: 'preserve_files',
+    reason: 'source_writeback_required: this source is a read-only mirror. Shared-skill setup must preserve its files and use a separately authorized content source.' };
   if (config.kind != null) return { mode: 'preserve_files',
     reason: 'source_skill_adoption_required: this connector-managed source is not a shared-skill write target. Preserve its generated/imported files and put approved shared skills in a separate content source.' };
   if (config.remote_url != null || config.managed_clone === true) return { mode: 'explicit_pack_required',

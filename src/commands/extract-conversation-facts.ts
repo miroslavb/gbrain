@@ -73,7 +73,8 @@ import {
   type ExtractedFact,
 } from '../core/facts/extract.ts';
 import { configureGatewayIfUninitialized, isAvailable, withBudgetTracker } from '../core/ai/gateway.ts';
-import { assertUnmanagedCanonicalWriter } from '../core/persistence/maintenance.ts';
+import { managedDerivedFactsPreflight, replaceDerivedFactsForPage, writeDerivedFacts } from '../core/persistence/derived-facts.ts';
+import { managedPersistenceEnabled } from '../core/persistence/ownership.ts';
 import { BudgetTracker, BudgetExhausted, loadPricingOverrides } from '../core/budget/budget-tracker.ts';
 import { listSources } from '../core/sources-ops.ts';
 import {
@@ -709,6 +710,8 @@ interface ExtractCoreState {
   result: ExtractConversationFactsResult;
   engine: BrainEngine;
   sourceId: string;
+  /** Managed brain: a page's rows are buffered and replace the prior batch in one coordinator transaction. */
+  managed: boolean;
   dryRun: boolean;
   sleepMs: number;
   segmentLimit: number;
@@ -955,6 +958,30 @@ async function snapshotIsCurrent(
   return currentSnapshot.versionToken === snapshot.versionToken;
 }
 
+/**
+ * Managed publication: under the page lock the page must still be the same
+ * row at the same revision with the same parser input the batch came from.
+ * Counts the replaced prior batch as cleaned and returns the rows inserted.
+ */
+async function replacePageFacts(
+  state: ExtractCoreState,
+  snapshot: ConversationPageSnapshot,
+  build: (tx: BrainEngine) => Promise<Array<NewFact & { row_num: number; source_markdown_slug: string }>>,
+): Promise<number> {
+  const { page } = snapshot;
+  const { deleted, inserted } = await replaceDerivedFactsForPage(state.engine, state.sourceId, page.slug, {
+    sourcePrefix: 'cli:extract-conversation-facts',
+    isCurrent: async tx => {
+      const current = await tx.getPage(page.slug, { sourceId: state.sourceId });
+      return !!current && current.id === page.id && current.knowledge_revision === page.knowledge_revision &&
+        (await preparePageSnapshot(tx, current)).versionToken === snapshot.versionToken;
+    },
+    build,
+  });
+  state.result.orphan_facts_cleaned += deleted;
+  return inserted;
+}
+
 async function processPage(
   state: ExtractCoreState,
   snapshot: ConversationPageSnapshot,
@@ -1077,6 +1104,9 @@ async function processPage(
       // orphan cleanup below until the page re-extracts.)
       !declinedUnrecognizedSpeaker
     ) {
+      const reason = messages.length === 0
+        ? 'no conversation messages found'
+        : 'fewer than two eligible messages';
       if (await snapshotIsCurrent(state.engine, state.sourceId, snapshot)) {
         const rowNum = await peekRowNumStart(
           state.engine,
@@ -1092,7 +1122,7 @@ async function processPage(
             ? 'no conversation messages found'
             : 'fewer than two eligible messages',
         );
-        const committed = await state.engine.insertFacts( // gbrain-allow-direct-insert: atomic conversation-page epoch reconcile; transcript is canonical
+        const committed = await writeDerivedFacts(state.engine, state.sourceId, page.slug, db => db.insertFacts( // gbrain-allow-direct-insert: atomic conversation-page epoch reconcile; transcript is canonical
           [marker],
           { source_id: state.sourceId },
           {
@@ -1108,7 +1138,7 @@ async function processPage(
             postCommitCheck: sidecarCommitCheck,
             requireAllRows: true,
           },
-        );
+        ));
         state.result.orphan_facts_cleaned += committed.deleted;
         state.result.pages_marked_non_extractable++;
       }
@@ -1292,7 +1322,7 @@ async function processPage(
     await snapshotIsCurrent(state.engine, state.sourceId, snapshot)
   ) {
     const terminal = buildTerminalAuditRow(page.slug, rowNum, snapshot.versionToken);
-    const committed = await state.engine.insertFacts( // gbrain-allow-direct-insert: atomic conversation-page epoch reconcile; transcript is canonical
+    const committed = await writeDerivedFacts(state.engine, state.sourceId, page.slug, db => db.insertFacts( // gbrain-allow-direct-insert: atomic conversation-page epoch reconcile; transcript is canonical
       [...stagedRows, terminal],
       { source_id: state.sourceId },
       {
@@ -1308,7 +1338,7 @@ async function processPage(
         postCommitCheck: sidecarCommitCheck,
         requireAllRows: true,
       },
-    );
+    ));
     state.result.orphan_facts_cleaned += committed.deleted;
     pageInsertedTotal = stagedRows.length;
     state.result.facts_inserted += pageInsertedTotal;
@@ -1330,6 +1360,7 @@ async function processPage(
     );
     newestEnd = null;
   }
+
 
   if (newestEnd !== null) {
     // v0.41.15.0 (codex #5/#6): per-page atomic checkpoint write. Mutate
@@ -1410,7 +1441,7 @@ export async function runExtractConversationFactsCore(
   if (!sourceId) {
     throw new Error('runExtractConversationFactsCore: opts.sourceId is required');
   }
-  await assertUnmanagedCanonicalWriter(engine, 'bulk conversation fact extraction');
+  const managed = await managedDerivedFactsPreflight(engine, sourceId);
 
   const result: ExtractConversationFactsResult = {
     pages_considered: 0,
@@ -1528,6 +1559,7 @@ export async function runExtractConversationFactsCore(
     result,
     engine,
     sourceId,
+    managed,
     dryRun,
     sleepMs,
     segmentLimit,
@@ -1850,7 +1882,7 @@ async function writeRunReceiptAndRollup(
   const runId = `ecf-${Date.now().toString(36)}-${sourceId.slice(0, 4)}`;
 
   // Facts and quality-only outcomes are both auditable.
-  if (result.facts_inserted > 0 || result.quality_candidates > 0) {
+  if ((result.facts_inserted > 0 || result.quality_candidates > 0) && !await managedPersistenceEnabled(engine)) {
     try {
       await writeReceipt(engine, {
         kind: 'facts.conversation',
@@ -2114,7 +2146,6 @@ export async function runExtractConversationFacts(
     console.log(HELP);
     return;
   }
-  await assertUnmanagedCanonicalWriter(engine, 'bulk conversation fact extraction');
 
   // --background path.
   const backgrounded = await maybeBackground({

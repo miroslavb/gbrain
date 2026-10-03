@@ -225,7 +225,7 @@ export async function buildEntityCard(
     create_safety: 'exists',
   }));
 
-  const card = await assembleCard(engine, sourceId, best.row, opts.remote);
+  const card = await assembleCard(engine, sourceId, best.row, opts.remote, excludePrivate);
   return {
     found: true,
     ambiguous: !canonical && candidates.filter(c => c.rank === best.rank).length > 1,
@@ -244,9 +244,14 @@ async function assembleCard(
   sourceId: string,
   row: CardPageRow,
   remote: boolean,
+  excludePrivate: boolean,
 ): Promise<EntityCard> {
   const pageSlug = row.slug;
   const visibility = undefined;
+  const { privatePagesFilterFragment, privateLinkOriginFilterFragment } = await import('../search/private-visibility.ts');
+  const inboundPrivacy = excludePrivate
+    ? ` AND ${privatePagesFilterFragment('f')} AND ${privateLinkOriginFilterFragment('l')}`
+    : '';
 
   // Parallel depth-1 reads — every arm individually fail-soft so a partial
   // brain (no aliases, no timeline) still returns a card.
@@ -258,7 +263,10 @@ async function assembleCard(
   // a both-sides-scoped query here (f.source_id = t.source_id = this source),
   // mentions excluded (matching the backlink-count convention). Outgoing edges
   // (getLinks) are the entity's OWN declared links — from-side scoped — so they
-  // stay as-is.
+  // stay as-is. The referrer must also be live and, for an untrusted caller,
+  // readable: the same private-page and private-origin predicates get_backlinks
+  // applies, so a private or derived page never surfaces its slug, its
+  // links.context sentence, or a count.
   const [aka, outLinks, inEdges, backlinkCount, timeline, facts, activeFactCount] = await Promise.all([
     engine
       .executeRaw<{ alias_norm: string }>(
@@ -267,15 +275,15 @@ async function assembleCard(
       )
       .then(rs => rs.map(r => r.alias_norm))
       .catch(() => [] as string[]),
-    engine.getLinks(pageSlug, { sourceId }).catch(() => []),
+    engine.getLinks(pageSlug, { sourceId, excludePrivate }).catch(() => []),
     engine
       .executeRaw<{ from_slug: string; link_type: string; context: string | null }>(
         `SELECT f.slug AS from_slug, l.link_type, l.context
            FROM links l
            JOIN pages f ON f.id = l.from_page_id
            JOIN pages t ON t.id = l.to_page_id
-          WHERE t.slug = $1 AND t.source_id = $2 AND f.source_id = $2
-            AND COALESCE(l.link_source, '') <> 'mentions'`,
+          WHERE t.slug = $1 AND t.source_id = $2 AND f.source_id = $2 AND f.deleted_at IS NULL
+            AND COALESCE(l.link_source, '') <> 'mentions'${inboundPrivacy}`,
         [pageSlug, sourceId],
       )
       .catch(() => [] as Array<{ from_slug: string; link_type: string; context: string | null }>),
@@ -285,13 +293,13 @@ async function assembleCard(
            FROM links l
            JOIN pages f ON f.id = l.from_page_id
            JOIN pages t ON t.id = l.to_page_id
-          WHERE t.slug = $1 AND t.source_id = $2 AND f.source_id = $2
-            AND COALESCE(l.link_source, '') <> 'mentions'`,
+          WHERE t.slug = $1 AND t.source_id = $2 AND f.source_id = $2 AND f.deleted_at IS NULL
+            AND COALESCE(l.link_source, '') <> 'mentions'${inboundPrivacy}`,
         [pageSlug, sourceId],
       )
       .then(rs => Number(rs[0]?.n ?? 0))
       .catch(() => 0),
-    engine.getTimeline(pageSlug, { limit: 5, sourceId }).catch(() => []),
+    engine.getTimeline(pageSlug, { limit: 5, sourceId, excludePrivate }).catch(() => []),
     engine
       .listFactsByEntity(sourceId, pageSlug, {
         activeOnly: true,

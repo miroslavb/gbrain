@@ -33,7 +33,7 @@ export async function exerciseAtomCompaction(engine: BrainEngine, scenario: type
       const page = (await engine.getPage('notes/2026-01-01-example', { sourceId }))!;
       const titles = ['Measured progress', 'Explicit ownership'];
       // Fork contract: atom slugs keep the title-hash shape (upstream #4733 not adopted).
-      const slugs = titles.map(title => atomSlug(title, page.slug));
+      const slugs = titles.map(title => atomSlug(title, page.slug, page.slug, new Date(page.created_at).toISOString().slice(0, 10)));
       await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
       const observe = (target: BrainEngine): BrainEngine => new Proxy(target, {
         get(current, key) {

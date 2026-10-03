@@ -117,7 +117,7 @@ describe('runFactsBackstop (page-sourced)', () => {
     expect(prompts[0]).toContain('Linked thing started on demand');
   });
 
-  test('a claim about a subject without a page is stored on the origin page, not a page-less slug', async () => {
+  test('an unknown subject stays unattributed with origin provenance; a verified subject is fenced', async () => {
     stub([
       { fact: 'The draft gold file replaced two quotes for the origin gate.', entity: 'gold-draft-file' },
       { fact: 'The origin gate owner confirmed the schedule for Sunday mornings.', entity: null },
@@ -125,8 +125,14 @@ describe('runFactsBackstop (page-sourced)', () => {
     ]);
     await runFactsBackstop(pageInput('projects/origin-page', 'A long enough new paragraph about the gate schedule and its draft gold file, on alpha node.'), ctx());
     const onOrigin = (await engine.listFactsByEntity(SOURCE, 'projects/origin-page')).map((f) => f.fact);
-    expect(onOrigin).toContain('The draft gold file replaced two quotes for the origin gate.');
-    expect(onOrigin).toContain('The origin gate owner confirmed the schedule for Sunday mornings.');
+    expect(onOrigin).not.toContain('The draft gold file replaced two quotes for the origin gate.');
+    const [unresolved] = await engine.executeRaw('SELECT entity_slug,context FROM facts WHERE source_id=$1 AND fact=$2',
+      [SOURCE, 'The draft gold file replaced two quotes for the origin gate.']);
+    expect(unresolved.entity_slug).toBeNull();
+    expect(unresolved.context).toContain('projects/origin-page');
+    expect(onOrigin).not.toContain('The origin gate owner confirmed the schedule for Sunday mornings.');
+    // This fixture has no working tree; upstream intentionally leaves inferred
+    // subjects unparented instead of creating unfenced legacy rows.
     expect(await engine.listFactsByEntity(SOURCE, 'gold-draft-file')).toEqual([]);
     const onAlpha = (await engine.listFactsByEntity(SOURCE, 'hosts/alpha-node')).map((f) => f.fact);
     expect(onAlpha).toContain('Alpha node hosts the origin gate runner process now.');

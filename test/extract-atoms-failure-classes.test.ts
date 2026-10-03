@@ -53,9 +53,10 @@ function okChatResult(text: string): ChatResult {
   } as ChatResult;
 }
 
+const EVIDENCE = 'The insight body prose is a durable observation.';
 const HASH_A = 'a'.repeat(16);
 const ATOM_JSON = JSON.stringify([
-  { title: 'A durable insight', atom_type: 'insight', body: 'The insight body prose.' },
+  { title: 'A durable insight', atom_type: 'insight', body: EVIDENCE, source_quote: EVIDENCE },
 ]);
 
 async function seedPage(slug: string): Promise<void> {
@@ -122,7 +123,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     // and the trailing prose from the sent prompt entirely.
     expect(capturedPrompt).not.toContain('trailing prose');
     expect(capturedPrompt).toContain('a'.repeat(49_999));
-    expect(capturedPrompt.length).toBe(`Source: note/surrogate-boundary\n\n---\n\n${'a'.repeat(49_999)}`.length);
+    expect(/<transcript>\n([\s\S]*)\n<\/transcript>/.exec(capturedPrompt)?.[1]).toBe('a'.repeat(49_999));
   });
 
   test('malformed output is a counted failure, NOT a zero-yield tombstone', async () => {
@@ -130,7 +131,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const result = await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/m1', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/m1', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => okChatResult('no json in sight'),
     });
     expect(result.details.malformed_outputs).toBe(1);
@@ -150,7 +151,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const opts = {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/m2', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/m2', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => okChatResult('still not json'),
     };
     for (let i = 1; i < MAX_DETERMINISTIC_FAILURES; i++) {
@@ -176,7 +177,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const mk = (hash: string) => ({
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/m3', content: 'prose', contentHash: hash }],
+      _pages: [{ slug: 'note/m3', content: EVIDENCE, contentHash: hash }],
       _chat: async (_o: ChatOpts) => okChatResult('nope'),
     });
     await runPhaseExtractAtoms(engine, mk(HASH_A));
@@ -195,7 +196,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const result = await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/t1', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/t1', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => { throw new Error('fetch failed: 503 upstream timeout'); },
     });
     const failures = result.details.failures as Array<{ error: string }>;
@@ -223,7 +224,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const opts = {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/q1', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/q1', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => okChatResult(ATOM_JSON),
       _semanticValidator: rejectAtomicity,
     };
@@ -256,7 +257,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
     const result = await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/q2', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/q2', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => okChatResult(ATOM_JSON),
       _semanticValidator: async () => { throw new Error('validator transport failed'); },
     });
@@ -275,7 +276,7 @@ describe('runPhaseExtractAtoms — failure classes (gbrain#4148)', () => {
 // with a clean failure streak.
 describe('runPhaseExtractAtoms — global-error halt (#3044)', () => {
   const mkPages = (slugs: string[]) =>
-    slugs.map((slug, i) => ({ slug, content: 'prose', contentHash: String(i).repeat(16) }));
+    slugs.map((slug, i) => ({ slug, content: EVIDENCE, contentHash: String(i).repeat(16) }));
 
   test('auth error halts on the FIRST hit without charging the per-page failure counter', async () => {
     await seedPage('note/g1');
@@ -357,7 +358,7 @@ describe('runPhaseExtractAtoms — global-error halt (#3044)', () => {
 // misreport a heavy-but-healthy run as failing).
 describe('runPhaseExtractAtoms — extract_health rollup excludes transient failures', () => {
   const mkPages = (slugs: string[]) =>
-    slugs.map((slug, i) => ({ slug, content: 'prose', contentHash: String(i).repeat(16) }));
+    slugs.map((slug, i) => ({ slug, content: EVIDENCE, contentHash: String(i).repeat(16) }));
 
   async function rollupRow(kind: string): Promise<{ halt_count: number; round_completed_count: number } | undefined> {
     const rows = await engine.executeRaw<{ halt_count: number; round_completed_count: number }>(
@@ -372,7 +373,7 @@ describe('runPhaseExtractAtoms — extract_health rollup excludes transient fail
     await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/rt1', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/rt1', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => { throw new Error('fetch failed: 503 upstream timeout'); },
     });
     const row = await rollupRow('atoms');
@@ -386,7 +387,7 @@ describe('runPhaseExtractAtoms — extract_health rollup excludes transient fail
     await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/rh1', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/rh1', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => okChatResult('no json in sight'),
     });
     const row = await rollupRow('atoms');
@@ -400,7 +401,7 @@ describe('runPhaseExtractAtoms — extract_health rollup excludes transient fail
     await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/rh2', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/rh2', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => { throw new Error('unexpected internal error: null pointer'); },
     });
     const row = await rollupRow('atoms');
@@ -449,7 +450,7 @@ describe('runPhaseExtractAtoms — completion receipt (gbrain#4148)', () => {
     const result = await runPhaseExtractAtoms(engine, {
       sourceId: 'default',
       _transcripts: [],
-      _pages: [{ slug: 'note/ok1', content: 'prose', contentHash: HASH_A }],
+      _pages: [{ slug: 'note/ok1', content: EVIDENCE, contentHash: HASH_A }],
       _chat: async (_o: ChatOpts) => okChatResult(ATOM_JSON),
     });
     expect(result.details.atoms_extracted).toBe(1);
@@ -505,5 +506,78 @@ describe('runPhaseExtractAtoms — completion receipt (gbrain#4148)', () => {
     );
     const done = await discoverExtractablePages(engine, 'default');
     expect(done.map(p => p.slug)).not.toContain('meetings/2026-04-03');
+  });
+});
+
+// #5809 / #5832: the drain's hard signal (job timeout/cancel, cycle-lock lease
+// loss, job deadline) reaches the in-flight model call and stops the run
+// before the next commit; the interrupted page takes no strike and nothing is
+// written after the stop (no atoms, no scan state, no rollup row). The soft
+// signal (drain window) lets the page in flight finish and commit, then stops
+// before the next page, booked as an expected limit.
+describe('runPhaseExtractAtoms — hard and soft stops (#5809)', () => {
+  const mkPages = (slugs: string[]) =>
+    slugs.map((slug, i) => ({ slug, content: EVIDENCE, contentHash: String(i + 1).repeat(16) }));
+  const atomPages = async () =>
+    Number((await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM pages WHERE type = 'atom'`))[0].n);
+  const rollup = async () => (await engine.executeRaw<{ round_completed_count: number; expected_limit_count: number; halt_count: number }>(
+    `SELECT round_completed_count, expected_limit_count, halt_count FROM extract_rollup_7d WHERE kind = 'atoms' AND source_id = 'default'`,
+  ))[0];
+
+  test.each([
+    { callOutcome: 'throws', pacingMs: null },
+    { callOutcome: 'still answers', pacingMs: null },
+    { callOutcome: 'still answers under per-item pacing', pacingMs: '60000' },
+  ])('a hard abort while the model call $callOutcome commits nothing and strikes nothing', async ({ callOutcome, pacingMs }) => {
+    if (pacingMs) await engine.setConfig('cycle.extract_atoms.pacing_ms', pacingMs);
+    await seedPage('note/ab1');
+    await seedPage('note/ab2');
+    const controller = new AbortController();
+    const callSignals: Array<AbortSignal | undefined> = [];
+    const result = await runPhaseExtractAtoms(engine, {
+      sourceId: 'default',
+      _transcripts: [],
+      _pages: mkPages(['note/ab1', 'note/ab2']),
+      signal: controller.signal,
+      _chat: async (o: ChatOpts) => {
+        callSignals.push(o.abortSignal);
+        controller.abort(new Error('timeout'));
+        if (callOutcome === 'throws') throw new Error('claude-cli adapter aborted');
+        return okChatResult(ATOM_JSON);
+      },
+    }).finally(() => engine.unsetConfig('cycle.extract_atoms.pacing_ms'));
+    expect(callSignals).toEqual([controller.signal]);
+    expect(result.details.failures).toEqual([]);
+    expect(result.details.pages_processed).toBe(0);
+    expect(await atomPages()).toBe(0);
+    expect(await stateOf('note/ab1')).toBeUndefined();
+    expect(await stateOf('note/ab2')).toBeUndefined();
+    expect(await rollup()).toBeUndefined();
+  }, 20_000);
+
+  test('a soft stop during a page lets that page commit, then stops before the next one', async () => {
+    await seedPage('note/sf1');
+    await seedPage('note/sf2');
+    const hard = new AbortController();
+    const soft = new AbortController();
+    const calls: Array<boolean | undefined> = [];
+    const result = await runPhaseExtractAtoms(engine, {
+      sourceId: 'default',
+      _transcripts: [],
+      _pages: mkPages(['note/sf1', 'note/sf2']),
+      signal: hard.signal,
+      stopSignal: soft.signal,
+      _chat: async (o: ChatOpts) => {
+        soft.abort(new Error('window'));
+        calls.push(o.abortSignal?.aborted);
+        return okChatResult(ATOM_JSON);
+      },
+    });
+    expect(calls).toEqual([false]);
+    expect(result.details.pages_processed).toBe(1);
+    expect(result.details.atoms_extracted).toBe(1);
+    expect((await stateOf('note/sf1'))?.tombstoned).toBe(true);
+    expect(await stateOf('note/sf2')).toBeUndefined();
+    expect(await rollup()).toMatchObject({ round_completed_count: 0, expected_limit_count: 1, halt_count: 0 });
   });
 });

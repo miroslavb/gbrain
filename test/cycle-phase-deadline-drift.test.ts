@@ -72,7 +72,7 @@ describe('propose_takes deadline < job timeout (#4168)', () => {
   });
 
   test('SOURCE SHAPE: dream --max-pages reaches propose_takes pageLimit only', () => {
-    // test-reads-source-ok: this is a deliberate CLI-to-cycle structural
+    // test-reads-source-ok[structural]: this is a deliberate CLI-to-cycle structural
     // wiring guard; the runtime behavior otherwise requires a full dream run.
     const dream = readFileSync(new URL('../src/commands/dream.ts', import.meta.url), 'utf-8');
     // Runtime phase confinement is exercised by test/dream.test.ts, including

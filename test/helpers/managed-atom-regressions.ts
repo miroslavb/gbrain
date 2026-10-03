@@ -73,7 +73,7 @@ export async function exerciseAtomRetryFence(engine: BrainEngine, state: typeof 
       const page = (await engine.getPage('notes/2026-01-01-example', { sourceId }))!;
       const titles = state === 'committed' ? ['Measured progress', 'Explicit ownership'] : ['Measured progress'];
       // Fork contract: atom slugs keep the title-hash shape (upstream #4733 not adopted).
-      const slugs = titles.map(title => atomSlug(title, page.slug));
+      const slugs = titles.map(title => atomSlug(title, page.slug, page.slug, new Date(page.created_at).toISOString().slice(0, 10)));
       if (state !== 'committed') await engine.putPage(slugs[0], { type: 'atom', title: titles[0], compiled_truth: 'Previously reviewed atom.',
         frontmatter: { source_slug: page.slug, visibility: 'private' } }, { sourceId });
       const originalTarget = await engine.readPageSnapshot(slugs[0], { sourceId });

@@ -60,21 +60,28 @@ const FENCE_BEGIN = '<!--- gbrain:facts:begin -->';
 const FENCE_END = '<!--- gbrain:facts:end -->';
 
 /**
- * Strike fence row `rowNum` inside `body`: strikethrough on the claim
- * (already-struck rows stay struck), valid_until = today, `forgotten:
- * <reason>` appended to context (preserving any existing context). Returns
- * the rewritten body, or null when the fence lacks the row (DB drifted from
- * markdown) or its markers — callers fall back to a DB-only expire.
+ * A superseded row is struck like a forgotten one but carries the parser's
+ * `superseded by #N` reference instead of the withdrawal marker, so the next
+ * reconcile links it and it never becomes a durable withdrawal.
  */
-function strikeFenceRow(body: string, rowNum: number, reason: string, today: string): string | null {
+export function supersededFact(fact: ParsedFact, today: string, newRowNum: number | null): ParsedFact {
+  const context = [newRowNum !== null ? `superseded by #${newRowNum}` : 'superseded', fact.context?.trim()].filter(Boolean).join(' | ');
+  const validUntil = fact.validUntil && /^\d{4}-\d{2}-\d{2}$/.test(fact.validUntil) && fact.validUntil < today ? fact.validUntil : today;
+  return { ...fact, active: false, validUntil, context };
+}
+
+/**
+ * Strike fence row `rowNum` inside `body` with `strike` (strikethrough,
+ * valid_until = today, and a withdrawal or supersession marker in context,
+ * preserving existing context). Returns the rewritten body, or null when the
+ * fence lacks the row (DB drifted from markdown) or its markers — callers
+ * fall back to a DB-only expire.
+ */
+export function strikeFenceRow(body: string, rowNum: number, strike: (fact: ParsedFact) => ParsedFact): string | null {
   const parsed = parseFactsFence(body);
   const target = parsed.facts.find(f => f.rowNum === rowNum);
   if (!target) return null;
-  const updated: ParsedFact[] = parsed.facts.map(f =>
-    f.rowNum === rowNum
-      ? withdrawnFact(f, today, reason)
-      : f,
-  );
+  const updated: ParsedFact[] = parsed.facts.map(f => f.rowNum === rowNum ? strike(f) : f);
   const begin = body.indexOf(FENCE_BEGIN);
   const end = body.indexOf(FENCE_END, begin + 1);
   if (begin === -1 || end === -1) return null;
@@ -111,10 +118,21 @@ export async function forgetFactInFence(
      * could never read (mirrors recall's remote posture).
      */
     worldOnly?: boolean;
+    /**
+     * Supersession, not withdrawal: expire and strike the row with a
+     * `superseded by #N` reference to the replacing fact's fence row. No
+     * durable withdrawal is recorded, so the old claim can be remembered
+     * again and no other page is invalidated.
+     */
+    supersededBy?: { rowNum: number | null };
   } = {},
 ): Promise<ForgetFactResult> {
   const reason = opts.reason ?? 'forgotten';
   const today = todayUtc();
+  const supersession = opts.supersededBy;
+  const strike = (fact: ParsedFact) => supersession
+    ? supersededFact(fact, today, supersession.rowNum)
+    : withdrawnFact(fact, today, reason);
 
   const rows = await engine.executeRaw<FactDbRow>(
     `SELECT id, source_id, entity_slug, row_num, source_markdown_slug, expired_at, visibility
@@ -155,7 +173,7 @@ export async function forgetFactInFence(
     const slug = row.source_markdown_slug;
     const page = await engine.getPage(slug, { sourceId: row.source_id });
     if (!page) return;
-    const struck = strikeFenceRow(page.compiled_truth ?? '', row.row_num, reason, today);
+    const struck = strikeFenceRow(page.compiled_truth ?? '', row.row_num, strike);
     if (struck === null) return;
     // The FILE was not rewritten on this tier, so the row must NOT keep the
     // importer's hash: sync would see file == row and skip, leaving
@@ -171,7 +189,8 @@ export async function forgetFactInFence(
   // holds the same per-page lock the fence writers do (`locked` = the fence
   // tier is calling from inside its own withPageLock).
   const legacyExpire = async (locked = false): Promise<ForgetFactResult> => {
-    await recordFactWithdrawal(engine, factId, row.source_id, opts.worldOnly === true, { strict: true });
+    if (supersession) await engine.executeRaw('UPDATE facts SET expired_at=now(),valid_until=LEAST(COALESCE(valid_until,now()),now()) WHERE id=$1 AND expired_at IS NULL', [factId]);
+    else await recordFactWithdrawal(engine, factId, row.source_id, opts.worldOnly === true, { strict: true });
     const ok = true;
     if (ok && row.source_markdown_slug !== null) {
       const slug = row.source_markdown_slug;
@@ -224,7 +243,7 @@ export async function forgetFactInFence(
       // Fence missing the row (DB drifted from markdown) or its markers (race /
       // corruption): fall through to legacy expire so the user's intent
       // succeeds; doctor surfaces the drift separately.
-      const newBody = strikeFenceRow(body, targetRowNum, reason, today);
+      const newBody = strikeFenceRow(body, targetRowNum, strike);
       if (newBody === null) return legacyExpire(true);
 
       // Atomic .tmp + parse-validate + rename.
@@ -243,7 +262,8 @@ export async function forgetFactInFence(
       // A failure rolls back withdrawal plus only our own file bytes.
       try {
         await engine.transaction(async tx => {
-          await recordFactWithdrawalInTransaction(tx, factId, row.source_id, opts.worldOnly === true, { strict: true });
+          if (supersession) await tx.executeRaw('UPDATE facts SET expired_at=now(),valid_until=LEAST(COALESCE(valid_until,now()),now()) WHERE id=$1 AND expired_at IS NULL', [factId]);
+          else await recordFactWithdrawalInTransaction(tx, factId, row.source_id, opts.worldOnly === true, { strict: true });
           await tx.executeRaw(
             `UPDATE facts SET valid_until = $1
              WHERE id = $2 AND source_id = $3`,

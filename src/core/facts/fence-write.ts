@@ -48,7 +48,7 @@ import { assertSourceFilesystemActive, hasSourceFilesystemLock, withSourceFilesy
 import { gbrainPath } from '../config.ts';
 import { isWriteThroughDisabled, resolvePageWriteTarget } from '../write-through.ts';
 import { isDurabilityHardened, commitWriteThroughFile } from '../brain-repo-durability.ts';
-import { upsertFactRow, parseFactsFence, renderFactsTable } from '../facts-fence.ts';
+import { upsertFactRow, parseFactsFence, renderFactsTable, formatFenceDate } from '../facts-fence.ts';
 import { contentHash } from '../utils.ts';
 import { extractFactsFromFenceText } from './extract-from-fence.ts';
 import { rollbackFactFile } from './file-rollback.ts';
@@ -56,6 +56,8 @@ import { factPageProjection } from './page-projection.ts';
 import { logStubGuardEvent } from './stub-guard-audit.ts';
 import { selectExactFenceFacts } from './fence-exact-dedup.ts';
 import { assertUnmanagedCanonicalWriter } from '../persistence/maintenance.ts';
+import { isFactWithdrawn } from './withdrawal.ts';
+import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 
 /** Resolved source binding for the entity page. */
 export interface FenceTarget {
@@ -78,6 +80,7 @@ export interface FenceTarget {
 
 /** Input fact prepared by runPipelineWithBody (post-dedup). */
 export interface FenceInputFact {
+  embedding_model?: string | null;
   fact: string;
   kind: NewFact['kind'];
   notability: NewFact['notability'];
@@ -88,8 +91,9 @@ export interface FenceInputFact {
   confidence?: number;
   validFrom?: Date;
   /**
-   * MEMORY_VERBS v1 (c5): remember's ttl → valid_until. Date-only in the
-   * fence cell; the DB column derives from it on the stamp step.
+   * MEMORY_VERBS v1 (c5): remember's ttl → valid_until. Written to the
+   * fence cell losslessly (formatFenceDate); the DB column derives from it on
+   * the stamp step.
    * Undefined/null = never expires (pre-v1 behavior unchanged).
    */
   validUntil?: Date | null;
@@ -122,6 +126,12 @@ export interface FenceWriteResult {
    * `jared.md` stub.
    */
   stubGuardBlocked?: true;
+  /**
+   * Input facts dropped because their claim is withdrawn for this page's
+   * entity (write-path audit B-10): a withdrawn claim is never appended to
+   * the Markdown fence as an active row.
+   */
+  withdrawnSkipped?: number;
   /**
    * True when the shared page-target resolver could not produce a usable
    * fence file path (source tree missing / not a directory, or a hostile
@@ -282,7 +292,19 @@ export async function writeFactsToFence(
   target: FenceTarget,
   facts: FenceInputFact[],
 ): Promise<FenceWriteResult> {
-  await assertUnmanagedCanonicalWriter(engine, 'direct facts fence write');
+  if (await managedPersistenceEnabled(engine)) {
+    // The coordinator owns the canonical file on a managed brain: publish the
+    // fence rows through its fact intent instead of editing the file here.
+    const kept: FenceInputFact[] = [];
+    for (const f of facts) {
+      if (!await isFactWithdrawn(engine, target.sourceId, f.visibility, f.fact, target.slug)) kept.push(f);
+    }
+    const withdrawnSkipped = facts.length - kept.length ? { withdrawnSkipped: facts.length - kept.length } : {};
+    if (!kept.length) return { inserted: 0, ids: [], ...withdrawnSkipped };
+    const { publishManagedEntityFacts } = await import('./managed-fact-write.ts');
+    const { inserted, ids } = await publishManagedEntityFacts(engine, target.sourceId, target.slug, kept);
+    return { inserted, ids, ...withdrawnSkipped };
+  }
   if (target.localPath === null) {
     return { inserted: 0, ids: [], legacyFallback: true };
   }
@@ -326,6 +348,14 @@ export async function writeFactsToFence(
   return withPageLock(
     target.slug,
     async () => {
+      const kept: FenceInputFact[] = [];
+      for (const f of facts) {
+        if (!await isFactWithdrawn(engine, target.sourceId, f.visibility, f.fact, target.slug)) kept.push(f);
+      }
+      const withdrawnSkipped = facts.length - kept.length ? { withdrawnSkipped: facts.length - kept.length } : {};
+      facts = kept;
+      if (!facts.length) return { inserted: 0, ids: [], ...withdrawnSkipped };
+
       // 1. Read existing body or stub-create.
       const originalBody = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
       let body: string;
@@ -382,7 +412,7 @@ export async function writeFactsToFence(
               ? `[facts] refusing to stub-create unprefixed entity page slug=${target.slug} — routing to legacy DB-only path. Provide a directory prefix (people/, companies/, etc.) to opt into fence writes.`
               : `[facts] refusing to stub-create entity page slug=${target.slug} from a fallback-resolved reference (no live page verified) — routing to legacy DB-only path.`,
           );
-          return { inserted: 0, ids: [], stubGuardBlocked: true };
+          return { inserted: 0, ids: [], stubGuardBlocked: true, ...withdrawnSkipped };
         }
         // Stub-create the parent directory if it doesn't exist.
         mkdirSync(dirname(filePath), { recursive: true });
@@ -423,7 +453,8 @@ export async function writeFactsToFence(
       //    Degrades to the previous file-only behaviour if the lookup fails
       //    (pre-v51 brain without the fence columns, or a transient DB error):
       //    a fence write must not become impossible just because the counter
-      //    hint is unavailable.
+      //    hint is unavailable. The degradation is reported, never silent,
+      //    because file-only numbering is the duplicate-key class above.
       let dbMaxRowNum = 0;
       try {
         const rows = await engine.executeRaw<{ max_row_num: number | null }>(
@@ -432,8 +463,8 @@ export async function writeFactsToFence(
           [target.sourceId, target.slug],
         );
         dbMaxRowNum = Number(rows[0]?.max_row_num ?? 0);
-      } catch {
-        dbMaxRowNum = 0;
+      } catch (err) {
+        console.warn(`[facts.fence] FACTS_ROW_NUM_HINT_UNAVAILABLE: ${target.slug} (source ${target.sourceId}): ${err instanceof Error ? err.message : String(err)}; numbering from the file alone`);
       }
       const { facts: existingFenceFacts } = parseFactsFence(body);
       const fileMaxRowNum = existingFenceFacts.length > 0
@@ -443,7 +474,6 @@ export async function writeFactsToFence(
 
       const assignedRowNums: number[] = [];
       for (const f of facts) {
-        const validFromStr = (f.validFrom ?? new Date()).toISOString().slice(0, 10);
         const { body: updated, rowNum } = upsertFactRow(body, {
           rowNum:      nextRowNum++,
           claim:       f.fact,
@@ -451,11 +481,11 @@ export async function writeFactsToFence(
           confidence:  f.confidence ?? 1.0,
           visibility:  f.visibility,
           notability:  f.notability ?? 'medium',
-          validFrom:   validFromStr,
+          validFrom:   formatFenceDate(f.validFrom ?? new Date()),
           // MEMORY_VERBS v1 (c5): remember's ttl threads through to the fence
           // cell — was hard-coded undefined, which silently dropped expiry on
           // this path. extractFactsFromFenceText derives the DB column from it.
-          validUntil:  f.validUntil ? f.validUntil.toISOString().slice(0, 10) : undefined,
+          validUntil:  f.validUntil ? formatFenceDate(f.validUntil) : undefined,
           source:      f.source,
           context:     f.context ?? undefined,
         });
@@ -537,6 +567,7 @@ export async function writeFactsToFence(
       const enriched = toInsert.map((row, i) => ({
         ...row,
         embedding:      facts[i].embedding,
+        embedding_model: facts[i].embedding_model,
         source_session: facts[i].sessionId,
         supersedes_fact_id: facts[i].supersedesFactId,
       }));
@@ -568,7 +599,7 @@ export async function writeFactsToFence(
           durabilityPrewriteState,
         );
       }
-      return { inserted: result.inserted, ids: selection.resolveIds(result.ids), duplicate: selection.duplicate };
+      return { inserted: result.inserted, ids: selection.resolveIds(result.ids), duplicate: selection.duplicate, ...withdrawnSkipped };
     },
     { timeoutMs: 5_000 },
   );

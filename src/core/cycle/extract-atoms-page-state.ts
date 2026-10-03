@@ -88,18 +88,26 @@ export async function completeAtomReceipts(
   });
 }
 
-const LEGACY_KEYS = ['atoms_scan_hash', 'atoms_fail_hash', 'atoms_fail_count'];
+const LEGACY_KEYS = ['atoms_scan_hash', 'atoms_fail_hash', 'atoms_fail_count',
+  'atoms_reject_hash', 'atoms_reject_count', 'atoms_reject_last_reasons'];
 
 export function matchingLegacyAtomPageState(frontmatter: Record<string, unknown>, contentHash: string): { fail_count: number; tombstoned: boolean } | null {
   if (!/^[0-9a-f]{64}$/.test(contentHash)) return null;
   const hash = contentHash.slice(0, 16);
-  const hasFailure = LEGACY_KEYS.slice(1).some(key => Object.hasOwn(frontmatter, key));
-  const count = frontmatter.atoms_fail_count;
-  if (hasFailure && (frontmatter.atoms_fail_hash !== hash || typeof count !== 'number'
-    || !Number.isInteger(count) || count < 1 || count > 2147483647)) return null;
+  let count = 0, hasFailure = false;
+  // The host fork also persisted deterministic quality rejections. Preserve
+  // matching counters without carrying stale-content evidence into a new epoch.
+  for (const prefix of ['atoms_fail', 'atoms_reject']) {
+    const present = [`${prefix}_hash`, `${prefix}_count`].some(key => Object.hasOwn(frontmatter, key));
+    if (!present) continue;
+    const value = frontmatter[`${prefix}_count`];
+    if (frontmatter[`${prefix}_hash`] !== hash || typeof value !== 'number'
+      || !Number.isInteger(value) || value < 1 || value > 2147483647) return null;
+    count = Math.max(count, value); hasFailure = true;
+  }
   if (Object.hasOwn(frontmatter, 'atoms_scan_hash') && frontmatter.atoms_scan_hash !== hash) return null;
   const tombstoned = frontmatter.atoms_scan_hash === hash;
-  return tombstoned || hasFailure ? { fail_count: hasFailure ? count as number : 0, tombstoned } : null;
+  return tombstoned || hasFailure ? { fail_count: count, tombstoned } : null;
 }
 
 export async function transferLegacyAtomPageState(engine: SqlEngine, before: PageSnapshot, after: PageSnapshot): Promise<boolean> {
@@ -117,7 +125,9 @@ export async function transferLegacyAtomPageState(engine: SqlEngine, before: Pag
     `SELECT fail_count, tombstoned FROM extract_atoms_page_state
       WHERE source_incarnation=$1::uuid AND page_id=$2 AND content_hash=$3`,
     [before.sourceIncarnation, before.page.id, before.page.content_hash]);
-  const state = existing ?? matchingLegacyAtomPageState(before.page.frontmatter, before.page.content_hash);
+  const legacy = matchingLegacyAtomPageState(before.page.frontmatter, before.page.content_hash);
+  const state = existing && legacy ? { fail_count: Math.max(existing.fail_count, legacy.fail_count),
+    tombstoned: existing.tombstoned || legacy.tombstoned } : existing ?? legacy;
   if (!state) return false;
   const rows = await engine.executeRaw(
     `INSERT INTO extract_atoms_page_state (source_incarnation, page_id, content_hash, fail_count, tombstoned)

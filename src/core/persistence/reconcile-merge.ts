@@ -6,7 +6,8 @@ import { RECONCILE_SAFETY_KEYS } from './reconcile-safety.ts';
 
 export type ReconcileDecision = { path: string; action: 'take_file' | 'take_database' | 'set_value' | 'delete'; value?: unknown };
 export interface ReconcileConflict { path: string; file: unknown; database: unknown; }
-export const RECONCILE_SCAN_KEYS = ['atoms_scan_hash', 'atoms_fail_hash', 'atoms_fail_count'];
+export const RECONCILE_SCAN_KEYS = ['atoms_scan_hash', 'atoms_fail_hash', 'atoms_fail_count',
+  'atoms_reject_hash', 'atoms_reject_count', 'atoms_reject_last_reasons'];
 const protectedKeys = new Set([...RECONCILE_SCAN_KEYS, ...RECONCILE_SAFETY_KEYS, 'visibility', 'source_hash', 'source_kind',
   'source_uri', 'source_slug', 'source_path', 'source_quote', 'source_quote_verified', 'source_quote_offset', 'quote_unverified',
   'ingested_via', 'ingested_at', 'captured_at', 'extracted_at', 'extracted_by', 'provenance',

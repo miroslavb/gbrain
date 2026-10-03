@@ -181,6 +181,8 @@ export interface VolunteerOpts {
   minConfidence?: number;
   /** v0.46.15: lexical-arms kill switch — see ResolvePointersOpts.lexicalArms. */
   lexicalArms?: boolean;
+  /** Private-page filter — see ResolvePointersOpts.excludePrivate (default true). */
+  excludePrivate?: boolean;
 }
 
 /** Shared wire protocol for window turns — watch.ts imports this so the two
@@ -401,6 +403,7 @@ export async function volunteerContext(
         suppression: ropts.suppression,
         maxPointers: ropts.maxPointers,
         lexicalArms: ropts.lexicalArms,
+        excludePrivate: opts.excludePrivate,
       }),
     candidates,
     turns.length,

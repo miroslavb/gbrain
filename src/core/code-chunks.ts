@@ -3,6 +3,7 @@ import type { ChunkInput, CodeEdgeInput } from './types.ts';
 import { chunkCodeTextFull } from './chunkers/code.ts';
 import { findChunkForOffset } from './chunkers/edge-extractor.ts';
 import { sanitizeRemoteBody } from './remote-body.ts';
+import { credentialSafeProjection } from './credential-projection.ts';
 import { isEmbedSkipped } from './embed-skip.ts';
 import { isQuarantined } from './quarantine.ts';
 
@@ -12,7 +13,7 @@ export function isFiniteLexicalSymbols(frontmatter: Record<string, unknown> | nu
 }
 
 export async function prepareCodeChunks(page: { compiled_truth: string; frontmatter?: Record<string, unknown> | null }, path: string) {
-  const content = sanitizeRemoteBody(page.compiled_truth);
+  const content = credentialSafeProjection(sanitizeRemoteBody(page.compiled_truth));
   // Fork 2026-09-27: the host code index marks its finite lexical-symbol pages
   // embed_skip (reason 'finite_lexical_symbols') so their chunks stay vector-free;
   // keyword search and code_def/code_refs still need those chunks.

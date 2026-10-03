@@ -45,10 +45,13 @@ export function factQualityContract(getEngine: () => BrainEngine) {
       expect((await writeFactsToFence(engine,target,[metric])).inserted).toBe(1);
       await forgetFactInFence(engine, first.ids[0], { sourceId, reason:'test retirement' });
       const returned = await writeFactsToFence(engine, target, [input()]);
-      expect(returned.inserted).toBe(1); expect(returned.ids[0]).not.toBe(first.ids[0]);
+      // Durable withdrawals supersede historical replay-after-forget behavior.
+      expect(returned.inserted).toBe(0); expect(returned.ids).toEqual([]);
+      expect(returned.withdrawnSkipped).toBe(1);
       const fence = parseFactsFence(readFileSync(file, 'utf8'));
       expect(fence.warnings).toEqual([]);
-      expect(fence.facts.filter(f=>!f.active)).toHaveLength(1);
+      expect(fence.facts.filter(f=>!f.active)).toHaveLength(1); // Forget retires the selected row; the ledger blocks future replay.
+      expect(fence.facts.some(f=>f.claim === 'Keep a rollback.' && f.active)).toBe(true);
     } finally { await engine.executeRaw('DELETE FROM sources WHERE id=$1', [sourceId]); rmSync(root,{recursive:true,force:true}); }
   });
 

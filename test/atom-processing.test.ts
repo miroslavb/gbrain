@@ -42,7 +42,7 @@ describe('actual page processing outcomes', () => {
     // v0.58 derived atom page state pins the exact stored page (slug, content
     // hash, body); completion is only recorded against that identity.
     const pinned = { ...page, contentHash: (await engine.getPage(page.slug))!.content_hash! };
-    const answer = JSON.stringify([{ title: 'Prototype requirement', atom_type: 'insight', body: page.content }]);
+    const answer = JSON.stringify([{ title: 'Prototype requirement', atom_type: 'insight', body: page.content, source_quote: page.content }]);
     await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [pinned], _chat: chat(answer) });
     expect(await state()).toMatchObject({ completed_scans: 1, empty_scans: 0, published_atoms: 1 });
     await runPhaseExtractAtoms(engine, { _pages: [], _transcripts: [{ filePath: '/fixture/transcript.txt',

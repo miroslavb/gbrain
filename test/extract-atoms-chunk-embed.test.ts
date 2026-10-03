@@ -188,7 +188,7 @@ describe('extracted atoms reach content_chunks (PGLite round-trip)', () => {
     expect(isAvailable('embedding')).toBe(false);
     {
       const chat = async (_o: ChatOpts): Promise<ChatResult> => ({
-        text: `[{"title":"Chunked atom","atom_type":"insight","body":"Enterprise buyers want tangible prototypes, not renders."}]`,
+        text: `[{"title":"Chunked atom","atom_type":"insight","body":"The synthetic buyer requires a tangible prototype.","source_quote":"The synthetic buyer requires a tangible prototype."}]`,
         blocks: [{ type: 'text', text: '' }],
         stopReason: 'end',
         usage: { input_tokens: 500, output_tokens: 200, cache_read_tokens: 0, cache_creation_tokens: 0 },
@@ -196,9 +196,10 @@ describe('extracted atoms reach content_chunks (PGLite round-trip)', () => {
         providerId: 'anthropic',
       });
       const result = await runPhaseExtractAtoms(engine, {
-        _transcripts: [{ filePath: '/fake/meeting.txt', content: 'transcript content', contentHash: 'abc123def4567890' }],
+        _transcripts: [{ filePath: '/fake/meeting.txt', content: 'The synthetic buyer requires a tangible prototype.', contentHash: 'abc123def4567890' }],
         _pages: [],
         _chat: chat,
+        _semanticValidator: async ({ candidates }) => ({ verdicts: candidates.map((_, index) => ({ index, scores: { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 } })), actualModel: 'anthropic:validator-fixture', route: 'anthropic' }),
       });
       expect(result.status).toBe('ok');
       expect(result.details?.atoms_extracted).toBe(1);

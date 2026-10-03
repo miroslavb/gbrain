@@ -146,11 +146,11 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
 
   test('extracts atoms from transcript via stub chat', async () => {
     const chat = stubChat(`[
-      {"title":"Renders vs physical proof","atom_type":"insight","body":"Enterprise buyers want tangible prototypes."},
-      {"title":"Founder lesson","atom_type":"anecdote","body":"Story about a founder."}
+      {"title":"Renders vs physical proof","atom_type":"insight","body":"Enterprise buyers want tangible prototypes.","source_quote":"Enterprise buyers want tangible prototypes."},
+      {"title":"Founder lesson","atom_type":"anecdote","body":"Story about a founder.","source_quote":"Story about a founder."}
     ]`);
     const result = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: '/fake/meeting.txt', content: 'content', contentHash: 'abc123def' }],
+      _transcripts: [{ filePath: '/fake/meeting.txt', content: 'Enterprise buyers want tangible prototypes. Story about a founder.', contentHash: 'abc123def' }],
       _pages: [], // suppress page discovery — transcript-only test
       _chat: chat,
     });
@@ -166,9 +166,9 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
   });
 
   test('dry-run counts but does NOT write', async () => {
-    const chat = stubChat(`[{"title":"x","atom_type":"insight","body":"b"}]`);
+    const chat = stubChat(`[{"title":"x","atom_type":"insight","body":"Dry runs leave the database unchanged.","source_quote":"Dry runs leave the database unchanged."}]`);
     const result = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: '/x.txt', content: 'c', contentHash: 'h' }],
+      _transcripts: [{ filePath: '/x.txt', content: 'Dry runs leave the database unchanged.', contentHash: 'h' }],
       _pages: [],
       _chat: chat,
       dryRun: true,
@@ -187,7 +187,7 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
       callCount++;
       if (callCount === 1) throw new Error('rate limit');
       return {
-        text: `[{"title":"t","atom_type":"insight","body":"b"}]`,
+        text: `[{"title":"t","atom_type":"insight","body":"The second transcript preserves a useful observation.","source_quote":"The second transcript preserves a useful observation."}]`,
         blocks: [],
         stopReason: 'end' as const,
         usage: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 0, cache_creation_tokens: 0 },
@@ -198,7 +198,7 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
     const result = await runPhaseExtractAtoms(engine, {
       _transcripts: [
         { filePath: '/a.txt', content: 'a', contentHash: 'ha' },
-        { filePath: '/b.txt', content: 'b', contentHash: 'hb' },
+        { filePath: '/b.txt', content: 'The second transcript preserves a useful observation.', contentHash: 'hb' },
       ],
       _pages: [],
       _chat: chat as typeof import('../../src/core/ai/gateway.ts').chat,
@@ -221,7 +221,7 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
     const result = await runPhaseExtractAtoms(engine, {
       _transcripts: [
         { filePath: '/a.txt', content: 'a', contentHash: 'ha' },
-        { filePath: '/b.txt', content: 'b', contentHash: 'hb' },
+        { filePath: '/b.txt', content: 'The second transcript preserves a useful observation.', contentHash: 'hb' },
       ],
       _pages: [],
       _chat: chat as typeof import('../../src/core/ai/gateway.ts').chat,
@@ -239,9 +239,9 @@ describe('v0.41 T5: runPhaseExtractAtoms via stubbed chat', () => {
   // pages_total, pages_skipped_budget, duplicates_skipped) exist but
   // are zeros. Closes the "transcript path silently regresses" risk.
   test('legacy transcript-only fields unchanged when _pages:[] (regression guard)', async () => {
-    const chat = stubChat(`[{"title":"r","atom_type":"insight","body":"b"}]`);
+    const chat = stubChat(`[{"title":"r","atom_type":"insight","body":"The protocol preserves durable observations.","source_quote":"The protocol preserves durable observations."}]`);
     const result = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: '/regression.txt', content: 'c', contentHash: 'rH' }],
+      _transcripts: [{ filePath: '/regression.txt', content: 'The protocol preserves durable observations.', contentHash: 'rH' }],
       _pages: [],
       _chat: chat,
     });
@@ -711,11 +711,11 @@ describe('runPhaseSynthesizeConcepts — global-error halt (#3044)', () => {
 describe('#2123: extractor stamps concepts → synthesize_concepts consumes via real DB path', () => {
   test('end-to-end: atoms with shared label materialize a concept page', async () => {
     const chat = stubChat(`[
-      {"title":"Cert warning on guest wifi","atom_type":"insight","body":"Portal redirects to an IP-based HTTPS URL.","concepts":["captive-portal"]},
-      {"title":"iPhone portal popup is flaky","atom_type":"critique","body":"CNA probe behavior differs across iOS versions.","concepts":["captive-portal"]}
+      {"title":"Cert warning on guest wifi","atom_type":"insight","body":"Portal redirects to an IP-based HTTPS URL.","source_quote":"Portal redirects to an IP-based HTTPS URL.","concepts":["captive-portal"]},
+      {"title":"iPhone portal popup is flaky","atom_type":"critique","body":"CNA probe behavior differs across iOS versions.","source_quote":"CNA probe behavior differs across iOS versions.","concepts":["captive-portal"]}
     ]`);
     const extract = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: '/fake/notes.txt', content: 'content', contentHash: 'cc2123' }],
+      _transcripts: [{ filePath: '/fake/notes.txt', content: 'Portal redirects to an IP-based HTTPS URL. CNA probe behavior differs across iOS versions.', contentHash: 'cc2123' }],
       _pages: [],
       _chat: chat,
     });

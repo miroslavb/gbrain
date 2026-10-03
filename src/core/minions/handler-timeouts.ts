@@ -65,6 +65,7 @@ export const HANDLER_DEFAULT_TIMEOUT_MS: Readonly<Record<string, number>> = {
   // exact-30:00 dead letters during transient embed degradation. Keep a hard
   // deadline, but size this aggregate lane independently.
   'autopilot-global-maintenance': SIXTY_MIN_MS,
+  extract: THIRTY_MIN_MS,
   // v0.42.x (#2390) — Life Chronicle: one page = one LLM extraction call + a
   // few writes. Generous 10-min budget (vs the tight null-default) covers a
   // slow gateway without the 30-min loop budget.

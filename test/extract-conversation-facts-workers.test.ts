@@ -36,6 +36,7 @@ import {
 
 const REPO_ROOT = resolve(import.meta.dir, '..');
 const SRC_PATH = resolve(REPO_ROOT, 'src/commands/extract-conversation-facts.ts');
+// test-reads-source-ok[structural]: pins propagation of fork worker locks, TTL and admission controls across CLI branches.
 const SRC = readFileSync(SRC_PATH, 'utf-8');
 
 beforeEach(() => {

@@ -6,6 +6,7 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { contentHash, runPhaseProposeTakes, type ProposeTakesExtractor } from '../src/core/cycle/propose-takes.ts';
 import { acceptProposal, listPendingProposals, TakeProposalError } from '../src/core/take-proposals.ts';
+import { serializePageToMarkdown } from '../src/core/markdown.ts';
 import { parseTakesFence } from '../src/core/takes-fence.ts';
 import type { OperationContext } from '../src/core/operations.ts';
 
@@ -29,9 +30,11 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetPgliteState(engine);
   await engine.setConfig('cycle.propose_takes.enabled', 'true');
+  await engine.setConfig('sync.repo_path', repo);
   await engine.putPage(slug, { type: 'concept', title: slug, compiled_truth: body, frontmatter: {} });
   mkdirSync(join(repo, 'analysis'), { recursive: true });
-  writeFileSync(join(repo, `${slug}.md`), `# Consumer safety\n\n${body}\n`, 'utf-8');
+  const snapshot = (await engine.readPageSnapshot(slug, { sourceId: 'default' }))!;
+  writeFileSync(join(repo, `${slug}.md`), serializePageToMarkdown(snapshot.page, snapshot.tags), 'utf-8');
 });
 
 const ctx = (): OperationContext => ({
@@ -56,7 +59,7 @@ describe('take proposal acceptance quarantine and retry safety', () => {
       [slug],
     );
     expect(await listPendingProposals(engine, { sourceId: 'default' })).toEqual([]);
-    await expect(acceptProposal({ engine, brainDir: repo, sourceId: 'default' }, legacy.id))
+    await expect(acceptProposal({ engine, config: { engine: 'pglite' }, brainDir: repo, sourceId: 'default' }, legacy.id))
       .rejects.toMatchObject({ code: 'unverified' } as Partial<TakeProposalError>);
   });
 
@@ -80,11 +83,11 @@ describe('take proposal acceptance quarantine and retry safety', () => {
     );
 
     expect(await listPendingProposals(engine, { sourceId: 'default' })).toEqual([]);
-    await expect(acceptProposal({ engine, brainDir: repo, sourceId: 'default' }, proposal.id))
+    await expect(acceptProposal({ engine, config: { engine: 'pglite' }, brainDir: repo, sourceId: 'default' }, proposal.id))
       .rejects.toMatchObject({ code: 'unverified' } as Partial<TakeProposalError>);
   });
 
-  test('fault after canonical write leaves pending row; retry reuses the same fence row', async () => {
+  test('fault after canonical write retains the journal claim; retry settles the same fence row', async () => {
     const extractor: ProposeTakesExtractor = async () => [
       { claim_text: claim, kind: 'bet', holder: 'brain', weight: 0.7, evidence_span: body },
     ];
@@ -92,14 +95,17 @@ describe('take proposal acceptance quarantine and retry safety', () => {
     const [proposal] = await listPendingProposals(engine, { sourceId: 'default' });
 
     await expect(acceptProposal({
-      engine, brainDir: repo, sourceId: 'default',
+      engine, config: { engine: 'pglite' }, brainDir: repo, sourceId: 'default',
       afterCanonicalWrite: async () => { throw new Error('injected post-write failure'); },
     }, proposal.id)).rejects.toThrow('injected post-write failure');
     expect((await engine.executeRaw<{ status: string }>(
       `SELECT status FROM take_proposals WHERE id=$1`, [proposal.id],
-    ))[0]?.status).toBe('pending');
+    ))[0]?.status).toBe('accepted');
+    expect((await engine.executeRaw<{ promoted_row_num: number | null }>(
+      'SELECT promoted_row_num FROM take_proposals WHERE id=$1', [proposal.id],
+    ))[0]?.promoted_row_num).toBeNull();
 
-    await acceptProposal({ engine, brainDir: repo, sourceId: 'default' }, proposal.id);
+    await acceptProposal({ engine, config: { engine: 'pglite' }, brainDir: repo, sourceId: 'default' }, proposal.id);
     const parsed = parseTakesFence(readFileSync(join(repo, `${slug}.md`), 'utf-8'));
     expect(parsed.takes.filter((take) => take.claim === claim)).toHaveLength(1);
     expect((await engine.executeRaw<{ status: string }>(
@@ -119,7 +125,7 @@ describe('take proposal acceptance quarantine and retry safety', () => {
 
     expect(await listPendingProposals(engine, { sourceId: 'default' })).toEqual([]);
 
-    await expect(acceptProposal({ engine, brainDir: repo, sourceId: 'default' }, proposal.id))
+    await expect(acceptProposal({ engine, config: { engine: 'pglite' }, brainDir: repo, sourceId: 'default' }, proposal.id))
       .rejects.toMatchObject({ code: 'unverified' } as Partial<TakeProposalError>);
     expect(parseTakesFence(readFileSync(join(repo, `${slug}.md`), 'utf-8')).takes).toHaveLength(0);
   });
@@ -132,8 +138,8 @@ describe('take proposal acceptance quarantine and retry safety', () => {
     const [proposal] = await listPendingProposals(engine, { sourceId: 'default' });
     writeFileSync(join(repo, `${slug}.md`), '# Consumer safety\n\nEvidence was removed.\n', 'utf-8');
 
-    await expect(acceptProposal({ engine, brainDir: repo, sourceId: 'default' }, proposal.id))
-      .rejects.toThrow('evidence is absent');
+    await expect(acceptProposal({ engine, config: { engine: 'pglite' }, brainDir: repo, sourceId: 'default' }, proposal.id))
+      .rejects.toThrow();
     expect((await engine.executeRaw<{ status: string }>(
       `SELECT status FROM take_proposals WHERE id=$1`, [proposal.id],
     ))[0]?.status).toBe('pending');

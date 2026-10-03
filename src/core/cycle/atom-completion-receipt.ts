@@ -1,4 +1,5 @@
 import type { BrainEngine } from '../engine.ts';
+import { type AtomPageInput, AtomPageStateError } from './extract-atoms-page-state.ts';
 import { contentHash } from '../utils.ts';
 
 /**
@@ -21,6 +22,7 @@ export async function finalizeAtomCompletionReceipt(
   sourceId: string,
   hash16: string,
   importedSlugs: string[],
+  origin?: AtomPageInput,
 ): Promise<void> {
   if (importedSlugs.length === 0) return;
 
@@ -58,6 +60,16 @@ export async function finalizeAtomCompletionReceipt(
     matches.push(`(slug = $${slugParam} AND content_hash = $${priorHashParam})`);
     finalHashCases.push(`WHEN $${slugParam} THEN $${finalHashParam}`);
   }
+  let originGuard = '';
+  if (origin) {
+    if (!origin.identity) throw new AtomPageStateError('unpinned');
+    const start = params.length;
+    params.push(origin.identity.pageId, origin.identity.sourceIncarnation, origin.contentHash, origin.identity.revision, origin.content);
+    originGuard = `AND EXISTS (SELECT 1 FROM pages origin JOIN sources s ON s.id=origin.source_id
+      WHERE origin.id=$${start+1} AND s.incarnation=$${start+2}::uuid AND origin.source_id=$2
+        AND origin.content_hash=$${start+3} AND origin.knowledge_revision=$${start+4}::uuid
+        AND origin.compiled_truth=$${start+5} AND origin.deleted_at IS NULL FOR SHARE OF origin, s)`;
+  }
   const matchSql = matches.join(' OR ');
   const publishSql = `
     WITH eligible AS (
@@ -78,13 +90,14 @@ export async function finalizeAtomCompletionReceipt(
        AND frontmatter->>'source_hash' = $3
        AND (${matchSql})
        AND (SELECT n FROM eligible) = ${plans.length}
+       ${originGuard}
     RETURNING slug`;
 
   const publish = async (target: BrainEngine): Promise<void> => {
     const updated = await target.executeRaw<{ slug: string }>(publishSql, params);
     if (updated.length !== plans.length) {
       throw new Error(
-        `atom completion receipt raced on ${sourceId}: expected ${plans.length} rows, updated ${updated.length}`,
+        `atom completion receipt changed on ${sourceId}: expected ${plans.length} rows, updated ${updated.length}`,
       );
     }
   };

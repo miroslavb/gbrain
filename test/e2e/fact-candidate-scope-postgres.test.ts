@@ -1,13 +1,15 @@
 /** Real PostgreSQL SQL, isolated entirely in transaction-local temporary tables. */
 import {describe,test,expect} from 'bun:test';
-import postgres from 'postgres';
-import {findCandidateDuplicates,type PgFactsDeps} from '../../src/core/postgres-engine/facts.ts';
+import postgres from '#postgres';
+import {findCandidateDuplicates} from '../../src/core/engine-sql/facts.ts';
+import {unscopedExecutor, type LegacyUnscopedRead} from '../../src/core/engine-sql/brands.ts';
+import {postgresExecutor} from '../../src/core/engine-sql/dialect-postgres.ts';
 // The normal E2E runner validates/isolates DATABASE_URL. A dedicated URL also
 // supports running this rollback-only regression directly.
 const url=process.env.GBRAIN_TEST_CANDIDATE_URL ?? process.env.DATABASE_URL;
 const d=url?describe:describe.skip;
 
-async function fixture(run:(sql:any,deps:PgFactsDeps)=>Promise<void>){
+async function fixture(run:(sql:any,deps:LegacyUnscopedRead)=>Promise<void>){
  const db=postgres(url!,{max:1,onnotice:()=>{}});
  const rollback=Symbol('fixture rollback');
  try{
@@ -18,7 +20,7 @@ async function fixture(run:(sql:any,deps:PgFactsDeps)=>Promise<void>){
     confidence float8 DEFAULT 1, context text, source text DEFAULT 'fixture', source_session text,
     valid_from timestamptz DEFAULT now(), valid_until timestamptz, expired_at timestamptz,
     superseded_by bigint, consolidated_at timestamptz, consolidated_into bigint,
-    created_at timestamptz DEFAULT now(),embedded_at timestamptz,embedding vector(3)
+    created_at timestamptz DEFAULT now(),embedded_at timestamptz,embedding_model text,embedded_text_hash text,embedding vector(3)
    ) ON COMMIT DROP`;
    await sql`SET LOCAL search_path = pg_temp, public`;
    await sql`INSERT INTO facts(id,source_id,entity_slug,fact,embedding)
@@ -35,6 +37,7 @@ async function fixture(run:(sql:any,deps:PgFactsDeps)=>Promise<void>){
    await sql`INSERT INTO facts(id,source_id,entity_slug,fact,embedding,created_at)
      SELECT 3000+g,'default','projects/test','distant eligible','[0,1,0]'::vector,'2000-01-01'::timestamptz
      FROM generate_series(1,300) g`;
+   await sql`UPDATE facts SET embedding_model='fixture:embed',embedded_text_hash=md5(fact) WHERE embedding IS NOT NULL`;
    await sql`CREATE INDEX fact_scope ON facts(source_id,entity_slug)`;
    await sql`CREATE INDEX fact_ann ON facts USING hnsw(embedding vector_cosine_ops) WITH(m=8,ef_construction=16)`;
    await sql`ANALYZE facts`;
@@ -43,7 +46,11 @@ async function fixture(run:(sql:any,deps:PgFactsDeps)=>Promise<void>){
    if(setting.mode!=null)await sql`SET LOCAL hnsw.iterative_scan=off`;
    await sql`SET LOCAL enable_seqscan=off`;
    await sql`SET LOCAL enable_bitmapscan=off`;
-   await run(sql,{sql} as unknown as PgFactsDeps);
+   const exec=postgresExecutor(sql as unknown as ReturnType<typeof postgres>, {
+    runUnsafe: async <T>(conn: ReturnType<typeof postgres>, text: string, params?: unknown[]) => await conn.unsafe(text, params as never[]) as unknown as T[],
+    gauge: { acquire() {}, release() {} },
+   });
+   await run(sql,unscopedExecutor(exec,'transaction-local adversarial candidate fixture'));
    throw rollback;
   });
  }catch(e){if(e!==rollback)throw e;}finally{await db.end();}
@@ -56,14 +63,14 @@ d('source/entity fact candidate scope on Postgres',()=>{
    const plan=await sql.unsafe('EXPLAIN '+legacy);
    expect(JSON.stringify(plan)).toContain('fact_ann');
    expect(await sql.unsafe(legacy)).toHaveLength(0);
-   const rows=await findCandidateDuplicates(deps,'default','projects/test','query',{embedding:new Float32Array([1,0,0]),k:5});
+   const rows=await findCandidateDuplicates(deps,'default','projects/test','query',{embedding:new Float32Array([1,0,0]),embeddingModel:'fixture:embed',k:5});
    expect(rows.map(x=>x.id)).toEqual([1,2,3,3001,3002]);
    expect(rows.every(x=>x.source_id==='default'&&x.entity_slug==='projects/test'&&!x.expired_at&&x.embedding)).toBe(true);
   });
  });
  test('keep requested k and empty scope; never widen the source',async()=>{
   await fixture(async(_sql,deps)=>{
-   const opts={embedding:new Float32Array([1,0,0]),k:1};
+   const opts={embedding:new Float32Array([1,0,0]),embeddingModel:'fixture:embed',k:1};
    expect((await findCandidateDuplicates(deps,'default','projects/test','query',opts)).map(x=>x.id)).toEqual([1]);
    expect(await findCandidateDuplicates(deps,'missing','projects/test','query',opts)).toEqual([]);
   });

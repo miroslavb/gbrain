@@ -112,10 +112,8 @@ describe('derived atom page state', () => {
     expect(await rows()).toEqual([]);
     expect(await countExtractAtomsBacklog(engine, 'default')).toBe(1);
     const receipts = await engine.executeRaw<{ hash: string }>("SELECT frontmatter->>'source_hash' AS hash FROM pages WHERE type='atom'");
-    // Fork contract: atom completion receipts are keyed to the content hash that
-    // was actually scanned (flip before the page stamp), never to the edited
-    // content; the edited page stays in the backlog for a fresh extraction.
-    expect(receipts.every(row => row.hash === scannedHash)).toBe(true);
+    // Changed source identity prevents completion; provisional rows remain retryable.
+    expect(receipts.every(row => row.hash === `pending:${scannedHash}`)).toBe(true);
   });
 
   test.each(['[]', atoms])('a page recreated during the provider call cannot complete stale extraction: %s', async text => {
@@ -127,13 +125,10 @@ describe('derived atom page state', () => {
     } });
     expect(result.status).toBe('warn');
     expect(await rows()).toEqual([]);
-    // Fork contract: completion is keyed to (source page slug, content hash).
-    // A byte-identical recreation is already covered by the atoms extracted
-    // from that same content, so it is not re-extracted; zero-yield output
-    // stays retryable because no completion record exists.
-    expect(await countExtractAtomsBacklog(engine, 'default')).toBe(text === '[]' ? 1 : 0);
+    // A recreated source is a new identity, even if its bytes are identical.
+    expect(await countExtractAtomsBacklog(engine, 'default')).toBe(1);
     const receipts = await engine.executeRaw<{ hash: string }>("SELECT frontmatter->>'source_hash' AS hash FROM pages WHERE type='atom'");
-    expect(receipts.every(row => !row.hash.startsWith('pending:'))).toBe(true);
+    expect(receipts.every(row => row.hash.startsWith('pending:'))).toBe(true);
   });
 
   test.each([
@@ -248,6 +243,25 @@ describe('derived atom page state', () => {
 });
 
 describe('legacy atom state migration and reviewed cleanup', () => {
+  test('reviewed cleanup retains matching fork rejection counters and rejects stale evidence', async () => {
+    await seed();
+    const hash = 'e'.repeat(64);
+    const markers = { atoms_reject_hash: hash.slice(0, 16), atoms_reject_count: 4,
+      atoms_reject_last_reasons: ['not_self_contained'], atoms_custom: 'retain' };
+    expect(matchingLegacyAtomPageState(markers, hash)).toEqual({ fail_count: 4, tombstoned: false });
+    expect(matchingLegacyAtomPageState(markers, 'f'.repeat(64))).toBeNull();
+    expect(matchingLegacyAtomPageState({ ...markers, atoms_reject_count: '4' }, hash)).toBeNull();
+    await engine.executeRaw('UPDATE pages SET frontmatter=$1::jsonb,content_hash=$2 WHERE slug=$3', [JSON.stringify(markers), hash, slug]);
+    const before = await snapshot();
+    await engine.executeRaw(`INSERT INTO extract_atoms_page_state(source_incarnation,page_id,content_hash,fail_count,tombstoned)
+      VALUES($1,$2,$3,2,false)`, [before.sourceIncarnation, before.page.id, hash]);
+    await engine.putPage(slug, { ...before.page, content_hash: undefined, frontmatter: { atoms_custom: 'retain' } });
+    const after = await snapshot();
+    expect(await transferLegacyAtomPageState(engine, before, after)).toBe(true);
+    expect(await engine.executeRaw('SELECT fail_count,tombstoned FROM extract_atoms_page_state WHERE page_id=$1 AND content_hash=$2',
+      [after.page.id, after.page.content_hash])).toEqual([{ fail_count: 4, tombstoned: false }]);
+    expect(await transferLegacyAtomPageState(engine, before, after)).toBe(true);
+  });
   test('migration copies only well-formed matching markers, preserving canonical data and revision', async () => {
     const hash = 'a'.repeat(64), stale = 'b'.repeat(16);
     const markers = [

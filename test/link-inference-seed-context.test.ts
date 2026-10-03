@@ -8,6 +8,7 @@ const resolver: SlugResolver = { resolve: async () => null };
 
 for (const name of ['gbrain-base', 'gbrain-base-v2']) {
   const path = new URL(`../src/core/schema-pack/base/${name}.yaml`, import.meta.url);
+  // test-reads-source-ok[structural]: loads the shipped schema data to exercise actual link-inference behavior.
   const pack = parseSchemaPackManifest(parseYamlMini(readFileSync(path, 'utf8')), { path: path.pathname });
   describe(`${name}: seeding needs financial evidence`, () => {
     for (const context of [

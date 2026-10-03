@@ -94,11 +94,11 @@ test('connector and unapproved external sources cannot receive packaged content 
     const { engine, close } = await isolatedSharedSkillsEngine();
     try {
       const ctx: OperationContext = { engine, config: { engine: 'pglite' }, sourceId: 'default', remote: false, dryRun: false, logger: { info() {}, warn() {}, error() {} } };
-      for (const config of [{ kind: 'google' }, { kind: 'github' }, { remote_url: 'https://example.com/reviewed.git', managed_clone: true }]) {
+      for (const config of [{ mirror_read_only: true }, { kind: 'google' }, { kind: 'github' }, { remote_url: 'https://example.com/reviewed.git', managed_clone: true }]) {
         await engine.executeRaw("UPDATE sources SET config=$1::text::jsonb WHERE id='default'", [JSON.stringify(config)]);
         expect((await setupSharedBrainContent(ctx, { fresh: true })).status).toBe('action_required');
         const migration = await runSharedSkillsMigration(ctx);
-        expect(migration.sources[0].stages[0].reason).toContain('source_skill_adoption_required');
+        expect(migration.sources[0].stages[0].reason).toContain('mirror_read_only' in config ? 'source_writeback_required' : 'source_skill_adoption_required');
         expect(migration.sources[0].stages[0].reason).not.toContain('db_only_export_required');
         await expect(installPackagedSharedSkills(ctx, 'default')).rejects.toMatchObject({ code: 'source_writeback_required' });
         await expect(exportDatabaseContent(ctx, { sourceId: 'default', root: join(home, 'export'), confirmQuiesced: true, backup: 'operator_verified' })).rejects.toMatchObject({ code: 'source_writeback_required' });

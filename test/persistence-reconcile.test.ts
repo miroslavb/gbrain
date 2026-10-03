@@ -212,6 +212,29 @@ test('unchanged safety assessments reuse canonical stamps without fresh revision
   });
 }), 120_000);
 
+test('legacy visibility and withdrawal overlays reconcile without false body conflicts, retaining raw preimages', async () => isolated(async engine => {
+  const body = upsertFactRow('A durable observation.', { claim: 'Previously preferred an example venue', kind: 'fact', visibility: 'world', confidence: 1, notability: 'medium' }).body;
+  const f = await fixture(engine, true, body);
+  // Restore the old file representation while the canonical DB uses host policy.
+  writeFileSync(f.file, readFileSync(f.file, 'utf8').replace('| world |', '| private |'));
+  const before = readFileSync(f.file);
+  await engine.executeRaw("INSERT INTO fact_withdrawals(source_id,visibility,fact_hash) VALUES($1,'world',$2)",
+    [f.id, sha256('previously preferred an example venue')]);
+  await local(engine, f.registration, async () => {
+    const { preview } = await runReconcilePreview(engine, { source_id: f.id, slug: f.slug });
+    expect(preview.status).toBe('ready');
+    expect(preview.conflicts).toEqual([]);
+    expect(preview.preimages.file_base64).toBe(before.toString('base64'));
+    const fact = parseFactsFence(preview.result.compiled_truth).facts[0];
+    expect(fact.visibility).toBe('world'); expect(fact.active).toBe(false);
+    const receipt = await runReconcileApply(engine, { source_id: f.id, slug: f.slug, preview, request_id: randomUUID() });
+    expect(receipt.state).toBe('committed');
+    const current = (await engine.readPageSnapshot(f.slug, { sourceId: f.id }))!;
+    expect(parseFactsFence(current.page.compiled_truth).facts).toEqual(parseFactsFence(readFileSync(f.file, 'utf8')).facts);
+    expect(parseFactsFence(current.page.compiled_truth).facts[0].active).toBe(false);
+  });
+}), 120_000);
+
 test('private and withdrawn timeline facts survive file choices without resurrection', async () => isolated(async engine => {
   const privateBody = upsertFactRow('Private biography.', { claim: 'Prefers a private example venue', kind: 'fact', visibility: 'private', confidence: 1, notability: 'medium' }).body;
   const timeline = upsertFactRow('## Timeline\n', { claim: 'Previously preferred the old example venue', kind: 'fact', visibility: 'world', confidence: 1, notability: 'medium' }).body.replace('| 1 |', '| 2 |');
@@ -242,17 +265,21 @@ test('matching legacy scan state migrates only during canonical publication', as
   const f = await fixture(engine);
   const marker = f.snapshot.page.content_hash!.slice(0, 16);
   await withCoordinatedWrite(engine, [f.id], () => engine.executeRaw("UPDATE pages SET frontmatter=frontmatter || $3::text::jsonb WHERE source_id=$1 AND slug=$2",
-    [f.id, f.slug, JSON.stringify({ atoms_scan_hash: marker, atoms_custom: 'preserve' })]));
+    [f.id, f.slug, JSON.stringify({ atoms_scan_hash: marker, atoms_reject_hash: marker,
+      atoms_reject_count: 3, atoms_reject_last_reasons: ['not_self_contained'], atoms_custom: 'preserve' })]));
   const before = (await engine.readPageSnapshot(f.slug, { sourceId: f.id }))!;
   writeFileSync(f.file, serializePageToMarkdown(before.page, before.tags));
   await local(engine, f.registration, async () => {
     const { preview } = await runReconcilePreview(engine, { source_id: f.id, slug: f.slug });
     expect(preview.result.frontmatter.atoms_scan_hash).toBeUndefined();
+    expect(preview.result.frontmatter.atoms_reject_hash).toBeUndefined();
+    expect(preview.result.frontmatter.atoms_reject_count).toBeUndefined();
+    expect(preview.result.frontmatter.atoms_reject_last_reasons).toBeUndefined();
     expect(preview.result.frontmatter.atoms_custom).toBe('preserve');
     expect(await engine.executeRaw('SELECT * FROM extract_atoms_page_state WHERE page_id=$1', [before.page.id])).toHaveLength(0);
     const result = await runReconcileApply(engine, { source_id: f.id, slug: f.slug, preview, request_id: randomUUID() });
     expect(result.outcome).toMatchObject({ scan_state_transferred: true });
-    expect(await engine.executeRaw('SELECT tombstoned FROM extract_atoms_page_state WHERE page_id=$1', [before.page.id])).toEqual([{ tombstoned: true }]);
+    expect(await engine.executeRaw('SELECT tombstoned,fail_count FROM extract_atoms_page_state WHERE page_id=$1', [before.page.id])).toEqual([{ tombstoned: true, fail_count: 3 }]);
   });
 }), 120_000);
 

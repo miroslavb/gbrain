@@ -54,7 +54,7 @@ describe('stale-chunk selectors and soft-deleted pages', () => {
     expect(await engine.countStaleChunks({ signature: `${MODEL}:8`, includeNullSignature: true })).toBe(1);
   });
 
-  test('migration verify: deleted-page NULL residue is reported, not a blocker; health stays raw', async () => {
+  test('migration verify: deleted-page NULL residue is reported, not a blocker; health reports live missing chunks', async () => {
     const dims = (await readContentChunksEmbeddingDim(engine)).dims!;
     const vec = `[${Array.from({ length: dims }, () => '0.1').join(',')}]`;
     // The live page converges in the target space; the deleted page keeps its NULL chunk.
@@ -65,9 +65,14 @@ describe('stale-chunk selectors and soft-deleted pages', () => {
 
     const v = await verifyMigrationComplete(engine, { toModel: MODEL, toDims: dims }, { filePlane: { model: MODEL, dims } });
     expect(v.details.stale_wide).toBe(0);
-    expect(v.details.missing_embeddings).toBe(1); // raw health count, #1305 contract
+    expect(v.details.missing_embeddings).toBe(0); // upstream excludes deleted pages
     expect(v.details.deleted_page_null_chunks).toBe(1);
     expect(v.blockers.filter((b) => /not in the target embedding space|NULL vectors outside the stale predicate/.test(b))).toEqual([]);
+  });
+
+  test('deleted residue never subtracts a live missing-vector blocker twice', async () => {
+    const { splitDeletedPageNull } = await import('../src/core/embedding-invalidation.ts');
+    expect(await splitDeletedPageNull(engine, 1)).toEqual({ deletedNull: 1, liveMissing: 1 });
   });
 
   test('a restored page is stale again', async () => {

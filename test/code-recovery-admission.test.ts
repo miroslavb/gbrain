@@ -8,14 +8,14 @@ import { positionalArgs } from '../src/commands/code-scope.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { performSync } from '../src/commands/sync.ts';
 
-describe('finite v7 admission', () => {
+describe('finite code admission', () => {
   let engine: PGLiteEngine;
   beforeAll(async () => { engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema(); });
   afterAll(async () => { await engine.disconnect(); });
-  test('v7 does not advance the automatic source recovery floor', () => {
-    expect(CHUNKER_VERSION).toBe(7);
+  test('v8 does not advance the automatic source recovery floor', () => {
+    expect(CHUNKER_VERSION).toBe(8);
     expect(AUTOMATIC_CODE_CHUNKER_VERSION).toBe(6);
-    for (const path of ['src/commands/sync.ts', 'src/core/sync-cost-gate.ts',
+    for (const path of ['src/commands/sync/preflight.ts', 'src/commands/sync/finalize.ts', 'src/commands/sync/full.ts', 'src/core/sync-cost-gate.ts',
                         'src/commands/doctor/checks/extraction-sync.ts']) {
       const text = readFileSync(new URL('../' + path, import.meta.url), 'utf8');
       expect(text).toContain('String(AUTOMATIC_CODE_CHUNKER_VERSION)');

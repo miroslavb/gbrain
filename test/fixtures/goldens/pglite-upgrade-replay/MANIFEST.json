@@ -1,0 +1,22 @@
+{
+  "gbrain_version": "0.50.0.0",
+  "schema_version": 157,
+  "latest_migration_version": 157,
+  "pglite_version": "0.4.3",
+  "embedding_model": "openai:text-embedding-3-large",
+  "embedding_dimensions": 1536,
+  "build_command": "sandbox bun /stage/scripts/build-old-fork-fixture.ts /stage/baseline (source 92e06c6c2cc307b4d617c75e9081dfe485c244fa)",
+  "data": {
+    "counts": {
+      "sources": 1,
+      "pages": 3,
+      "content_chunks": 6,
+      "links": 2,
+      "tags": 4,
+      "timeline_entries": 2,
+      "facts": 1,
+      "takes": 1
+    },
+    "fingerprint": "89c799916ce17a4cbe0abade3c5130781ecd822da5e7c15b3c18fc890119b0b4"
+  }
+}
