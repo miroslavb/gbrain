@@ -714,3 +714,5 @@ success messages; probe failures remain visible. Retrieval gold is unchanged.
 The PostgreSQL federated-link fixture sets `facts.default_visibility=private`,
 matching its PGLite twin when testing legacy private-page exclusion. Source
 grants and archived/non-federated exclusions remain asserted independently.
+
+Finite code maintenance is classified as coordinator-owned in canonical-writers.tsv; its PostgreSQL twin belongs to the persistence E2E map. Keep these inventories current when adding a writer or a new E2E file.
