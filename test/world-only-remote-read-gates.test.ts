@@ -1,12 +1,4 @@
-/**
- * Fork (world-only host): the v0.48.3 "trusted local only" read gates —
- * the pre-seal chunk withhold and the code-intel suspension — follow the private-page resolver instead of the
- * bare transport flag (stored contradiction reports keep upstream's
- * trusted-local-only rule). Under `facts.default_visibility=world` (the
- * migration v147 host posture) an agent caller reads exactly what the trusted
- * local CLI reads; with the posture cleared, upstream's fail-closed behaviour
- * is unchanged.
- */
+/** World visibility does not waive the remote safe-chunk gate. Code-intel access still follows the private-page resolver. */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { FACTS_DEFAULT_VISIBILITY_KEY } from '../src/core/facts/visibility.ts';
@@ -69,11 +61,11 @@ afterAll(async () => {
 });
 
 describe('world-only host read gates (fork)', () => {
-  test('readPolicyOpts: the safe-chunk gate follows the private-page resolver', async () => {
+  test('readPolicyOpts: world visibility and remote safe-chunk admission are independent', async () => {
     await setPosture(true);
     const world = await readPolicyOpts(mkCtx(true));
     expect(world.excludePrivate).toBe(false);
-    expect(world.requireSafeChunks).toBe(false);
+    expect(world.requireSafeChunks).toBe(true);
 
     await setPosture(false);
     const legacy = await readPolicyOpts(mkCtx(true));
@@ -82,15 +74,22 @@ describe('world-only host read gates (fork)', () => {
     expect((await readPolicyOpts(mkCtx(false))).requireSafeChunks).toBe(false);
   });
 
-  test('remote search serves pre-seal world chunks under the world posture and withholds them otherwise', async () => {
+  test('remote search withholds unsafe chunks under both postures and serves sealed chunks', async () => {
     const search = operationsByName.search!;
     await setPosture(true);
     const served = (await search.handler(mkCtx(true), { query: 'quokka wombat' })) as Array<{ slug: string }>;
-    expect(served.some((r) => r.slug === SLUG)).toBe(true);
+    expect(served.some((r) => r.slug === SLUG)).toBe(false);
 
     await setPosture(false);
     const withheld = (await search.handler(mkCtx(true), { query: 'quokka wombat' })) as Array<{ slug: string }>;
     expect(withheld.some((r) => r.slug === SLUG)).toBe(false);
+
+    await engine.executeRaw('UPDATE pages SET chunker_version = $1 WHERE slug = $2', [SAFE_FENCE_CHUNKER_VERSION, SLUG]);
+    for (const world of [true, false]) {
+      await setPosture(world);
+      const sealed = await search.handler(mkCtx(true), { query: 'quokka wombat' }) as Array<{ slug: string }>;
+      expect(sealed.some((r) => r.slug === SLUG)).toBe(true);
+    }
   });
 
   test('code_def: agent callers are served under the world posture and suspended otherwise', async () => {

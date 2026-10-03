@@ -196,16 +196,23 @@ describe('lease loss through the real lock helper', () => {
 
 describe('the drain window on the real phase', () => {
   it('a 1 s window stops within one page: the straddling page finishes and counts, the next never starts', async () => {
+    const quote = 'The release requires a passing durability check.';
     for (const slug of ['notes/window-a', 'notes/window-b']) {
       await engine.putPage(slug, {
-        type: 'note', title: slug, compiled_truth: 'A durable decision recorded in prose. '.repeat(20),
+        type: 'note', title: slug, compiled_truth: `${'Background context for the release. '.repeat(20)}\n${quote}`,
+        frontmatter: { atom_extract: true },
       } as never, { sourceId: 'default' });
     }
     const calls: Array<{ abortedAtEnd: boolean | undefined }> = [];
     __setChatTransportForTests(async (o) => {
-      await new Promise((r) => setTimeout(r, 1_300));
-      calls.push({ abortedAtEnd: o.abortSignal?.aborted });
-      const text = JSON.stringify([{ title: 'A durable decision', atom_type: 'insight', body: 'The decision body prose.' }]);
+      const validator = JSON.stringify(o).includes('source_support');
+      if (!validator) {
+        await new Promise((r) => setTimeout(r, 1_300));
+        calls.push({ abortedAtEnd: o.abortSignal?.aborted });
+      }
+      const text = validator
+        ? JSON.stringify({ verdicts: [{ index: 0, scores: { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 } }] })
+        : JSON.stringify([{ title: 'Release durability requirement', atom_type: 'insight', body: quote, source_quote: quote }]);
       return {
         text, blocks: [{ type: 'text', text }], stopReason: 'end',
         usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },

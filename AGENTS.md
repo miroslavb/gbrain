@@ -686,3 +686,10 @@ CommandComplete. All vendored PostgreSQL runtimes reset the result row index at
 ReadyForQuery; otherwise later reads contain leading holes and falsely reject
 valid source/writer authorization. Real PostgreSQL tests cover SQL error and
 partial-row cancellation on the same backend for ESM and CJS imports.
+
+Explicit fence-writer supersedesFactId must survive the managed intent and its
+request identity. Revalidate the old row's source, entity, visibility and active
+state before publication; retire its fence and index atomically, and preserve
+receipt replay after restart. Never turn an unknown replacement into an ordinary
+append. Structural doctor goldens normalize only the known clean/dirty Git drift
+success messages; probe failures remain visible. Retrieval gold is unchanged.

@@ -1119,7 +1119,7 @@
         },
         {
           "category": "brain",
-          "message": "47 retrieval-affecting file(s) changed since HEAD: src/core/ai/recipes/anthropic.ts, src/core/chunkers/code.ts, src/core/chunkers/def-types.ts, …. Re-run `gbrain eval run-all` after committing these changes.",
+          "message": "<working-tree-retrieval-drift>",
           "name": "eval_drift",
           "status": "ok"
         },

@@ -29,8 +29,14 @@ afterAll(async () => {
   if (engine) await engine.disconnect();
 }, 60_000);
 
+const quote = 'Enterprise buyers want tangible prototypes.';
+const source = `${'Background context for the procurement meeting. '.repeat(20)}\n${quote}`;
+const semanticPass = async ({ candidates }: { candidates: unknown[] }) => ({
+  verdicts: candidates.map((_, index) => ({ index, scores: { source_support: 1 as const, exactly_one_claim: 1 as const, self_contained: 1 as const, no_hidden_causation_or_overgeneralization: 1 as const, no_sensitive_content: 1 as const } })),
+});
+
 const stubChat = (title: string) => async (_o: ChatOpts): Promise<ChatResult> => ({
-  text: `[{"title":"${title}","atom_type":"insight","body":"Enterprise buyers want tangible prototypes, not renders."}]`,
+  text: JSON.stringify([{ title, atom_type: 'insight', body: quote, source_quote: quote }]),
   blocks: [{ type: 'text', text: '' }],
   stopReason: 'end',
   usage: { input_tokens: 500, output_tokens: 200, cache_read_tokens: 0, cache_creation_tokens: 0 },
@@ -42,13 +48,14 @@ describe('atom provenance backlinks (#3961)', () => {
   test('page-kind items get source-page → atom edges, visible as backlinks', async () => {
     await engine.putPage('writings/essay-one', {
       type: 'note', title: 'Essay One',
-      compiled_truth: 'A long essay with extractable claims.', timeline: '',
+      compiled_truth: source, timeline: '', frontmatter: { atom_extract: true },
     });
 
     const result = await runPhaseExtractAtoms(engine, {
       _transcripts: [],
-      _pages: [{ slug: 'writings/essay-one', content: 'A long essay with extractable claims.', contentHash: 'feedbeeffeedbeef' }],
+      _pages: [{ slug: 'writings/essay-one', content: source, contentHash: 'feedbeeffeedbeef' }],
       _chat: stubChat('Prototypes beat renders'),
+      _semanticValidator: semanticPass,
     });
     expect(result.status).toBe('ok');
     expect(result.details?.atoms_extracted).toBe(1);
@@ -69,8 +76,9 @@ describe('atom provenance backlinks (#3961)', () => {
     // write's ON CONFLICT dedupes the edge.
     await runPhaseExtractAtoms(engine, {
       _transcripts: [],
-      _pages: [{ slug: 'writings/essay-one', content: 'A long essay with extractable claims.', contentHash: 'feedbeeffeedbee2' }],
+      _pages: [{ slug: 'writings/essay-one', content: source, contentHash: 'feedbeeffeedbee2' }],
       _chat: stubChat('Prototypes beat renders'),
+      _semanticValidator: semanticPass,
     });
     const links = await engine.getLinks('writings/essay-one');
     expect(links.filter(l => l.link_source === 'atom-provenance')).toHaveLength(1);
@@ -81,9 +89,10 @@ describe('atom provenance backlinks (#3961)', () => {
       `SELECT COUNT(*)::int AS n FROM links WHERE link_source = 'atom-provenance'`,
     );
     const result = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: '/fake/meeting.txt', content: 'transcript content here', contentHash: 'abc123def4567890' }],
+      _transcripts: [{ filePath: '/fake/meeting.txt', content: source, contentHash: 'abc123def4567890' }],
       _pages: [],
       _chat: stubChat('Transcript atom'),
+      _semanticValidator: semanticPass,
     });
     expect(result.status).toBe('ok');
     const after = await engine.executeRaw<{ n: number }>(

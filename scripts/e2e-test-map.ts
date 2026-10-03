@@ -340,6 +340,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/persistence/prepared-maintenance.ts": ["test/e2e/migrations-v0_32_2-managed.test.ts", "test/e2e/fix-wave-4-integration.test.ts"],
   "src/core/pool-budget.ts": ["test/e2e/persistence-runtime-matrix.test.ts"],
   "src/core/connection-manager.ts": ["test/e2e/persistence-runtime-matrix.test.ts", "test/e2e/pgbouncer-teardown.test.ts"],
+  "vendor/postgres/": ["test/e2e/postgres-partial-row-error.test.ts", "test/e2e/postgres-driver-install.test.ts"],
   "src/core/postgres-engine.ts": [
     "test/e2e/executor-binding-matrix.test.ts",
     ...MIGRATION_WAVE_TESTS,

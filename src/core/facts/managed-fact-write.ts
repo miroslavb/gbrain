@@ -33,7 +33,8 @@ export async function publishManagedEntityFacts(engine: BrainEngine, sourceId: s
     const ctx = factsContext(engine, sourceId, { writer: 'fence_write', entity, visibility, supersede: options.supersede === true,
       ...(options.attributeFallback ? { attribute_fallback: true } : {}),
       facts: group.map(f => [f.fact, f.kind, f.source, f.notability, f.confidence ?? 1, f.validFrom?.toISOString() ?? null,
-        f.validUntil?.toISOString() ?? null, f.sessionId, f.context ?? null]) }, group[0].sessionId);
+        f.validUntil?.toISOString() ?? null, f.sessionId, f.context ?? null,
+        ...(f.supersedesFactId !== undefined ? [{ supersedes_fact_id: f.supersedesFactId }] : [])]) }, group[0].sessionId);
     const session = (await prepareManagedFactsSession(ctx, { turnText: '' }))!;
     let result = await resumeManagedFacts(engine, session);
     if (!result) {
@@ -42,6 +43,7 @@ export async function publishManagedEntityFacts(engine: BrainEngine, sourceId: s
       const extracted: ExtractedFact[] = group.map(f => ({ fact: f.fact, kind: f.kind, entity_slug: entity, visibility,
         notability: f.notability, source: f.source, context: f.context ?? null, confidence: f.confidence ?? 1,
         valid_from: f.validFrom, valid_until: f.validUntil ?? null, source_session: f.sessionId,
+        ...(f.supersedesFactId !== undefined ? { supersedes_fact_id: f.supersedesFactId } : {}),
         embedding: signature && f.embedding_model === signature.model && f.embedding?.length === signature.dimensions ? f.embedding : null }));
       result = await publishManagedFacts(engine, session, ctx, extracted, visibility, undefined,
         { supersede: options.supersede, explicitContext: true, attributeFallback: options.attributeFallback });

@@ -304,6 +304,12 @@ describe('extract_atoms pre-write safety and semantic gate', () => {
       'The second fallback-backed claim skips the failed primary.',
     ];
     await engine.setConfig('models.dream.extract_atoms', primaryModel);
+    // Explicit fixture prices let this test exercise fallback latching.
+    // Unknown routes remain blocked by the separate preflight cost tests.
+    await engine.setConfig('pricing.overrides', JSON.stringify({
+      [primaryModel]: { input: 0.6, output: 2.2 },
+      [fallbackModel]: { input: 1, output: 4 },
+    }));
     const requestedModels: Array<string | undefined> = [];
     let extractCall = 0;
 

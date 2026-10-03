@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { serializePageToMarkdown } from '../src/core/markdown.ts';
+import { parseFactsFence } from '../src/core/facts-fence.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
@@ -222,6 +223,79 @@ test('managed phantom redirect rechecks eligibility against the snapshot it merg
     expect(alive?.page.timeline).toContain('Met at the offsite');
     expect([result.phantomsRedirected, result.phantomsSkippedDrift]).toEqual([0, 1]);
     expect((await committed(engine, sourceId, 'people/alice-example')).map(r => r.kind)).not.toContain('managed_maintenance_phantom_merge');
+  });
+}, 120_000);
+
+test('explicit managed fence replacement retires the old row and replays after restart', async () => {
+  await managed(async ({ put }) => { await put('people/alice-example', PERSON('Alice Example')); }, async ({ engine, sourceId, root }) => {
+    const target = { sourceId, localPath: root, slug: 'people/alice-example', resolutionSource: 'exact_page' as const };
+    const base = { kind: 'fact' as const, notability: 'high' as const, visibility: 'world' as const,
+      source: 'explicit replacement fixture', embedding: null, sessionId: null };
+    const first = await writeFactsToFence(engine, target, [{ ...base, fact: 'The release window opens on Monday.' }]);
+    const replacement = { ...base, fact: 'The release window opens on Tuesday.', supersedesFactId: first.ids[0] };
+    const next = await writeFactsToFence(engine, target, [replacement]);
+    expect(next.inserted).toBe(1);
+    await disposePersistenceConsumer(engine);
+    expect(await writeFactsToFence(engine, target, [replacement])).toEqual(next);
+    const rows = await engine.executeRaw<{ id: number; expired_at: Date | null; superseded_by: number | null }>(
+      'SELECT id,expired_at,superseded_by FROM facts WHERE source_id=$1 ORDER BY id', [sourceId]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].expired_at).not.toBeNull();
+    expect(Number(rows[0].superseded_by)).toBe(next.ids[0]);
+    expect(rows[1].expired_at).toBeNull();
+    const file = readFileSync(join(root, 'people/alice-example.md'), 'utf8');
+    const fence = parseFactsFence(file).facts;
+    expect(fence[0].active).toBe(false);
+    expect(fence[0].supersededBy).toBe(fence[1].rowNum);
+    expect(fence[1].active).toBe(true);
+    const snapshot = await engine.readPageSnapshot(target.slug, { sourceId });
+    expect(parseFactsFence(snapshot!.page.compiled_truth).facts).toEqual(fence);
+  });
+}, 120_000);
+
+test('explicit replacement batches reject conflicting targets atomically', async () => {
+  await managed(async ({ put }) => { await put('people/alice-example', PERSON('Alice Example')); }, async ({ engine, sourceId, root }) => {
+    const target = { sourceId, localPath: root, slug: 'people/alice-example', resolutionSource: 'exact_page' as const };
+    const base = { kind: 'fact' as const, notability: 'high' as const, visibility: 'world' as const,
+      source: 'conflicting replacement fixture', embedding: null, sessionId: null };
+    const old = await writeFactsToFence(engine, target, [{ ...base, fact: 'Original alpha claim.' }, { ...base, fact: 'Original beta claim.' }]);
+    const path = join(root, 'people/alice-example.md');
+    const before = readFileSync(path, 'utf8');
+    for (const replacement of [
+      [{ ...base, fact: 'New alpha claim.', supersedesFactId: old.ids[0] }, { ...base, fact: 'New beta claim.', supersedesFactId: old.ids[0] }],
+      [{ ...base, fact: 'One merged claim.', supersedesFactId: old.ids[0] }, { ...base, fact: 'One merged claim.', supersedesFactId: old.ids[1] }],
+    ]) {
+      await expect(writeFactsToFence(engine, target, replacement)).rejects.toMatchObject({ code: 'invalid_params' });
+      expect(readFileSync(path, 'utf8')).toBe(before);
+      const rows = await engine.executeRaw<{ expired_at: Date | null; superseded_by: number | null }>(
+        'SELECT expired_at,superseded_by FROM facts WHERE source_id=$1', [sourceId]);
+      expect(rows).toEqual([{ expired_at: null, superseded_by: null }, { expired_at: null, superseded_by: null }]);
+    }
+  });
+}, 120_000);
+
+test.each(['source', 'entity', 'visibility', 'expired'] as const)('explicit replacement refuses a target outside its %s scope without publication', async (boundary) => {
+  let targetId = 0;
+  await managed(async ({ engine, sourceId, put }) => {
+    await put('people/alice-example', PERSON('Alice Example'));
+    const foreign = `foreign-${randomUUID().slice(0, 8)}`;
+    await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [foreign]);
+    const [row] = await engine.executeRaw<{ id: number }>(`INSERT INTO facts(source_id,entity_slug,fact,kind,source,visibility,expired_at)
+      VALUES($1,$2,'Scoped old claim','fact','fixture',$3,$4) RETURNING id`,
+      [boundary === 'source' ? foreign : sourceId, boundary === 'entity' ? 'people/bob-example' : 'people/alice-example',
+        boundary === 'visibility' ? 'private' : 'world', boundary === 'expired' ? new Date('2020-01-01') : null]);
+    targetId = Number(row.id);
+  }, async ({ engine, sourceId, root }) => {
+    const path = join(root, 'people/alice-example.md');
+    const before = readFileSync(path, 'utf8');
+    const counts = await engine.executeRaw('SELECT count(*)::int AS n FROM facts');
+    await expect(writeFactsToFence(engine, { sourceId, localPath: root, slug: 'people/alice-example', resolutionSource: 'exact_page' }, [{
+      fact: 'A replacement must stay scoped.', kind: 'fact', notability: 'high', visibility: 'world', source: 'fixture',
+      embedding: null, sessionId: null, supersedesFactId: targetId,
+    }])).rejects.toMatchObject({ code: 'invalid_params' });
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect(await engine.executeRaw('SELECT count(*)::int AS n FROM facts')).toEqual(counts);
+    expect((await engine.executeRaw<{ superseded_by: number | null }>('SELECT superseded_by FROM facts WHERE id=$1', [targetId]))[0].superseded_by).toBeNull();
   });
 }, 120_000);
 

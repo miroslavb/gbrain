@@ -4,7 +4,7 @@
  * on Postgres).
  *
  * Hermetic child: a fresh temp home (HOME = GBRAIN_HOME), cwd outside the
- * repo (so working-tree state such as eval_drift never leaks in), audit and
+ * repo (ambient application paths cannot leak in), audit and
  * sync-failure ledgers under the home, a two-line fixture skills dir passed
  * with `--skills-dir`, PATH reduced to a private bun symlink plus /usr/bin:/bin
  * (a globally linked `gbrain` would otherwise make npm_squat fire), every provider key removed, startup hooks skipped, and
@@ -137,6 +137,13 @@ export function normalizeDoctorText(text: string, roots: Record<string, string>,
   for (const [pattern, label] of extra) out = typeof pattern === 'string' ? out.split(pattern).join(label) : out.replace(pattern, label);
   out = scrubTimestamps(out).replace(UUID, '<uuid>');
   out = out.replace(/\(most recent caller: at [^()]*\([^()]*\)\)/g, '(most recent caller: <frame>)');
+  // eval_drift intentionally probes the installed source root, not child cwd.
+  // Its clean/dirty success message varies with developer edits. Preserve all
+  // errors and other messages; the focused drift tests verify the actual list.
+  if (out === 'No retrieval-affecting files changed in working tree.'
+    || /^\d+ retrieval-affecting file\(s\) changed since HEAD: [^\n]+\. Re-run `gbrain eval run-all` after committing these changes\.$/.test(out)) {
+    out = '<working-tree-retrieval-drift>';
+  }
   out = out.split(PACKAGE_VERSION).join('<version>');
   out = out.split(`Bun ${Bun.version}`).join('Bun <bun-version>');
   const host = hostname();

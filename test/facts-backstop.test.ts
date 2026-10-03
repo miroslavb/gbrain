@@ -316,9 +316,8 @@ describe('runFactsBackstop — stub guard routing (v0.34.5)', () => {
       //   2. fuzzy match → miss (no title contains noresolvable)
       //   3. prefix expansion → miss (no people/noresolvable-* rows)
       //   4. slugify fallback → 'noresolvable' (bare)
-      // Since 2026-09-27 the page-sourced backstop attributes a fallback
-      // slug to the origin page, so it never reaches the stub guard as a
-      // phantom entity (the turn-text path still routes it DB-only).
+      // An unresolved subject stays null. The source page is provenance,
+      // never a substitute subject or a phantom entity.
       chatStub([
         { fact: 'said hello at the meeting', kind: 'event', notability: 'high', entity: 'noresolvable' },
       ]);
@@ -335,14 +334,14 @@ describe('runFactsBackstop — stub guard routing (v0.34.5)', () => {
         // No phantom file at the brain root (this is the whole point of the guard).
         expect(existsSync(join(brainDir, 'noresolvable.md'))).toBe(false);
 
-        // Fork 2026-09-27: the page-sourced fact is attributed to its origin
-        // page instead of the page-less bare slug.
+        // Preserve origin separately from the unresolved subject.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rows = await (engine as any).db.query(
-          `SELECT entity_slug, fact FROM facts WHERE id = $1`,
+          `SELECT entity_slug, context, fact FROM facts WHERE id = $1`,
           [r.fact_ids[0]],
         );
-        expect(rows.rows[0].entity_slug).toBe(origin.slug);
+        expect(rows.rows[0].entity_slug).toBeNull();
+        expect(rows.rows[0].context).toBe(origin.slug);
         expect(rows.rows[0].fact).toBe('said hello at the meeting');
       }
     } finally {

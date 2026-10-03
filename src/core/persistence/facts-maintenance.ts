@@ -30,6 +30,8 @@ export type FrozenExtractedFact = Omit<NewFact, 'embedding' | 'valid_from' | 'va
   embedding: number[] | null; valid_from: string; valid_until: string | null;
   /** #5836: a write-time inferred subject dedups exact text only, never superseding or dropping a similar fact. */
   entity_inferred?: InferredVia;
+  /** Explicit fence-writer replacement, scoped and revalidated at publication. */
+  supersedes_fact_id?: number;
 };
 export interface ManagedFactIntent extends Record<string, unknown> {
   kind: 'managed_facts_entity' | 'managed_facts_complete';

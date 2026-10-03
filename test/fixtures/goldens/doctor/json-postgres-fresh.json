@@ -1134,7 +1134,7 @@
         },
         {
           "category": "brain",
-          "message": "No retrieval-affecting files changed in working tree.",
+          "message": "<working-tree-retrieval-drift>",
           "name": "eval_drift",
           "status": "ok"
         },

@@ -155,3 +155,20 @@ unchanged. Real PostgreSQL tests exercise errors and cancellation after partial
 rows through ESM and CJS imports and require a dense successor result on the
 same backend connection. Reproduction before the fix and readback after it are
 retained in the stage receipts.
+
+### Explicit fact replacement and acceptance fixtures
+
+Managed fence writes retain an explicit supersedesFactId in their frozen intent
+and request identity. Publication rechecks the old row's source, subject,
+visibility and live state, rejects ambiguous batch targets, and commits the
+retired fence plus index together. Ordinary request identities remain unchanged;
+restart replay returns the original result. The isolated PostgreSQL operation
+chain exposed this lost-field bug; PGlite/PG tests exercise replacement and
+cross-scope refusal. Gate results remain in the staging receipts.
+
+Test fixtures now separate a fact's unresolved subject from its page origin,
+provide grounded/opted-in atom inputs and explicit prices for synthetic fallback
+models, and retain remote safe-chunk admission on the world-only host. Doctor
+structural goldens normalize only recognized clean/dirty Git-drift messages as
+volatile developer state, preserving probe errors and the rest of the report.
+This does not change retrieval labels, thresholds, or runtime search results.
