@@ -416,19 +416,19 @@
         },
         {
           "category": "ops",
-          "message": "RLS enabled on 102/102 public tables",
+          "message": "RLS enabled on 105/105 public tables",
           "name": "rls",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "Version 197 (latest: 197)",
+          "message": "Version 207 (latest: 207)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "831 column(s) verified against live schema",
+          "message": "874 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -1518,7 +1518,7 @@
         },
         {
           "category": "meta",
-          "message": "Active pack gbrain-base-v2@1.2.1+99de63c4 is current (no successor declared)",
+          "message": "Active pack gbrain-base-v2@1.2.1+700f7ac1 is current (no successor declared)",
           "name": "pack_upgrade_available",
           "status": "ok"
         },

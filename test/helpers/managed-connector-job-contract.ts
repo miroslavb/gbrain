@@ -36,7 +36,7 @@
  */
 import { expect } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrainEngine } from '../../src/core/engine.ts';
@@ -176,7 +176,9 @@ function fakeChat(opts: unknown): ChatResult {
       counterparty_name: 'people/alice-example', counterparty_email: 'alice@example.invalid', due_iso: '2026-10-09',
       quote: 'can you send me the quarterly plan by Friday?' }], decisions_pending: [] });
   } else if (prompt.includes('atom_type')) {
-    text = '[{"title":"Plan reviews","atom_type":"insight","body":"The quarterly plan review occurs on Monday.","source_quote":"The quarterly plan review occurs on Monday."}]';
+    const quote = prompt.includes('The hiring plan review occurs on Monday.')
+      ? 'The hiring plan review occurs on Monday.' : 'The quarterly plan review occurs on Monday.';
+    text = JSON.stringify([{ title: 'Plan reviews', atom_type: 'insight', body: quote, source_quote: quote }]);
   } else {
     text = JSON.stringify({ facts: [{ fact: 'Alice Example reviews the quarterly plan on Mondays.', kind: 'fact',
       entity: 'people/alice-example', confidence: 0.9, notability: 'high' }] });
@@ -641,14 +643,33 @@ const cases: Record<ContractCase, (state: CaseState) => Promise<void>> = {
     await submitPageMutation(state.ctx, { operation: 'put_page', params: { slug: 'emails/2026/10/second-thread', request_id: randomUUID(),
       content: `---\ntitle: Second thread\ntype: email\nthread_id: second\n---\n${EMAIL_BODY.replaceAll('quarterly plan', 'hiring plan')}\n` } });
     await disposePersistenceConsumer(engine);
-    const tick = async () => {
-      await dispatchAutopilotTick(engine, { lastFullCycleAt: Date.now() } as never, { repoPath: '', baseInterval: 300, jsonMode: true });
+    // Auto-drain applies only when the active pack omits extract_atoms. The
+    // fork's base-v2 declares it; use a real child pack for the fallback lane.
+    const packName = 'connector-auto-drain-contract';
+    const packDir = join(state.brain.home, '.gbrain', 'schema-packs', packName);
+    mkdirSync(packDir, { recursive: true });
+    writeFileSync(join(packDir, 'pack.json'), JSON.stringify({
+      api_version: 'gbrain-schema-pack-v1', name: packName, version: '1.0.0',
+      extends: 'gbrain-base-v2', phases: [], page_types: [], link_types: [],
+    }));
+    const { loadActivePackForLocalEngine } = await import('../../src/core/schema-pack/best-effort.ts');
+    const tick = async (pack = packName) => {
+      await withEnv({ GBRAIN_SCHEMA_PACK: pack }, async () => {
+        const resolved = await loadActivePackForLocalEngine(engine);
+        expect(resolved?.manifest.name).toBe(pack);
+        expect(resolved?.manifest.phases?.includes('extract_atoms') ?? false).toBe(pack === 'gbrain-base-v2');
+        await dispatchAutopilotTick(engine, { lastFullCycleAt: Date.now() } as never, { repoPath: '', baseInterval: 300, jsonMode: true });
+      });
       await engine.executeRaw("UPDATE minion_jobs SET status='cancelled' WHERE id > $1 AND status IN ('waiting','delayed') AND name <> 'extract-atoms-drain'", [state.detector.jobsFrom]);
       return engine.executeRaw<{ id: number }>("SELECT id FROM minion_jobs WHERE name='extract-atoms-drain' AND data->>'sourceId'=$1 AND id > $2", [state.sourceId, state.detector.jobsFrom]);
     };
     await engine.setConfig('autopilot.auto_drain.threshold', '1');
-    await engine.setConfig(CONNECTOR_ATOMS_SETTING.key, CONNECTOR_ATOMS_SETTING.off);
     try {
+      // A declared cycle phase must not receive a duplicate auto-drain job.
+      await engine.executeRaw('DELETE FROM config WHERE key=$1', [CONNECTOR_ATOMS_SETTING.key]);
+      expect(await countExtractAtomsBacklog(engine, state.sourceId)).toBeGreaterThan(1);
+      expect(await tick('gbrain-base-v2')).toHaveLength(0);
+      await engine.setConfig(CONNECTOR_ATOMS_SETTING.key, CONNECTOR_ATOMS_SETTING.off);
       expect(await countExtractAtomsBacklog(engine, state.sourceId)).toBe(0);
       const off = await tick();
       // PGLite: the auto-drain dispatch is Postgres-only, so nothing is submitted.

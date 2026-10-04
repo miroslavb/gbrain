@@ -779,3 +779,16 @@ query adaptive-return guidance explicit within the MCP budget and asserts each
 derived fact names its source-scoped committed transaction receipt and local
 principal. Takes/timeline maintenance retain their separate attribution contract.
 The same attribution suite runs on PostgreSQL through its existing E2E wrapper.
+
+### PostgreSQL fixture parity after v0.60.45 port (2026-10-04)
+
+Doctor's fresh-Postgres structural golden reflects schema207 and the retained
+fork pack; retrieval gold is unchanged. The PostgreSQL health fixture uses the
+same curated-entity bound as its PGlite twin and keeps field-by-field legacy
+parity. Connector auto-drain tests use an explicit phase-free child pack and
+verify pack resolution, suppression when the cycle declares the phase, connector
+opt-out, and one completed opt-in job. Their synthetic atom quotes must match
+each source page. Managed-writer, exact-quote and dead-letter assertions remain.
+The timeline parity fixture seeds seven canonical cards with four timeline rows,
+asserts the nonempty curated denominator on both engines and retains the graded
+score of nine; archive and reference fixtures remain excluded from that score.

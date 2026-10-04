@@ -3,7 +3,7 @@
  * exactly as on PGLite (JSONB frontmatter read back as an object, text[]
  * binds, integer length bound, per-type getHealth rows).
  *
- *   #5828  getHealth timeline component grades only entity/temporal types
+ *   #5828  host getHealth timeline component grades canonical curated pages
  *   #5879  findTypeOrphans + doctor schema_pack_consistency count undeclared types
  *   #4419  discoverConversationPages reads conversation pages + frontmatter dates
  *
@@ -28,6 +28,14 @@ async function seed(engine: BrainEngine): Promise<void> {
     const slug = `meetings/2026-02-0${i + 1}-example-sync`;
     await engine.putPage(slug, { type: 'meeting', title: `Sync ${i}`, compiled_truth: `Sync ${i}.`, frontmatter: {} });
     await engine.addTimelineEntry(slug, { date: `2026-02-0${i + 1}`, source: 'meeting', summary: 'Sync held' });
+    slugs.push(slug);
+  }
+  // The host scores curated canonical knowledge, independently of archive
+  // temporal types. Exercise a nonempty denominator with missing timeline rows.
+  for (let i = 0; i < 7; i++) {
+    const slug = `people/timeline-example-${i}`;
+    await engine.putPage(slug, { type: 'person', title: `Person ${i}`, compiled_truth: `Person ${i}.`, frontmatter: {} });
+    if (i < 4) await engine.addTimelineEntry(slug, { date: `2026-02-0${i + 1}`, source: 'fixture', summary: 'Reviewed' });
     slugs.push(slug);
   }
   for (let i = 0; i < 12; i++) {
@@ -67,10 +75,15 @@ describePg('wave 8 lane D2 — Postgres parity', () => {
     await teardownDB();
   });
 
-  test('#5828 timeline component: same graded score on both engines, notes not graded', async () => {
+  test('#5828 timeline component: curated score matches on both engines, archives not graded', async () => {
     const [a, b] = [await pglite.getHealth(), await postgres.getHealth()];
     expect(b.timeline_coverage_score).toBe(a.timeline_coverage_score);
-    // 4 meetings with rows + 3 undeclared-type pages without -> round(4/7*15) = 9; notes excluded.
+    // Four of seven canonical person cards have rows; temporal archives,
+    // undeclared transcripts and reference notes must not change the denominator.
+    for (const health of [a, b]) {
+      expect(health.graph_scope?.curated_pages).toBe(7);
+      expect(health.graph_scope?.curated_timeline_pages).toBe(4);
+    }
     expect(b.timeline_coverage_score).toBe(Math.round((4 / 7) * 15));
   });
 

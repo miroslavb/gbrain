@@ -68,7 +68,7 @@ describe.skipIf(!hasDatabase())('F4a getHealth on Postgres', () => {
     test(`seeded random graph ${seed} matches the pre-F4a implementation`, async () => {
       await seedRandomHealthGraph(engine, seed);
       const [all] = await env(() => expectHealthMatchesLegacy(engine, `pg-random-${seed}`));
-      expect(all.most_connected.length).toBe(5);
+      expect(all.most_connected.length).toBe(Math.min(5, all.entity_page_count));
     });
   }
 
