@@ -1,6 +1,6 @@
 import { parseAtomsOutcome, MIN_PAGE_CHARS_FOR_EXTRACTION, type ExtractedAtom } from './extract-atoms-output.ts';
 export { parseAtomsOutcome, parseAtomsResponse, locateQuote, type AtomsParseOutcome } from './extract-atoms-output.ts';
-import { resolveExtractAtomsCostGate, resolveEmbedModelForCostGate, settleExtractAtomsCostGate } from './extract-atoms-cost-gate.ts';
+import { resolveExtractAtomsCostGate, resolveEmbedModelForCostGate, settleAtomPhasePricing } from './extract-atoms-cost-gate.ts';
 import { atomSlug } from './atom-slug.ts';
 // v0.41.2.1 — extract_atoms cycle phase, post-fix-wave rebuild.
 //
@@ -952,22 +952,11 @@ export async function runPhaseExtractAtoms(
     extractModel,
     validatorModel,
   );
-  if (!budgetPricing.enforceCostCap) {
-    const warning = `Unpriced extraction route(s): ${budgetPricing.unpricedModels.join(', ')}. Configure pricing.overrides before retrying; budget remains enforced.`;
-    const unpricedModel = budgetPricing.unpricedModels[0]!;
-    const gate = resolveExtractAtomsCostGate(
-      isModelPriceable(extractModel, 'chat', budgetPricing.pricingOverrides) && unpricedModel === validatorModel ? validatorModel : extractModel,
-      resolveEmbedModelForCostGate(), budgetPricing.pricingOverrides);
-    const refusal = await settleExtractAtomsCostGate(engine, sourceId, gate, { budgetCap, extractModel, dryRun: opts.dryRun ?? false });
-    console.error(`[extract_atoms] ${warning}`);
-    return { phase: 'extract_atoms', status: 'warn', duration_ms: 0, summary: warning,
-      details: { ...refusal?.details, atoms_extracted: 0, budget_exhausted: false, pricing_blocked: true,
-        unpriced_models: budgetPricing.unpricedModels, budget_usd: budgetCap,
-        transcripts_skipped_budget: transcripts.length, pages_skipped_budget: pages.length,
-        failures: [], warnings: [warning], source_id: sourceId } };
-  }
-  await settleExtractAtomsCostGate(engine, sourceId, { enforceCap: true },
-    { budgetCap, extractModel, dryRun: opts.dryRun ?? false });
+  const pricingRefusal = await settleAtomPhasePricing(engine, {
+    ...budgetPricing, sourceId, extractModel, validatorModel, budgetCap, dryRun: opts.dryRun ?? false,
+    transcripts: transcripts.length, pages: pages.length,
+  });
+  if (pricingRefusal) return pricingRefusal;
   const budgetTracker = opts.attempt?.budgetTracker ?? new BudgetTracker({
     maxCostUsd: budgetCap,
     label: 'cycle.extract_atoms',

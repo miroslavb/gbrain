@@ -770,3 +770,6 @@ are never queued outside that transaction and cannot stage source files.
 Starter MCP guidance is compacted without changing its parameters or limits;
 extended fork cursor/budget/visibility rules live in docs/mcp/TOOL_REFERENCE.md.
 Writer-attribution census includes the retained finite-code/atom/vector overlays.
+The v45 corrective integration keeps atom pricing refusal/recovery in the cost-gate
+helper; do not grow the already ratcheted extraction phase for new policy branches.
+Both unpriced refusal and clearing the warning after a priced retry remain tested.

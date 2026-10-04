@@ -43,6 +43,29 @@ export interface CostGateTarget {
 
 const ATOMS_TARGET: CostGateTarget = { phase: 'extract_atoms', keyPrefix: ATOMS_NO_PRICING_KEY_PREFIX, rollup: true };
 
+/** Settle the complete atom route before spend, including a priced retry's recovery. */
+export async function settleAtomPhasePricing(engine: BrainEngine, input: {
+  sourceId: string; extractModel: string; validatorModel: string; budgetCap: number; dryRun: boolean;
+  enforceCostCap: boolean; unpricedModels: string[]; pricingOverrides?: PricingOverrides;
+  transcripts: number; pages: number;
+}): Promise<PhaseResult | null> {
+  const { sourceId, extractModel, validatorModel, budgetCap, dryRun, pricingOverrides } = input;
+  if (input.enforceCostCap) {
+    return settleExtractAtomsCostGate(engine, sourceId, { enforceCap: true }, { budgetCap, extractModel, dryRun });
+  }
+  const warning = `Unpriced extraction route(s): ${input.unpricedModels.join(', ')}. Configure pricing.overrides before retrying; budget remains enforced.`;
+  const route = isModelPriceable(extractModel, 'chat', pricingOverrides) && input.unpricedModels[0] === validatorModel
+    ? validatorModel : extractModel;
+  const gate = resolveExtractAtomsCostGate(route, resolveEmbedModelForCostGate(), pricingOverrides);
+  const refusal = await settleExtractAtomsCostGate(engine, sourceId, gate, { budgetCap, extractModel, dryRun });
+  console.error(`[extract_atoms] ${warning}`);
+  return { phase: 'extract_atoms', status: 'warn', duration_ms: 0, summary: warning,
+    details: { ...refusal?.details, atoms_extracted: 0, budget_exhausted: false, pricing_blocked: true,
+      unpriced_models: input.unpricedModels, budget_usd: budgetCap,
+      transcripts_skipped_budget: input.transcripts, pages_skipped_budget: input.pages,
+      failures: [], warnings: [warning], source_id: sourceId } };
+}
+
 /**
  * Act on the gate before any work item. Default-cap drop: warn and return
  * null (the run proceeds uncapped). Refusal: record it for doctor, count the
