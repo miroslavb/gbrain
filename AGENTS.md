@@ -748,3 +748,25 @@ source and ID are unchanged, with the late repair at207-chain migration205 retai
 
 Verify2:66/67 PASS. Five inherited size rows still require the documented port
 exception relative to accepted b7, even though unchanged from the merge commit.
+
+### v0.60.45 integration follow-up (2026-10-04)
+
+The first full unit run is retained as FAIL, not waived. New upstream fixtures
+must explicitly opt catch-all notes into atom extraction, provide exact atom
+quotes and semantic verdicts, and use world-only agent facts while preserving
+legacy page metadata and source/document ACL tests. Health parity uses the
+accepted b7 fork implementation as its independent oracle; indexed endpoint
+lookups retain the curated scores and pass the no-statistics 8000-page gate.
+Explicit indexing above the automatic chunker floor is current. The tuned
+markdown investment matcher retains narrow financial seed phrases even when
+pack sketch matchers are NER-only. A priced retry clears its stale cost refusal;
+unpriced default and explicit budgets both remain fail-closed.
+
+Derived fact maintenance now admits and completes a journal request inside the
+same transaction as its source-scoped derived rows. A failed callback leaves no
+receipt, partial epoch or reserved-counter drift. These database-only requests
+are never queued outside that transaction and cannot stage source files.
+
+Starter MCP guidance is compacted without changing its parameters or limits;
+extended fork cursor/budget/visibility rules live in docs/mcp/TOOL_REFERENCE.md.
+Writer-attribution census includes the retained finite-code/atom/vector overlays.

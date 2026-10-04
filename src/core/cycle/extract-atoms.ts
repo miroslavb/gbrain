@@ -966,6 +966,8 @@ export async function runPhaseExtractAtoms(
         transcripts_skipped_budget: transcripts.length, pages_skipped_budget: pages.length,
         failures: [], warnings: [warning], source_id: sourceId } };
   }
+  await settleExtractAtomsCostGate(engine, sourceId, { enforceCap: true },
+    { budgetCap, extractModel, dryRun: opts.dryRun ?? false });
   const budgetTracker = opts.attempt?.budgetTracker ?? new BudgetTracker({
     maxCostUsd: budgetCap,
     label: 'cycle.extract_atoms',

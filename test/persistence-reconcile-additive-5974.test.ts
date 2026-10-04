@@ -135,7 +135,7 @@ test('the reporter\'s additive page reconciles under --auto-additive; a replaced
   const ctx: OperationContext = { engine, remote: false, sourceId: f.id, config: { engine: engine.kind }, dryRun: false, logger: { info() {}, warn() {}, error() {} } };
   await local(engine, f.registration, async () => {
     const fact = 'Prefers the synthetic morning review.', provenance = 'Synthetic operator conversation';
-    await expect(operationsByName.remember!.handler(ctx, { fact, provenance, entity: slug, visibility: 'private', request_id: randomUUID() }))
+    await expect(operationsByName.remember!.handler(ctx, { fact, provenance, entity: slug, visibility: 'world', request_id: randomUUID() }))
       .rejects.toMatchObject({ writeError: 'source_changed' });
 
     const audit = await auditCanonicalSource(engine, f.id, { classify: true });
@@ -173,10 +173,10 @@ test('the reporter\'s additive page reconciles under --auto-additive; a replaced
     expect(reconciled.page.frontmatter).toMatchObject({ access: 'private', visibility: 'private', phone_last_used: '2026-02-02',
       contacts: ['alice-example', 'bob-example', 'carol-example', 'alice-example'] });
 
-    const saved = await operationsByName.remember!.handler(ctx, { fact, provenance, entity: slug, visibility: 'private', request_id: randomUUID() }) as Record<string, unknown>;
+    const saved = await operationsByName.remember!.handler(ctx, { fact, provenance, entity: slug, visibility: 'world', request_id: randomUUID() }) as Record<string, unknown>;
     expect(saved).toMatchObject({ status: 'inserted', state: 'committed' });
     const current = (await engine.readPageSnapshot(slug, { sourceId: f.id }))!;
-    expect(parseFactsFence(current.page.compiled_truth).facts).toEqual(expect.arrayContaining([expect.objectContaining({ claim: fact, visibility: 'private' })]));
+    expect(parseFactsFence(current.page.compiled_truth).facts).toEqual(expect.arrayContaining([expect.objectContaining({ claim: fact, visibility: 'world' })]));
     expect(parseMarkdown(readFileSync(file, 'utf8'), slug).compiled_truth).toBe(current.page.compiled_truth);
 
     const read = await dispatchToolCall(engine, 'get_page', { slug, source_id: f.id }, { remote: false, sourceId: f.id, config: { engine: engine.kind },
@@ -184,7 +184,7 @@ test('the reporter\'s additive page reconciles under --auto-additive; a replaced
     expect(read.isError).toBeFalsy();
     expect((read.content[0] as { text: string }).text).toContain(fact);
 
-    const stillBlocked = await operationsByName.remember!.handler({ ...ctx }, { fact, provenance, entity: 'people/replaced-example', visibility: 'private', request_id: randomUUID() })
+    const stillBlocked = await operationsByName.remember!.handler({ ...ctx }, { fact, provenance, entity: 'people/replaced-example', visibility: 'world', request_id: randomUUID() })
       .then(() => null, e => e);
     expect(stillBlocked).toMatchObject({ writeError: 'source_changed' });
   });

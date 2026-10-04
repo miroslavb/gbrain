@@ -397,7 +397,7 @@ describe('runUpgrade — bun-link Bun floor gate (#5855)', () => {
     const fx = buildFixture('floor-unmet', '>=9.9.9');
     const run = await spawnWithShims(fx, [fx.driver, '--swap-only']);
     expect(run.code).toBe(78);
-    expect(run.err).toContain(`gbrain ${SHIM_NEW_VERSION} requires Bun >=9.9.9; bun on PATH (${join(fx.shimDir, 'bun')}) is 1.4.2. `
+    expect(run.err).toContain(`gbrain ${SHIM_NEW_VERSION} requires Bun >=9.9.9; the running Bun (${process.execPath}) is ${Bun.version}. `
       + 'Fix: bun upgrade, then gbrain upgrade. Docs: docs/guides/upgrades-auto-update.md#bun-floor');
     expect(run.err).toContain('Nothing was changed.');
     expect(git(['rev-parse', 'HEAD'], fx.clone).trim()).toBe(fx.cloneHeadBefore);

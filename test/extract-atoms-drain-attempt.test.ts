@@ -22,8 +22,8 @@ afterAll(async () => { __setChatTransportForTests(null); await engine.disconnect
 
 test('a three-batch drain attempt stops at its per-run cap (one BudgetTracker per attempt)', async () => {
   for (const n of [1, 2, 3]) {
-    await engine.putPage(`notes/decision-${n}`, { type: 'note', title: `Decision ${n}`,
-      compiled_truth: `Decision ${n}: a durable choice recorded in prose. `.repeat(20) } as never, { sourceId: 'default' });
+    await engine.putPage(`notes/decision-${n}`, { type: 'note', frontmatter: { atom_extract: true }, title: `Decision ${n}`,
+      compiled_truth: `Release ${n} requires a passing durability check. `.repeat(20) } as never, { sourceId: 'default' });
   }
   await engine.setConfig('cycle.extract_atoms.page_discovery_budget', '1');
   await engine.setConfig('models.dream.extract_atoms', 'anthropic:claude-haiku-4-5');
@@ -33,8 +33,14 @@ test('a three-batch drain attempt stops at its per-run cap (one BudgetTracker pe
   await engine.setConfig('cycle.extract_atoms.budget_usd', '0.03');
   let calls = 0;
   __setChatTransportForTests(async (opts) => {
+    if (opts.system?.includes('fail-closed atom quality gate')) {
+      const text = JSON.stringify({ verdicts: [{ index: 0, scores: { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 } }] });
+      return { text, blocks: [{ type: 'text' as const, text }], stopReason: 'end' as const,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: opts.model!, providerId: 'anthropic' };
+    }
     calls++;
-    const text = JSON.stringify([{ title: `Measured progress ${calls}`, atom_type: 'insight', body: `Measure progress against clear exit criteria ${calls}.` }]);
+    const quote = JSON.stringify(opts).match(/Release \d+ requires a passing durability check\./)![0];
+    const text = JSON.stringify([{ title: `Measured progress ${calls}`, atom_type: 'insight', body: quote, source_quote: quote }]);
     return { text, blocks: [{ type: 'text', text }], stopReason: 'end',
       usage: { input_tokens: 15_000, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
       model: opts.model!, providerId: 'anthropic' };
@@ -53,16 +59,22 @@ test('a three-batch drain attempt stops at its per-run cap (one BudgetTracker pe
 
 test('each drain attempt starts a fresh budget: the next attempt extracts the next page', async () => {
   for (const n of [1, 2]) {
-    await engine.putPage(`notes/attempt-${n}`, { type: 'note', title: `Attempt ${n}`,
-      compiled_truth: `Attempt ${n}: a durable choice recorded in prose. `.repeat(20) } as never, { sourceId: 'default' });
+    await engine.putPage(`notes/attempt-${n}`, { type: 'note', frontmatter: { atom_extract: true }, title: `Attempt ${n}`,
+      compiled_truth: `Release ${n} requires a passing durability check. `.repeat(20) } as never, { sourceId: 'default' });
   }
   await engine.setConfig('cycle.extract_atoms.page_discovery_budget', '1');
   await engine.setConfig('models.dream.extract_atoms', 'anthropic:claude-haiku-4-5');
   await engine.setConfig('cycle.extract_atoms.budget_usd', '0.03');
   let calls = 0;
   __setChatTransportForTests(async (opts) => {
+    if (opts.system?.includes('fail-closed atom quality gate')) {
+      const text = JSON.stringify({ verdicts: [{ index: 0, scores: { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 } }] });
+      return { text, blocks: [{ type: 'text' as const, text }], stopReason: 'end' as const,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: opts.model!, providerId: 'anthropic' };
+    }
     calls++;
-    const text = JSON.stringify([{ title: `Next step ${calls}`, atom_type: 'insight', body: `Ship the smallest next step ${calls}.` }]);
+    const quote = JSON.stringify(opts).match(/Release \d+ requires a passing durability check\./)![0];
+    const text = JSON.stringify([{ title: `Next step ${calls}`, atom_type: 'insight', body: quote, source_quote: quote }]);
     return { text, blocks: [{ type: 'text', text }], stopReason: 'end',
       usage: { input_tokens: 15_000, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
       model: opts.model!, providerId: 'anthropic' };

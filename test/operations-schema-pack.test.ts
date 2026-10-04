@@ -250,7 +250,7 @@ describe('schema_review_orphans', () => {
     expect(result.truncated).toBe(true);
   });
 
-  it('pack-aware arm: undeclared stored types surface with counts and samples; declared types do not', async () => {
+  it('pack-aware arm: undeclared stored types surface with counts and scoped pages; declared types do not', async () => {
     await engine.executeRaw(
       `INSERT INTO pages (slug, source_id, source_path, type, title, compiled_truth, timeline, content_hash)
        VALUES ('weird-1', 'default', 'unknown/w1.md', 'totally-made-up-type', 'w', '', '', ''),
@@ -259,8 +259,9 @@ describe('schema_review_orphans', () => {
     );
     const result = await operationsByName.schema_review_orphans!.handler(ctxOf(), {}) as {
       pack: string | null;
-      undeclared_page_count: number;
-      undeclared_types: Array<{ type: string; count: number; sample_slugs: string[] }>;
+      orphan_count: number;
+      orphans: Array<{ slug: string; source_id: string; type: string; reason: string }>;
+      undeclared_types: Array<{ type: string; count: number }>;
     };
     // The active pack must have loaded — a null pack would mean the arm
     // silently degraded and asserted nothing.
@@ -268,10 +269,14 @@ describe('schema_review_orphans', () => {
     const weird = result.undeclared_types.find((t) => t.type === 'totally-made-up-type');
     expect(weird).toBeDefined();
     expect(weird!.count).toBe(2);
-    expect(weird!.sample_slugs).toContain('weird-1');
+    expect(result.orphans.filter((p) => p.type === 'totally-made-up-type')).toEqual([
+      { slug: 'weird-1', source_id: 'default', type: 'totally-made-up-type', reason: 'undeclared' },
+      { slug: 'weird-2', source_id: 'default', type: 'totally-made-up-type', reason: 'undeclared' },
+    ]);
+    expect(result.orphans.some((p) => p.slug === 'typed-1')).toBe(false);
     // A declared canonical type never reports as undeclared.
     expect(result.undeclared_types.find((t) => t.type === 'person')).toBeUndefined();
-    expect(result.undeclared_page_count).toBeGreaterThanOrEqual(2);
+    expect(result.orphan_count).toBeGreaterThanOrEqual(2);
   });
 });
 

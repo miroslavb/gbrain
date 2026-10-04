@@ -45,8 +45,8 @@ test('a busy writer during a two-batch drain costs one wait; the deferred batch 
       await engine.executeRaw('INSERT INTO sources(id,name,local_path) VALUES($1,$1,$2)', [sourceId, root]);
       mkdirSync(join(root, 'notes'), { recursive: true });
       for (const n of [1, 2]) {
-        await engine.putPage(`notes/wait-${n}`, { type: 'note', title: `Wait ${n}`,
-          compiled_truth: `Decision ${n}: a durable choice recorded in prose. `.repeat(20) } as never, { sourceId });
+        await engine.putPage(`notes/wait-${n}`, { type: 'note', frontmatter: { atom_extract: true }, title: `Wait ${n}`,
+          compiled_truth: `Release ${n} requires a passing durability check. `.repeat(20) } as never, { sourceId });
         writeFileSync(join(root, `notes/wait-${n}.md`), serializePageToMarkdown((await engine.getPage(`notes/wait-${n}`, { sourceId }))!, []));
       }
       await engine.setConfig('cycle.extract_atoms.page_discovery_budget', '1');
@@ -57,9 +57,15 @@ test('a busy writer during a two-batch drain costs one wait; the deferred batch 
       let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
       let calls = 0;
       __setChatTransportForTests(async (opts) => {
-        calls++;
+        if (opts.system?.includes('fail-closed atom quality gate')) {
+      const text = JSON.stringify({ verdicts: [{ index: 0, scores: { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 } }] });
+      return { text, blocks: [{ type: 'text' as const, text }], stopReason: 'end' as const,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: opts.model!, providerId: 'anthropic' };
+    }
+    calls++;
         lock = await acquireWorktree(binding, 1000);
-        const text = JSON.stringify([{ title: `Exit criteria ${calls}`, atom_type: 'insight', body: `Measure progress against clear exit criteria ${calls}.` }]);
+        const quote = JSON.stringify(opts).match(/Release \d+ requires a passing durability check\./)![0];
+    const text = JSON.stringify([{ title: `Exit criteria ${calls}`, atom_type: 'insight', body: quote, source_quote: quote }]);
         return { text, blocks: [{ type: 'text', text }], stopReason: 'end',
           usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: opts.model!, providerId: 'anthropic' };
       });

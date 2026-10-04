@@ -154,6 +154,7 @@ const THREAD_ID = '17aa00000000c001';
 const MESSAGE_ID = '18c2f4a9b3d20001';
 const EMAIL_BODY = [
   'Hi, can you send me the quarterly plan by Friday? I will review it on Monday.',
+  'The quarterly plan review occurs on Monday.',
   '',
   'Some context for the review: the plan should cover hiring, the support backlog and the two launch dates we discussed.',
   'Last quarter the review slipped because the numbers arrived late, so this time the finance appendix should be attached to the first draft.',
@@ -168,12 +169,14 @@ const b64url = (s: string) => Buffer.from(s, 'utf-8').toString('base64url');
 function fakeChat(opts: unknown): ChatResult {
   const prompt = JSON.stringify(opts);
   let text: string;
-  if (prompt.includes('decisions_pending')) {
+  if (prompt.includes('fail-closed atom quality gate')) {
+    text = JSON.stringify({ verdicts: [{ index: 0, scores: { source_support: 1, exactly_one_claim: 1, self_contained: 1, no_hidden_causation_or_overgeneralization: 1, no_sensitive_content: 1 } }] });
+  } else if (prompt.includes('decisions_pending')) {
     text = JSON.stringify({ commitments: [{ text: 'Send the quarterly plan by Friday', direction: 'owed_by_me',
       counterparty_name: 'people/alice-example', counterparty_email: 'alice@example.invalid', due_iso: '2026-10-09',
       quote: 'can you send me the quarterly plan by Friday?' }], decisions_pending: [] });
   } else if (prompt.includes('atom_type')) {
-    text = '[{"title":"Plan reviews","atom_type":"insight","body":"Quarterly plans are reviewed on the Monday after they are sent."}]';
+    text = '[{"title":"Plan reviews","atom_type":"insight","body":"The quarterly plan review occurs on Monday.","source_quote":"The quarterly plan review occurs on Monday."}]';
   } else {
     text = JSON.stringify({ facts: [{ fact: 'Alice Example reviews the quarterly plan on Mondays.', kind: 'fact',
       entity: 'people/alice-example', confidence: 0.9, notability: 'high' }] });

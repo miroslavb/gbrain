@@ -36,7 +36,7 @@ test('a structural refusal dead-letters after one attempt with structural_refusa
     await withEnv({ GBRAIN_HOME: join(home, 'home'), ANTHROPIC_API_KEY: 'sk-test-structural' }, async () => {
       await engine.executeRaw('INSERT INTO sources(id,name,local_path) VALUES($1,$1,$2)', ['git-unowned', root]);
       for (const n of [1, 2]) {
-        await engine.putPage(`notes/unowned-${n}`, { type: 'note', title: `Unowned ${n}`,
+        await engine.putPage(`notes/unowned-${n}`, { type: 'note', frontmatter: { atom_extract: true }, title: `Unowned ${n}`,
           compiled_truth: `A durable decision ${n} recorded in prose. `.repeat(20) } as never, { sourceId: 'git-unowned' });
       }
       await engine.setConfig('sync.write_through', 'true');

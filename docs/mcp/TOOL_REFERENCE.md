@@ -429,3 +429,22 @@ Traverse link graph from a page. Remote callers default to bidirectional edges (
 
 Introspect the calling identity. Returns one of three transport shapes: {transport: "oauth", client_id, client_name, scopes, expires_at, source_id, federated_read}, {transport: "legacy", token_name, scopes, expires_at: null}, or {transport: "local", scopes: []}, or {transport: "stdio", scopes: []} for the auth-less stdio MCP pipe. Throws unknown_transport when the context is ambiguous (remote=true without auth and no transport marker) — fail-closed posture mirroring the v0.26.9 trust-boundary contract.
 
+
+## Host memory policy and compact schemas (2026-10-04)
+
+This single-principal fork writes world facts and includes legacy private facts
+in agent-facing reads; source grants and document ACLs still apply. The
+include_private compatibility parameter is a no-op. Entity lookup prefers
+canonical IDs over aliases and requires source review for ambiguous results.
+Context packs reserve envelope costs and pack cards before facts. Delta uses
+both next_cursor.since and next_cursor.slug for stateless continuation; session
+cursors advance only through delivered changes. Its entities filter limits
+thread events, not source-wide page changes. Threads are retained even when
+they exceed the requested token budget.
+
+Query expansion follows the configured mode unless explicitly overridden.
+Cloud expansion receives the query and can incur cost; expansion_applied
+reports actual use. Omitted/chunk return_unit caps cumulative chunk payload;
+explicit evidence units use the delivery budget (default 6000, auto 24000,
+remote maximum 32000). Long guidance lives here so the served starter tools
+can retain the unchanged 25000-character and 5700-token ceilings.

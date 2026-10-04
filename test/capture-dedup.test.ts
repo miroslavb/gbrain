@@ -86,7 +86,7 @@ async function capture(source: FactsBackstopCtx['source'], sessionId: string | n
 }
 async function remember(fact: string, entity: string) {
   const r = await dispatchToolCall(engine, 'remember', { fact, entity, provenance: 'user told me' }, { remote: false, sourceId });
-  expect(r.isError).toBeFalsy();
+  expect(r.isError, JSON.stringify(r)).toBeFalsy();
   await settled();
 }
 async function active() {
@@ -123,8 +123,17 @@ async function freshSource(mode: 'unmanaged' | 'managed') {
   for (const [slug, title, type] of ENTITIES) {
     const body = `${title} is a synthetic entity.`;
     if (mode === 'unmanaged') { await engine.putPage(slug, { type, title, compiled_truth: body }, { sourceId }); continue; }
-    const r = await dispatchToolCall(engine, 'put_page', { slug, content: `---\ntitle: ${title}\ntype: ${type}\n---\n\n${body}\n` }, { remote: false, sourceId });
-    expect(r.isError).toBeFalsy();
+    const params = { slug, request_id: randomUUID(), content: `---\ntitle: ${title}\ntype: ${type}\n---\n\n${body}\n` };
+    let r = await dispatchToolCall(engine, 'put_page', params, { remote: false, sourceId });
+    // A queued write is not a failed fixture. Replay the same request within a bound.
+    for (let retry = 0; retry < 5 && r.isError; retry++) {
+      const detail = JSON.parse((r.content[0] as { text: string }).text);
+      if (detail.error !== 'write_pending') break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      r = await dispatchToolCall(engine, 'put_page', params, { remote: false, sourceId });
+    }
+    expect(r.isError, JSON.stringify(r)).toBeFalsy();
+    await settled();
   }
   await settled();
 }
@@ -253,17 +262,17 @@ for (const mode of ['unmanaged', 'managed'] as const) {
       expect((await hotFacts()).length).toBe(2);
     }), 60_000);
 
-    test('visibility and time bounds: world candidates ignore private facts; a different session 16 minutes later is kept', () => run(async () => {
+    test('world-only exact facts dedup across lanes and outside the capture window', () => run(async () => {
       const claim = 'Bob Example runs the Acme Example offsite';
       extracts([{ fact: claim, entity: 'people/bob-example' }]);
       expect(await capture('hook:writeback', 'sess-6')).toMatchObject({ inserted: 1 });
-      expect(await capture('hook:writeback', 'sess-7', { visibility: 'world' })).toMatchObject({ inserted: 1, duplicate: 0 });
+      expect(await capture('hook:writeback', 'sess-7', { visibility: 'world' })).toMatchObject({ inserted: 0, duplicate: 1 });
       const later = 'Bob Example owns the Acme Example budget';
       await remember(later, 'people/bob-example');
       await age(later, 16);
       extracts([{ fact: later, entity: 'people/bob-example' }]);
-      expect(await capture('hook:writeback', 'sess-8')).toMatchObject({ inserted: 1, duplicate: 0 });
-      expect((await active()).map(f => [f.fact === claim, f.visibility])).toEqual([[true, 'private'], [true, 'world'], [false, 'world'], [false, 'private']]);
+      expect(await capture('hook:writeback', 'sess-8')).toMatchObject({ inserted: 0, duplicate: 1 });
+      expect((await active()).map(f => [f.fact === claim, f.visibility])).toEqual([[true, 'world'], [false, 'world']]);
     }), 60_000);
 
     test('a dedup read failure inserts the candidate and warns with the lane', () => run(async () => {
@@ -289,12 +298,12 @@ for (const mode of ['unmanaged', 'managed'] as const) {
       expect((await active()).length).toBe(2);
     }), 60_000);
 
-    test('explicit remember is never dropped; hot memory collapses the identical pair (accepted residual S2)', () => run(async () => {
+    test('explicit remember preserves the existing world fact; hot memory injects it once', () => run(async () => {
       const claim = 'Alice Example chairs the Acme Example review';
       extracts([{ fact: claim, entity: 'people/alice-example' }]);
       await capture('hook:writeback', 'sess-11');
       await remember(claim, 'people/alice-example');
-      expect((await active()).map(f => f.visibility)).toEqual(['private', 'world']);
+      expect((await active()).map(f => f.visibility)).toEqual(['world']);
       const hot = await hotFacts();
       expect(hot.map(f => [f.fact, f.entity_slug])).toEqual([[claim, 'people/alice-example']]);
     }), 60_000);

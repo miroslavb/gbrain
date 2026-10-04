@@ -58,7 +58,7 @@ async function seed(meetings: number, notes: number, extraType?: string): Promis
   }
 }
 
-describe('#5828 timeline component grades entity/temporal pages only', () => {
+describe('host timeline score grades canonical curated pages', () => {
   test('events all on the timeline + undated reference notes -> full timeline points', async () => {
     await seed(10, 90);
     const h = await env(() => engine.getHealth());
@@ -66,18 +66,21 @@ describe('#5828 timeline component grades entity/temporal pages only', () => {
     expect(h.timeline_coverage_score).toBe(15);
   });
 
-  test('an event missing its row still costs points', async () => {
+  test('a curated entity missing its row still costs points', async () => {
     await seed(10, 90);
-    await engine.executeRaw(`DELETE FROM timeline_entries WHERE page_id IN (SELECT id FROM pages WHERE slug LIKE 'meetings/2026-01-0%')`);
+    // Reclassify the ten synthetic timeline fixtures as canonical person cards.
+    await engine.executeRaw(`UPDATE pages SET type='person',slug=replace(slug,'meetings/','people/') WHERE type='meeting'`);
+    await engine.executeRaw(`DELETE FROM timeline_entries WHERE page_id IN (SELECT id FROM pages WHERE slug LIKE 'people/2026-01-0%')`);
     const h = await env(() => engine.getHealth());
     // 1 of 10 meetings keeps its row (2026-01-10).
     expect(h.timeline_coverage_score).toBe(Math.round((1 / 10) * 15));
   });
 
-  test('types the pack does not declare stay graded', async () => {
+  test('undeclared archive types do not dilute the curated denominator', async () => {
     await seed(10, 10, 'research-memo-example');
     const h = await env(() => engine.getHealth());
-    expect(h.timeline_coverage_score).toBe(Math.round((10 / 20) * 15));
+    expect(h.timeline_coverage_score).toBe(15);
+    expect(h.graph_scope?.curated_pages).toBe(0);
   });
 
   test('predicate: aliases resolve to their canonical primitive; no pack grades everything', async () => {

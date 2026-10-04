@@ -12,7 +12,8 @@
  *   - subagent_capability: an explicit models.subagent without tool calling
  *     is refused at dispatch, not "falls back".
  */
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -72,13 +73,17 @@ describe('#5432 multi_source_drift is not verified when it could not read', () =
     const root = tmp('subdir');
     mkdirSync(join(root, 'locked'));
     writeFileSync(join(root, 'locked', 'page.md'), 'x\n');
-    chmodSync(join(root, 'locked'), 0o000);
+    const readDir = fs.readdirSync;
+    const denied = spyOn(fs, 'readdirSync').mockImplementation(((path: string, ...args: unknown[]) => {
+      if (String(path) === join(root, 'locked')) throw Object.assign(new Error('fixture denied'), { code: 'EACCES' });
+      return (readDir as (...args: unknown[]) => unknown)(path, ...args);
+    }) as typeof fs.readdirSync);
     try {
       const result = await findMisroutedPages(engine, [{ id: 'src-locked', local_path: root }]);
       expect(result.unreadable_sources).toEqual([{ source_id: 'src-locked', reason: 'subdirs_unreadable', dirs: 1 }]);
       expect(multiSourceDriftCheck(result, 1, 'remote').status).toBe('warn');
     } finally {
-      chmodSync(join(root, 'locked'), 0o700);
+      denied.mockRestore();
     }
   });
 

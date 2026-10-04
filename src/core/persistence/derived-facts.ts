@@ -1,9 +1,11 @@
 import type { BrainEngine, NewFact } from '../engine.ts';
-import { OperationError } from '../ops/contract.ts';
+import { OperationError, type OperationContext } from '../ops/contract.ts';
 import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
 import { withCoordinatedWrite } from './context.ts';
-import { maintenanceAttribution } from './attribution.ts';
-import { currentVerifiedLocalWriter } from './identity.ts';
+import { requestAttribution } from './attribution.ts';
+import { currentVerifiedLocalWriter, registerLocalWriter } from './identity.ts';
+import { submissionAuthority } from './authority.ts';
+import { admitWriteInTransaction, completeWrite } from './journal.ts';
 import { managedPersistenceEnabled } from './ownership.ts';
 import { assertPersistenceAccepting } from './service.ts';
 
@@ -33,13 +35,33 @@ export async function managedDerivedFactsPreflight(engine: BrainEngine, sourceId
  */
 export async function withDerivedFactsWrite<T>(engine: BrainEngine, sourceId: string, slugs: readonly string[],
   fn: (tx: BrainEngine) => Promise<T>): Promise<T> {
-  const attribution = await maintenanceAttribution(engine);
-  return engine.transaction(tx => withCoordinatedWrite(tx, [sourceId], async () => {
-    const [source] = await tx.executeRaw<{ archived: boolean }>('SELECT archived FROM sources WHERE id=$1 FOR SHARE', [sourceId]);
-    if (!source || source.archived) throw new OperationError('source_changed', 'The fact maintenance source changed during extraction; nothing was written.');
-    await tx.lockPageKeys(slugs.map(slug => ({ sourceId, slug })));
-    return fn(tx);
-  }, attribution));
+  await managedDerivedFactsPreflight(engine, sourceId);
+  if (!currentVerifiedLocalWriter()) await registerLocalWriter(engine, 'cli');
+  const [source] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation FROM sources WHERE id=$1', [sourceId]);
+  if (!source) throw new OperationError('source_changed', 'The fact maintenance source is unavailable.');
+  const pages = [...new Set(slugs)].sort();
+  const slug = pages[0] ?? 'maintenance/derived-facts';
+  const authority = await submissionAuthority({ engine, sourceId, remote: false } as OperationContext,
+    'submit_job', sourceId, source.incarnation, slug);
+  if (authority.slugPrefixes !== null || authority.restrictedNamespace || authority.delegated) {
+    throw new OperationError('permission_denied', 'Derived fact maintenance requires an unconfined source grant.');
+  }
+  // Derived rows never stage canonical files. Admission, all mutations and the
+  // terminal receipt commit together: no observable queued request, no partial
+  // epoch, and no receipt if the callback or its sidecar checks roll back.
+  return engine.transaction(async tx => {
+    const intent = { kind: 'derived_facts_transaction', pages };
+    const row = await admitWriteInTransaction(tx, { principal: authority.principal,
+      operation: 'submit_job', sourceId, sourceIncarnation: source.incarnation,
+      slug, authority, callerIntent: intent, intent });
+    return withCoordinatedWrite(tx, [sourceId], async () => {
+      await tx.lockPageKeys(pages.map(page => ({ sourceId, slug: page })));
+      const result = await fn(tx);
+      await completeWrite(tx, row, 'committed', { kind: intent.kind, status: 'completed',
+        derived_pages: pages.length, persistence: { mode: 'database' } });
+      return result;
+    }, requestAttribution(row));
+  });
 }
 
 /**

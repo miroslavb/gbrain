@@ -1131,7 +1131,7 @@ const WORKS_AT_RE = /\b(?:CEO of|CTO of|COO of|CFO of|CMO of|CRO of|VP at|VP of|
 // Series A"), narrative verbs ("invests in", "investing in"), historical
 // ("early investor in", "first check"), and portfolio framing ("portfolio
 // company", "portfolio includes").
-const INVESTED_RE = /\b(?:invested in|invests in|investing in|invest in|investment in|investments in|backed by|funding from|funded by|raised from|led the (?:seed|Series|round|investment|round)|led .{0,30}(?:Series [A-Z]|seed|round|investment)|participated in (?:the )?(?:seed|Series|round)|wrote (?:a |the )?check|first check|early investor|portfolio (?:company|includes)|board seat (?:at|in|on)|term sheet for)\b/i;
+const INVESTED_RE = /\b(?:seed[- ](?:funding|capital|investment|round)|invested in|invests in|investing in|invest in|investment in|investments in|backed by|funding from|funded by|raised from|led the (?:seed|Series|round|investment|round)|led .{0,30}(?:Series [A-Z]|seed|round|investment)|participated in (?:the )?(?:seed|Series|round)|wrote (?:a |the )?check|first check|early investor|portfolio (?:company|includes)|board seat (?:at|in|on)|term sheet for)\b/i;
 
 // Founded patterns. Includes the noun-form "founder of" / "founders include"
 // because that's how real prose identifies founders ("Carol Wilson is the

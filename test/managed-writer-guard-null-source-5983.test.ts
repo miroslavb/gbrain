@@ -185,8 +185,8 @@ test('a managed put_page of a tagged page with timeline lines commits on a brain
   }
 }, 120_000);
 
-test('upgrading a v196 brain with the pre-fix guard: v197 unblocks the refused write and is idempotent', async () => {
-  const v197 = MIGRATIONS.find(migration => migration.version === 197)!;
+test('upgrading a v204 fork brain with the pre-fix guard: v205 unblocks the refused write and is idempotent', async () => {
+  const guardFix = MIGRATIONS.find(migration => migration.version === 205)!;
   for (const engine of engines) {
     await installPre5983Guard(engine);
     const pageId = await pageIn(engine, 'default');
@@ -194,14 +194,14 @@ test('upgrading a v196 brain with the pre-fix guard: v197 unblocks the refused w
     const triggers = `SELECT tgrelid::regclass::text AS tbl, oid FROM pg_trigger WHERE tgname='managed_writer_guard' ORDER BY 1`;
     const before = await engine.executeRaw(triggers);
     for (let run = 0; run < 2; run++) {
-      await engine.setConfig('version', '196');
+      await engine.setConfig('version', '204');
       await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
-      expect((await runMigrations(engine)).current).toBeGreaterThanOrEqual(197);
+      expect((await runMigrations(engine)).current).toBeGreaterThanOrEqual(205);
       await guarded(engine, ['default'], INSERTS.tags.replace("'probe'", `'probe-${run}'`), [pageId]);
       expect(await count(engine, 'tags', pageId)).toBe(run + 1);
       await expect(guarded(engine, undefined, INSERTS.tags.replace("'probe'", "'uncoordinated'"), [pageId])).rejects.toThrow(REFUSED);
     }
-    expect(v197.sql).not.toMatch(/\b(TRIGGER|ALTER TABLE|LOCK)\b/);
+    expect(guardFix.sql).not.toMatch(/\b(TRIGGER|ALTER TABLE|LOCK)\b/);
     expect(await engine.executeRaw(triggers)).toEqual(before);
   }
 }, 120_000);

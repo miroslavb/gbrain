@@ -1431,7 +1431,8 @@ export async function checkSyncFreshness(
           source.last_commit,
           { requireCleanWorkingTree: 'ignore-untracked' },
         );
-        const chunkerMatch = source.chunker_version === currentChunkerVersion;
+        const chunkerMatch = /^\d+$/.test(source.chunker_version ?? '')
+          && Number(source.chunker_version) >= Number(currentChunkerVersion);
         if (gitState === 'unchanged' && chunkerMatch) {
           unchanged_count++;
           continue;

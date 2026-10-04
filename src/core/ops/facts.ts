@@ -44,7 +44,7 @@ const extract_facts: Operation = {
   name: 'extract_facts',
   outputRedaction: 'no_stored_text',
   description:
-    'v0.31: extract personal-knowledge facts (events, preferences, commitments, beliefs, ideas, and plain facts) from a conversation turn into the per-source hot memory. Sanitizes turn_text via INJECTION_PATTERNS, calls the configured extraction model (key-aware: any servable provider — OpenAI or Anthropic key both work), runs the cosine fast-path + classifier dedup pipeline, INSERTs into facts. Returns counts by status. With NO servable chat model, returns skipped: extraction_unavailable + an agent_action telling YOU to extract and write via `remember` (visibility: "private"). Skips extraction when the turn is dream-generated content (anti-loop). For agent memory writes of a SINGLE already-formed fact, prefer the `remember` verb (zero LLM, mandatory provenance).',
+    'v0.31: extract personal-knowledge facts (events, preferences, commitments, beliefs, ideas, and plain facts) from a conversation turn into the per-source hot memory. Sanitizes turn_text via INJECTION_PATTERNS, calls the configured extraction model (key-aware: any servable provider — OpenAI or Anthropic key both work), runs the cosine fast-path + classifier dedup pipeline, INSERTs into facts. Returns counts by status. With NO servable chat model, returns skipped: extraction_unavailable + an agent_action telling YOU to extract and write via `remember` (visibility: "world"). Skips extraction when the turn is dream-generated content (anti-loop). For agent memory writes of a SINGLE already-formed fact, prefer the `remember` verb (zero LLM, mandatory provenance).',
   params: {
     request_id: { ...WRITE_REQUEST_PARAM, description: `${WRITE_REQUEST_PARAM.description} Managed extraction returns durable receipts; when omitted, each call gets a new UUID. Unmanaged extraction retains its legacy non-journaled behavior.` },
     turn_text: { type: 'string', required: true, description: 'The user message or page body to extract facts from. Sanitized via INJECTION_PATTERNS before the LLM call.' },
@@ -194,7 +194,7 @@ const recall: Operation = {
   name: 'recall',
   outputRedaction: { retrieval: { localVerbatim: ['facts'] } },
   description:
-    'MEMORY VERB (v1): retrieve saved facts/snippets — the protocol read verb. Filters hot-memory facts by entity / since / session_id; pass `query` to ALSO run hybrid search over pages (results[] arm); pass `budget_tokens` for server-side packing (response reports budget_used + dropped_count — never trims client-side). Every fact is agent-readable under the host world-only policy. Routing: for ONE known person/company/project card use `entity` (zero LLM); for broad questions needing reasoning use `synthesize` (expensive). Branch on structured fields (status/kind/evidence), never on prose. Every response carries protocol_version.',
+    "Read saved facts by entity, since or session. Host world-only policy includes legacy facts. Add query for page evidence; budget_tokens packs server-side. Next: `query` for broader evidence or synthesize for reasoning.",
   params: {
     entity: { type: 'string', description: 'Entity slug; facts about it, newest first.' },
     query: { type: 'string', description: 'Also search pages (results[] arm).' },
@@ -611,13 +611,13 @@ const context_pack: Operation = {
   name: 'context_pack',
   outputRedaction: { retrieval: { localVerbatim: ['facts'] } },
   description:
-    'MEMORY VERB (v1): budget-packed session-boundary bundle for a set of standing entities — entity cards + open threads + hot facts, zero-LLM, sub-second. Call at session start (warm cold context) and after compaction (rehydrate what the summary lost). Every host agent sees all legacy facts; new facts are world-only. budget_tokens packs server-side (response reports budget_used + dropped_count; cards pack first, then facts). Branch on structured fields, never prose. protocol_version rides every response.',
+    "Bundle entity cards, facts and threads at session start or compaction, zero LLM. World-only; source grants apply. Check budget_used/dropped_count.",
   params: {
-    entities: { type: 'string', required: true, description: 'Comma-separated entity names/slugs to bundle. Capped at 8.' },
-    budget_tokens: { type: 'number', description: 'Server-side token budget (char/4). Cards pack first, then facts; each item costs its rendered line and the envelope + section headers are reserved, so `text` fits the budget. Response adds budget_tokens, budget_used (tokens of `text`), dropped_count.' },
-    since: { type: 'string', description: 'ISO 8601 datetime. When set, open-thread events are filtered to those after this cursor.' },
-    session_id: { type: 'string', description: 'Opaque session id; keys the hot-memory cache and (on the push path) the session cursor.' },
-    include_private: { type: 'boolean', description: 'Deprecated compatibility no-op: all host agents already see legacy facts.' },
+    entities: { type: 'string', required: true, description: "Up to 8 names/slugs, comma-separated." },
+    budget_tokens: { type: 'number', description: "Token cap; cards first. Reports budget_used and dropped_count." },
+    since: { type: 'string', description: "ISO thread-event cursor." },
+    session_id: { type: 'string', description: "Session/cache key." },
+    include_private: { type: 'boolean', description: "No-op; legacy facts remain visible." },
   },
   scope: 'read',
   verb: true,
@@ -725,14 +725,14 @@ const delta: Operation = {
   name: 'delta',
   outputRedaction: { retrieval: { localVerbatim: ['facts'] } },
   description:
-    'MEMORY VERB (v1): "what changed since T" for heartbeats — pages updated after `since` + hot facts newer than `since` + open-thread events after `since`, zero-LLM. Lets a periodic wake maintain warm state in O(changes) instead of re-deriving. Optionally scope thread deltas to `entities`. Every host agent sees all legacy facts; new facts are world-only. budget_tokens packs server-side (pages first, then facts; threads are never dropped). protocol_version rides every response.',
+    "Changes since time/session_id, zero LLM. On has_more, continue next_cursor. Entity scope: threads only.",
   params: {
-    since: { type: 'string', description: 'ISO 8601 cursor. Returns pages/facts/thread-events newer than this timestamp. Optional when session_id carries an established cursor.' },
-    since_slug: { type: 'string', description: 'Stateless keyset resume: pass back `next_cursor.slug` from the previous response (paired with `since`=next_cursor.since) to page through pages sharing one timestamp. Ignored when session_id is set (the session cursor carries it).' },
-    entities: { type: 'string', description: 'Optional comma-separated entity scope for thread-event deltas. Capped at 8.' },
-    budget_tokens: { type: 'number', description: 'Server-side token budget (char/4). Pages pack first, then facts; each item costs its rendered line and the envelope + section headers + every thread line are reserved, so `text` fits the budget. Threads are never dropped (budget_used can exceed the budget only when the header + threads alone do). Response adds budget_tokens, budget_used (tokens of `text`), dropped_count.' },
-    session_id: { type: 'string', description: 'Opaque session id. Drives the per-session cursor: the first call establishes it, each call advances it to the newest DELIVERED change (at-least-once — with has_more:true the undelivered tail returns on the next wake). Without it, pass an explicit `since` for a stateless delta.' },
-    include_private: { type: 'boolean', description: 'Deprecated compatibility no-op: all host agents already see legacy facts.' },
+    since: { type: 'string', description: "ISO time; omit with session_id." },
+    since_slug: { type: 'string', description: "next_cursor.slug, paired with since; ignored with session_id." },
+    entities: { type: 'string', description: "Thread scope: up to 8 names/slugs." },
+    budget_tokens: { type: 'number', description: "Token cap; retained threads may exceed it." },
+    session_id: { type: 'string', description: "Cursor for delivered changes; first call establishes it." },
+    include_private: { type: 'boolean', description: "No-op; legacy facts remain visible." },
   },
   scope: 'read',
   verb: true,

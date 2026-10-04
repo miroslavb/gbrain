@@ -686,23 +686,19 @@ const query: Operation = {
     snippet_chars: { type: 'number', description: SNIPPET_CHARS_PARAM_DESCRIPTION },
     return_unit: RETURN_UNIT_PARAM,
     return_window: RETURN_WINDOW_PARAM,
-    token_budget: { type: 'number', description: "Token budget. Chunk mode, and whenever return_unit is omitted: caps the cumulative chunk payload (results that would overflow are skipped). Explicit non-chunk return_unit: the budget for delivered evidence (default search.return_budget_default = 6000, auto 24000; remote max search.return_budget_max_remote = 32000)." },
+    token_budget: { type: 'number', description: "Caps chunks by default; explicit units cap evidence (6000; auto 24000; remote max 32000)." },
     expand: {
       type: 'boolean',
-      description:
-        'Override multi-query expansion for this call. When omitted, search.expansion / the active search-mode bundle decides ' +
-        '(fork: the documented resolution chain is honored, so a bundle or config with expansion off stays off). ' +
-        'Requires configured embedding and expansion providers; a cloud expander receives the query and may charge for the call. ' +
-        'Response metadata expansion_applied reports whether variants were actually used.',
+      description: "Omit: config/mode. false: off. Cloud expansion sends the query and may cost. See expansion_applied.",
     },
-    detail: { type: 'string', description: 'Result detail level: low (compiled truth only), medium (default, all with dedup), high (all chunks)' },
-    mode: { type: 'string', description: 'Search mode (conservative|balanced|tokenmax). Local callers only; remote uses configured mode.' },
+    detail: { type: 'string', description: 'low: truth; medium: dedup (default); high: chunks.' },
+    mode: { type: 'string', description: 'Local: conservative|balanced|tokenmax. Remote: config.' },
     fields: FIELDS_PARAM,
     // v0.20.0 Cathedral II Layer 10 C1/C2: language + symbol-kind filters.
     lang: { type: 'string', description: 'Code language.' },
     symbol_kind: { type: 'string', description: 'Code symbol type.' },
     // v0.20.0 Cathedral II Layer 7 (A2) / Layer 10 C3: two-pass structural expansion.
-    near_symbol: { type: 'string', description: 'Anchor code symbol.' },
+    near_symbol: { type: 'string', description: 'Code symbol.' },
     walk_depth: { type: 'number', description: 'Code walk depth 1-2.' },
     // v0.29.1 — orthogonal recency + salience axes. YOU (the agent) decide.
     salience: SALIENCE_PARAM,
@@ -712,7 +708,7 @@ const query: Operation = {
     source_id: { type: 'string', description: SOURCE_ID_PARAM_DESCRIPTION },
     cross_modal: { type: 'string', enum: ['text', 'image', 'both', 'auto'], description: 'Default auto.' },
     embedding_column: { type: 'string', description: 'Registered embedding column.' },
-    adaptive_return: { type: 'boolean', description: 'true when one specific answer is wanted (fewer rows; never returns empty); omit for breadth.' },
+    adaptive_return: { type: 'boolean', description: 'True: fewer rows for a specific answer; never empty. Omit for breadth.' },
     autocut: { type: 'boolean', description: 'Default on (never returns empty); false gives full top-K for breadth. Cuts at the score cliff, unlike adaptive_return.' },
     relational: { type: 'boolean', description: 'Relationship-graph arm (default on).' },
   },

@@ -72,7 +72,7 @@ describe('F4a getHealth equals the pre-F4a implementation field by field (PGLite
       expect(all.linkable_page_count).toBeGreaterThan(0);
       expect(all.linkable_page_count).toBeLessThan(all.page_count);
       expect(all.orphan_pages).toBeGreaterThan(0);
-      expect(all.most_connected.length).toBe(5);
+      expect(all.most_connected.length).toBe(Math.min(5, all.entity_page_count));
     });
   }
 

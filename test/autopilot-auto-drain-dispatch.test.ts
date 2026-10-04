@@ -55,7 +55,7 @@ async function gitSource(id: string, pages = 2): Promise<void> {
   mkdirSync(root, { recursive: true });
   await engine.executeRaw('INSERT INTO sources(id,name,local_path) VALUES($1,$1,$2)', [id, root]);
   for (let i = 0; i < pages; i++) {
-    await engine.putPage(`notes/${id}-${i}`, { type: 'note', title: `${id} ${i}`, compiled_truth: prose(`${id} ${i}`) } as never, { sourceId: id });
+    await engine.putPage(`notes/${id}-${i}`, { type: 'note', frontmatter: { atom_extract: true }, title: `${id} ${i}`, compiled_truth: prose(`${id} ${i}`) } as never, { sourceId: id });
   }
 }
 

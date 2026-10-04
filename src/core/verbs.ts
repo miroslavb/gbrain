@@ -62,13 +62,7 @@ const remember: Operation = {
   name: 'remember',
   outputRedaction: 'no_stored_text',
   description:
-    'MEMORY VERB (v1): save one fact to durable agent memory — the protocol write verb. ' +
-    'provenance is REQUIRED (free text, e.g. "conversation 2026-06-12", "user said in chat", "import: notes.md"). ' +
-    'Set `entity` whenever the fact is about a specific person/company/project — entity-scoped recall will not find it otherwise. ' +
-    'ttl accepts duration shorthand ("30d", "12h") or an absolute ISO 8601 timestamp; ISO-8601 durations like "P30D" are rejected with a fix. ' +
-    'visibility is always "world" (readable by every agent connected to this brain). ' +
-    'Response: branch on `status` (inserted|duplicate|superseded), never on `status_text` (human rendering only). ' +
-    'write_pending carries a receipt: poll get_write_request. On duplicate, `id` is the EXISTING fact\'s id. For bulk extraction from a raw transcript use extract_facts instead.',
+    "Save one fact with required provenance. Set `entity` for scoped recall. World-only; ttl accepts 30d, 12h or an ISO timestamp. Branch on `status`; duplicate returns the existing id. For write_pending poll get_write_request with the same request_id.",
   params: {
     ...PAGE_MUTATION_PARAMS,
     fact: { type: 'string', description: 'One claim.', required: true },
@@ -96,7 +90,7 @@ const remember: Operation = {
     visibility: {
       type: 'string',
       enum: ['world'],
-      description: 'The only supported value is world: readable by every agent connected to this brain.',
+      description: 'Only world is supported.',
     },
   },
   mutating: true,
@@ -167,11 +161,7 @@ const entity: Operation = {
   name: 'entity',
   outputRedaction: 'retrieval',
   description:
-    'MEMORY VERB (v1): inspect ONE known person/company/project card — zero LLM calls, sub-100ms. ' +
-    'Resolution: canonical ID > alias > exact title > slug-suffix; tied cards carry ambiguous:true and require source review. ' +
-    'NEVER errors on a miss: returns found:false plus near-miss suggestions with create_safety hints ' +
-    '(exists | probable | unknown — whether writing a new page would duplicate). ' +
-    'Routing: for facts/snippets retrieval use recall; for broad questions needing reasoning use synthesize (expensive).',
+    "Inspect one known card by name or slug, zero LLM. Canonical IDs outrank aliases; ambiguous:true requires source review. A miss returns found:false and create_safety. Next: recall for facts.",
   params: {
     name: { type: 'string', required: true, description: 'Name, alias or slug (e.g. "Alice Example").' },
   },

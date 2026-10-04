@@ -233,13 +233,15 @@ or a physical projection that leaves attribution untouched):
 - `src/core/persistence/sync-prepare.ts` (4): managed sync request preparer.
 - `src/core/persistence/takes-prepare.ts` (3): takes request preparer.
 - `src/core/repair/stale-atoms.ts` (3): a request on managed brains; the unmanaged retirement runs in `maintenanceTransaction`.
+- `src/core/embed-stale-facts.ts` (1): bounded fact-vector physical projection; preserves canonical row attribution.
+- `src/core/persistence/finite-code-maintenance.ts` (2): admitted finite-code request preparer.
 <!-- write-attribution-covered:end -->
 
 Unattributed until Foundations 2 mutation attribution (on unmanaged brains
 these write with `NULL` attribution):
 
 <!-- write-attribution-unattributed:start -->
-- `src/commands/extract-conversation-facts.ts` (3): the conversation fact index calls the engine directly through `writeDerivedFacts`.
+- `src/commands/extract-conversation-facts.ts` (2): unmanaged conversation epochs call the engine directly; managed `writeDerivedFacts` now journals the atomic epoch transaction.
 - `src/commands/extract-timeline-db.ts` (2): `gbrain extract timeline --source db` batch insert.
 - `src/commands/extract.ts` (4): `gbrain extract` timeline walks (file, incremental, stale) and the per-entry fallback.
 - `src/commands/sync/renames.ts` (1): legacy sync rename (`updateSlug`).
@@ -258,10 +260,10 @@ these write with `NULL` attribution):
 - `src/core/extract-timeline-from-meetings.ts` (1): meeting timeline batch.
 - `src/core/extract/receipt-writer.ts` (1): extraction receipt page.
 - `src/core/facts/backstop.ts` (3): legacy DB-only fact fallbacks.
-- `src/core/facts/fence-write.ts` (2): markdown-first fence reconcile insert and page body refresh.
-- `src/core/facts/forget.ts` (4): legacy forget expiry and fence strike-through.
+- `src/core/facts/fence-write.ts` (1): markdown-first fence reconcile insert and page body refresh.
+- `src/core/facts/forget.ts` (5): legacy forget expiry and fence strike-through.
 - `src/core/facts/proposal-supersede.ts` (4): unmanaged `decide` proposal accept and undo (facts and page body).
-- `src/core/facts/write-single.ts` (2): legacy single-fact insert and supersession.
+- `src/core/facts/write-single.ts` (1): legacy single-fact insert and supersession.
 - `src/core/import-file.ts` (11): remaining sites: the moved-file rename (`updateSlug`) and the #3694 legacy-hash re-stamp of an unchanged body. Direct import writes are attributed.
 - `src/core/minions/handlers/ingest-capture.ts` (1): capture ingest soft delete.
 - `src/core/ops/extraction.ts` (2): extraction review promote (frontmatter) and reject (soft delete).
@@ -274,10 +276,11 @@ these write with `NULL` attribution):
 - `src/core/schema-pack/retype.ts` (1): schema-pack retype.
 - `src/core/schema-pack/sync.ts` (1): schema-pack type sync.
 - `src/core/sweep.ts` (1): sweep timeline batch.
-- `src/core/takes-write.ts` (7): legacy takes file helper mirror rows and resolutions.
+- `src/core/takes-write.ts` (8): legacy takes file helper mirror rows and resolutions.
 - `src/core/think/index.ts` (1): saved `think` result page.
 - `src/core/timeline-dedup-repair.ts` (1): timeline dedup repair.
 - `src/core/timeline-write-through.ts` (2): timeline write-through entry and page timeline.
+- `src/core/cycle/atom-completion-receipt.ts` (1): unmanaged atom completion hash/frontmatter transaction; managed atoms use their coordinator path.
 <!-- write-attribution-unattributed:end -->
 
 ## The host visibility boundary

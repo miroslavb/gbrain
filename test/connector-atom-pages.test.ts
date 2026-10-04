@@ -25,7 +25,7 @@ beforeEach(async () => {
   const prose = (n: string) => `A durable decision about ${n}, recorded in prose with context. `.repeat(12);
   await engine.putPage('emails/thread-1', { type: 'email', title: 'Thread 1', compiled_truth: prose('thread 1') } as never, { sourceId: 'gmail' });
   await engine.putPage('calendar/standup', { type: 'meeting', title: 'Standup', compiled_truth: prose('standup') } as never, { sourceId: 'gmail' });
-  await engine.putPage('notes/connector-note', { type: 'note', title: 'Note', compiled_truth: prose('connector note') } as never, { sourceId: 'gmail' });
+  await engine.putPage('notes/connector-note', { type: 'note', frontmatter: { atom_extract: true }, title: 'Note', compiled_truth: prose('connector note') } as never, { sourceId: 'gmail' });
   await engine.putPage('emails/forwarded', { type: 'email', title: 'Forwarded', compiled_truth: prose('forwarded') } as never, { sourceId: 'notes' });
 });
 

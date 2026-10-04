@@ -1,5 +1,5 @@
 /**
- * Declared lineage: a page whose `derived_from` frontmatter names a private
+ * Host world-only operation views: a page whose `derived_from` names a legacy private
  * page is private to remote readers too. Found by gbrain-evals Cat 40, where an
  * unlabeled digest repeated a finance-only discount and remote agents reported
  * it after the labeled memo itself was hidden.
@@ -55,23 +55,23 @@ afterAll(async () => {
 const ctx = (engine: BrainEngine, remote: boolean) => ({ engine, config: { engine: engine.kind }, logger: { info() {}, warn() {}, error() {} },
   dryRun: false, remote, sourceId: 'default' }) as never;
 
-describe('derived_from carries private visibility to derived pages', () => {
-  test('remote list_pages hides pages derived from a private page; local lists everything', async () => {
+describe('world-only operations preserve access to legacy lineage', () => {
+  test('remote and local list_pages include legacy-private lineage', async () => {
     for (const engine of engines) {
       __resetPrivateVisibilityCacheForTests();
       const remote = ((await operationsByName.list_pages.handler(ctx(engine, true), { limit: 100 })) as Array<{ slug: string }>).map(r => r.slug);
-      for (const slug of hidden) expect(remote).not.toContain(slug);
+      for (const slug of hidden) expect(remote).toContain(slug);
       for (const slug of visible) expect(remote).toContain(slug);
       const local = ((await operationsByName.list_pages.handler(ctx(engine, false), { limit: 100 })) as Array<{ slug: string }>).map(r => r.slug);
       for (const slug of [...hidden, ...visible]) expect(local).toContain(slug);
     }
   });
 
-  test('remote get_page refuses a page derived from a private page', async () => {
+  test('remote get_page includes a page derived from legacy-private material', async () => {
     for (const engine of engines) {
       __resetPrivateVisibilityCacheForTests();
       for (const slug of ['digests/from-private', 'digests/from-private-md']) {
-        await expect(operationsByName.get_page.handler(ctx(engine, true), { slug })).rejects.toThrow('Page not found');
+        expect(await operationsByName.get_page.handler(ctx(engine, true), { slug })).toMatchObject({ slug });
         const local = await operationsByName.get_page.handler(ctx(engine, false), { slug }) as { slug: string };
         expect(local.slug).toBe(slug);
       }

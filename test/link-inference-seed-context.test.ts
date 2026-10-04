@@ -48,7 +48,7 @@ for (const name of ['gbrain-base', 'gbrain-base-v2']) {
 
     test('NER pack matcher retains explicit seed funding and ordinary investment verbs', () => {
       for (const context of ['seed funding for Acme', 'seed-capital investment in Acme', 'invested in Acme', 'funded Acme', 'backed Acme', 'wrote a check to Acme']) {
-        expect(inferLinkTypeFromPack(pack, 'person', context)).toBe('invested_in');
+        expect(inferLinkTypeFromPack(pack, 'person', context, undefined, undefined, { ner: true })).toBe('invested_in');
         expect(inferNerLinkType(pack, 'company', context)).toBe('invested_in');
       }
     });

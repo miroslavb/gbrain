@@ -55,7 +55,7 @@ const MINIMUM_GUIDANCE: Record<string, string[]> = {
   list_pages: ['sort=updated_desc', 'Default 50', 'truncated', 'updated_after_slug'],
   capture: ['inbox/', 'idempotent', 'put_page', 'remember'],
   remember: ['provenance', '`entity`', '`status`', 'write_pending', 'get_write_request'],
-  recall: ['entity', '`query`', 'world facts only', 'synthesize'],
+  recall: ['entity', '`query`', 'world-only policy', 'synthesize'],
   entity: ['zero LLM', 'found:false', 'create_safety', 'recall'],
   forget: ['fact_id', 'Idempotent'],
   synthesize: ['[EXPENSIVE', 'recall', 'entity'],

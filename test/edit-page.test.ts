@@ -170,7 +170,7 @@ describe('edit_page matching', () => {
 });
 
 describe('edit_page protected fences and privacy', () => {
-  test('protected text never matches; canonical fences stay in place; private rows never reach diff, receipt, replay or poll', async () => {
+  test('canonical fences stay protected; unchanged fence rows stay out of diff, receipt, replay and poll', async () => {
     await seed('notes/f', fencedBody());
     const canonicalBefore = (await read('notes/f', false)).content;
     expect(canonicalBefore).toContain(SECRET_FACT);
@@ -178,9 +178,9 @@ describe('edit_page protected fences and privacy', () => {
     // Local callers see the fences but may not edit inside them.
     expect((await edit('notes/f', [{ old_text: SECRET_TAKE, new_text: 'x' }], { remote: false })).body.error).toBe('edit_protected_span');
     expect((await edit('notes/f', [{ old_text: 'Public fact example', new_text: 'x' }], { remote: false })).body.error).toBe('edit_protected_span');
-    // Remote callers cannot see hidden rows: they do not match and are never echoed.
+    // Host world-only readers can see legacy facts; canonical fences remain immutable.
     const hidden = await edit('notes/f', [{ old_text: SECRET_FACT, new_text: 'x' }]);
-    expect(hidden.body.error).toBe('edit_no_match');
+    expect(hidden.body.error).toBe('edit_protected_span');
     expect(hidden.text).not.toContain(SECRET_FACT);
     expect((await edit('notes/f', [{ old_text: 'Public fact example', new_text: 'x' }])).body.error).toBe('edit_protected_span');
     expect((await edit('notes/f', [{ old_text: 'Line one.\n\n\n\nLine two', new_text: 'x' }])).body.error).toBe('edit_protected_span');

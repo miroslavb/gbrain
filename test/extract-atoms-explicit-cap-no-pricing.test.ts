@@ -4,7 +4,7 @@
  * call), carries the shared no_pricing guidance in its details, records the
  * stop as an expected limit (not a halt) for extract_health, and doctor's
  * extract_health names the registration command until the price is
- * registered. A default cap still warns and runs (#5825).
+ * registered. The host default cap also refuses unpriced routes.
  *
  * Hermetic: in-memory PGLite, chat stubbed through the `_chat` seam, embed
  * transport stubbed. No network or API keys.
@@ -41,7 +41,7 @@ function useEmbedModel(model: string): void {
 async function chat(_o: ChatOpts): Promise<ChatResult> {
   chatCalls++;
   return {
-    text: `[{"title":"Example atom","atom_type":"insight","body":"An example rollout finished."}]`,
+    text: `[{"title":"Example atom","atom_type":"insight","body":"The example rollout finished successfully.","source_quote":"The example rollout finished successfully."}]`,
     blocks: [{ type: 'text', text: '' }],
     stopReason: 'end',
     usage: { input_tokens: 500, output_tokens: 200, cache_read_tokens: 0, cache_creation_tokens: 0 },
@@ -57,7 +57,7 @@ async function runOnce() {
   console.error = (...a: unknown[]) => { errors.push(a.map(String).join(' ')); };
   try {
     const result = await runPhaseExtractAtoms(engine, {
-      _transcripts: [{ filePath: `/fake/meeting-${n}.txt`, content: `transcript content ${n}`, contentHash: `${n}`.padStart(16, '0') }],
+      _transcripts: [{ filePath: `/fake/meeting-${n}.txt`, content: `The example rollout finished successfully. Transcript ${n}.`, contentHash: `${n}`.padStart(16, '0') }],
       _pages: [],
       _chat: chat,
     });
@@ -114,8 +114,8 @@ describe('explicit extract_atoms cap + unpriced model', () => {
       docs: 'docs/guides/write-refusals.md#no_pricing',
     });
     expect(details.no_pricing.register_command).toStartWith(`gbrain pricing set ${UNPRICED_CHAT} --input`);
-    expect(result.summary).toContain('the $0.50 cost cap can\'t be enforced');
-    expect(result.summary).toContain(details.no_pricing.register_command);
+    expect(result.summary).toContain('budget remains enforced');
+    expect(result.summary).toContain('pricing.overrides');
     expect(stderr).toContain(details.no_pricing.register_command);
     expect(stderr).not.toContain('running without a cost gate');
 
@@ -172,16 +172,17 @@ describe('explicit extract_atoms cap + unpriced model', () => {
 });
 
 describe('default extract_atoms cap + unpriced model', () => {
-  test('warns and runs (#5825)', async () => {
+  test('refuses unpriced routes before any model call', async () => {
     useEmbedModel(PRICED_EMBED);
     await engine.setConfig('models.dream.extract_atoms', UNPRICED_CHAT);
 
     const { result, stderr } = await runOnce();
-    expect(result.status).toBe('ok');
-    expect(chatCalls).toBe(1);
-    expect(result.details?.atoms_extracted).toBe(1);
-    expect(stderr).toContain('running without a cost gate');
+    expect(result.status).toBe('warn');
+    expect(chatCalls).toBe(0);
+    expect(result.details?.atoms_extracted).toBe(0);
+    expect(stderr).not.toContain('running without a cost gate');
     expect(stderr).toContain(`gbrain pricing set ${UNPRICED_CHAT} --input`);
-    expect(await readExtractAtomsNoPricing(engine)).toEqual([]);
+    expect(await readExtractAtomsNoPricing(engine)).toHaveLength(1);
+    expect(await rollup()).toEqual({ halt: 0, expected: 1, completed: 0 });
   }, 60_000);
 });
