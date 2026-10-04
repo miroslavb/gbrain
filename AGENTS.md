@@ -773,3 +773,9 @@ Writer-attribution census includes the retained finite-code/atom/vector overlays
 The v45 corrective integration keeps atom pricing refusal/recovery in the cost-gate
 helper; do not grow the already ratcheted extraction phase for new policy branches.
 Both unpriced refusal and clearing the warning after a priced retry remain tested.
+
+Full unit2 ended with36468PASS/3FAIL/68skip on2d913ccf. The follow-up keeps
+query adaptive-return guidance explicit within the MCP budget and asserts each
+derived fact names its source-scoped committed transaction receipt and local
+principal. Takes/timeline maintenance retain their separate attribution contract.
+The same attribution suite runs on PostgreSQL through its existing E2E wrapper.

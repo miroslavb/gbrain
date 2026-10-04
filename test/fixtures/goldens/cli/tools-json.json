@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 175534,
-    "stdoutSha256": "54e5c5d9e80771cff25b052d6c974d93f53cb69ab93b31a34a24549e2ff09e30",
+    "stdoutBytes": 175532,
+    "stdoutSha256": "53cc911b58586f83adbe6921108a67e5e9751520862d01104ec553461b0819e9",
     "toolNames": [
       "remember",
       "entity",
@@ -953,7 +953,7 @@
         "schema": {
           "properties": {
             "adaptive_return": {
-              "description": "True: fewer rows for a specific answer; never empty. Omit for breadth.",
+              "description": "True when seeking one answer; never returns empty. Omit for breadth.",
               "type": "boolean"
             },
             "autocut": {

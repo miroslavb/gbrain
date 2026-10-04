@@ -126,6 +126,15 @@ type RowActors = { created_request: string | null; created_kind: string | null; 
   last_request: string | null; last_kind: string | null; last_id: string | null; last_written_at: unknown };
 const created = (row: RowActors) => ({ request: row.created_request, kind: row.created_kind, id: row.created_id });
 const last = (row: RowActors) => ({ request: row.last_request, kind: row.last_kind, id: row.last_id });
+async function expectDerivedActor(engine: BrainEngine, sourceId: string, row: RowActors, principal: Principal) {
+  expect(row.created_request).toMatch(/^[0-9a-f-]{36}$/);
+  const receipt = await engine.executeRaw<{ state: string; source_id: string; kind: string }>(
+    "SELECT state,source_id,intent->>'kind' AS kind FROM persistence_requests WHERE id=$1::uuid", [row.created_request]);
+  expect(receipt).toEqual([{ state: 'committed', source_id: sourceId, kind: 'derived_facts_transaction' }]);
+  expect(created(row)).toEqual(actor(row.created_request, principal));
+  expect(last(row)).toEqual(actor(row.created_request, principal));
+}
+
 async function fact(brain: Brain, id: unknown) {
   return (await brain.engine.executeRaw<RowActors & { expired_at: unknown }>(`SELECT ${ROW_COLUMNS},expired_at FROM facts WHERE id=$1`, [Number(id)]))[0];
 }
@@ -274,7 +283,7 @@ describe('write attribution on a managed brain', () => {
     }
   }, 120_000);
 
-  test('coordinated derived fact maintenance has no request and names the local writer', async () => {
+  test('coordinated derived facts name their committed transaction receipt and local writer', async () => {
     for (const engine of engines) {
       const brain = await managedBrain(engine);
       const slug = 'notes/derived-example';
@@ -284,7 +293,7 @@ describe('write attribution on a managed brain', () => {
           source: 'cli:extract-conversation-facts:test', entity_slug: slug, row_num: 1, source_markdown_slug: slug }] as never });
       const rows = await engine.executeRaw<RowActors>(`SELECT ${ROW_COLUMNS} FROM facts WHERE source_id=$1 AND fact='Derived example claim'`, [brain.sourceId]);
       expect(rows).toHaveLength(1);
-      expect(created(rows[0])).toEqual(actor(null, brain.principals.local));
+      await expectDerivedActor(engine, brain.sourceId, rows[0], brain.principals.local);
     }
   }, 120_000);
 
@@ -355,7 +364,12 @@ describe('write attribution on a managed brain', () => {
         const maintenance = actor(null, brain.principals.local);
         for (const [table, where, key] of [['facts', 'source_id=$1', sourceId], ['takes', 'page_id=$1', alice.id], ['timeline_entries', 'page_id=$1', alice.id]] as const) {
           const rows = await engine.executeRaw<RowActors>(`SELECT ${ROW_COLUMNS} FROM ${table} WHERE ${where}`, [key]);
-          expect({ table, created: rows.map(created) }).toEqual({ table, created: [maintenance] });
+          if (table === 'facts') {
+            expect(rows).toHaveLength(1);
+            await expectDerivedActor(engine, sourceId, rows[0], brain.principals.local);
+          } else {
+            expect({ table, created: rows.map(created) }).toEqual({ table, created: [maintenance] });
+          }
         }
 
         const remembered = await submitRememberMutation(ctx, { fact: 'Leads the design review', provenance: 'test', entity: 'people/charlie-example', request_id: randomUUID() }, 30_000);

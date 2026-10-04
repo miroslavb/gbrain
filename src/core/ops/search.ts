@@ -708,7 +708,7 @@ const query: Operation = {
     source_id: { type: 'string', description: SOURCE_ID_PARAM_DESCRIPTION },
     cross_modal: { type: 'string', enum: ['text', 'image', 'both', 'auto'], description: 'Default auto.' },
     embedding_column: { type: 'string', description: 'Registered embedding column.' },
-    adaptive_return: { type: 'boolean', description: 'True: fewer rows for a specific answer; never empty. Omit for breadth.' },
+    adaptive_return: { type: 'boolean', description: 'True when seeking one answer; never returns empty. Omit for breadth.' },
     autocut: { type: 'boolean', description: 'Default on (never returns empty); false gives full top-K for breadth. Cuts at the score cliff, unlike adaptive_return.' },
     relational: { type: 'boolean', description: 'Relationship-graph arm (default on).' },
   },

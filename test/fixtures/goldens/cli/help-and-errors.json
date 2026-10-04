@@ -696,7 +696,7 @@
         "  --source-id                One source, or '__all__'.",
         "  --cross-modal              Default auto.",
         "  --embedding-column         Registered embedding column.",
-        "  --adaptive-return          True: fewer rows for a specific answer; never empty. Omit for breadth.",
+        "  --adaptive-return          True when seeking one answer; never returns empty. Omit for breadth.",
         "  --autocut                  Default on (never returns empty); false gives full top-K for breadth. Cuts at the score cliff, unlike adaptive_return.",
         "  --relational               Relationship-graph arm (default on)."
       ]
