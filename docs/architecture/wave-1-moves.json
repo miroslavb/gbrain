@@ -1,7 +1,7 @@
 {
   "generatedBy": "scripts/generate-wave-1-moves.ts",
   "base": "92e06c6c2cc3",
-  "head": "b75dea62671d",
+  "head": "30e23a433b42",
   "landing": {
     "integrationOwner": "the wave-1 PR author (ports upstream fixes into moved code until merge)",
     "freezeStart": "when the wave-1 PR is marked ready for review",
@@ -71,7 +71,6 @@
       "wasExported": false,
       "new": [
         "src/cli.ts:connectCliOnlyEngine",
-        "src/cli.ts:prepareConnectedDispatch",
         "src/cli.ts:routeCliOnlyBeforeTable",
         "src/cli.ts:routeEngineFreeSubcommands",
         "src/cli.ts:runReadOnlyTimeoutDispatch",
@@ -196,12 +195,30 @@
       ]
     },
     {
+      "old": "src/commands/apply-migrations.ts:parseArgs",
+      "kind": "extracted",
+      "facade": "src/commands/apply-migrations.ts:parseArgs",
+      "wasExported": false,
+      "new": [
+        "src/commands/pricing.ts:runSet"
+      ]
+    },
+    {
       "old": "src/commands/apply-migrations.ts:runApplyMigrations",
       "kind": "moved",
       "facade": "src/commands/apply-migrations.ts:runApplyMigrations",
       "wasExported": true,
       "new": [
         "src/commands/apply-migrations.ts:runLockedMigrations"
+      ]
+    },
+    {
+      "old": "src/commands/auth.ts:rescopeClient",
+      "kind": "moved",
+      "facade": "src/commands/auth.ts:rescopeClient",
+      "wasExported": false,
+      "new": [
+        "src/commands/auth.ts:rescopeClientWith"
       ]
     },
     {
@@ -312,6 +329,7 @@
         "src/commands/autopilot-dispatch.ts:dispatchAutoDrain",
         "src/commands/autopilot-dispatch.ts:dispatchAutopilotTick",
         "src/commands/autopilot-dispatch.ts:dispatchFreshnessSyncs",
+        "src/commands/autopilot-dispatch.ts:submitAutoDrains",
         "src/commands/autopilot-probes.ts:runNightlyQualityProbeStep",
         "src/commands/autopilot-probes.ts:runParserProbeStep"
       ]
@@ -354,6 +372,7 @@
       "facade": "src/commands/config.ts:runConfig",
       "wasExported": true,
       "new": [
+        "src/commands/config.ts:setFilePlaneKey",
         "src/commands/doctor/checks/embedding-health.ts:runEmbeddingColumnRegistry",
         "src/commands/sync/trigger.ts:runSyncTrigger",
         "src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler"
@@ -532,6 +551,15 @@
       ]
     },
     {
+      "old": "src/commands/doctor/checks/core-health.ts:childTableOrphansCheck",
+      "kind": "extracted",
+      "facade": "src/commands/doctor/checks/core-health.ts:childTableOrphansCheck",
+      "wasExported": true,
+      "new": [
+        "src/core/repair/orphan-children.ts:PAGE_CHILD_FK_TARGETS"
+      ]
+    },
+    {
       "old": "src/commands/doctor/checks/extraction-sync.ts:checkLinksExtractionLag",
       "kind": "extracted",
       "facade": "src/commands/doctor/checks/extraction-sync.ts:checkLinksExtractionLag",
@@ -546,7 +574,7 @@
       "facade": "src/commands/doctor/checks/extraction-sync.ts:checkSyncFreshness",
       "wasExported": true,
       "new": [
-        "src/commands/doctor/checks/extraction-sync.ts:loadSyncFreshnessSources"
+        "src/core/source-health.ts:loadSyncFreshnessSources"
       ]
     },
     {
@@ -557,15 +585,6 @@
       "new": [
         "src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider",
         "src/core/import-contextual-mode.ts:resolveImportContextualMode"
-      ]
-    },
-    {
-      "old": "src/commands/doctor/checks/graph-embedding.ts:checkZeEmbeddingHealth",
-      "kind": "moved",
-      "facade": null,
-      "wasExported": true,
-      "new": [
-        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan"
       ]
     },
     {
@@ -581,7 +600,8 @@
         "src/commands/doctor/checks/schema-health.ts:runPgvector",
         "src/commands/doctor/checks/schema-health.ts:runSchemaVersion",
         "src/commands/doctor/checks/sync-search.ts:runSearchMode",
-        "src/commands/doctor/checks/sync-search.ts:runSyncFreshness"
+        "src/commands/doctor/checks/sync-search.ts:runSyncFreshness",
+        "src/commands/doctor/schema-pack-checks.ts:multiSourceDriftCheck"
       ]
     },
     {
@@ -601,7 +621,7 @@
       "wasExported": false,
       "new": [
         "src/cli/commands/reindex.ts:run",
-        "src/commands/autopilot-dispatch.ts:dispatchAutoDrain",
+        "src/commands/autopilot-dispatch.ts:submitAutoDrains",
         "src/core/minions/handlers/extract-atoms-drain.ts:makeExtractAtomsDrainHandler"
       ]
     },
@@ -633,6 +653,33 @@
       ]
     },
     {
+      "old": "src/commands/embed.ts:recordFailure",
+      "kind": "extracted",
+      "facade": "src/commands/embed.ts:recordFailure",
+      "wasExported": false,
+      "new": [
+        "src/core/minions/handlers/loops-extract.ts:makeLoopsExtractHandler"
+      ]
+    },
+    {
+      "old": "src/commands/enrich.ts:runEnrich",
+      "kind": "extracted",
+      "facade": "src/commands/enrich.ts:runEnrich",
+      "wasExported": true,
+      "new": [
+        "src/commands/dream-reset-key.ts:runDreamResetKey"
+      ]
+    },
+    {
+      "old": "src/commands/enrich.ts:runEnrichCore",
+      "kind": "extracted",
+      "facade": "src/commands/enrich.ts:runEnrichCore",
+      "wasExported": true,
+      "new": [
+        "src/core/chronicle/execute.ts:executeChronicleRow"
+      ]
+    },
+    {
       "old": "src/commands/eval-brainbench.ts:parseArgs",
       "kind": "extracted",
       "facade": "src/commands/eval-brainbench.ts:parseArgs",
@@ -660,6 +707,24 @@
       ]
     },
     {
+      "old": "src/commands/extract-conversation-facts.ts:ALLOWED_TYPE_ALIASES",
+      "kind": "moved",
+      "facade": "src/commands/extract-conversation-facts.ts:ALLOWED_TYPE_ALIASES",
+      "wasExported": true,
+      "new": [
+        "src/core/facts/conversation-types.ts:ALLOWED_TYPE_ALIASES"
+      ]
+    },
+    {
+      "old": "src/commands/extract-conversation-facts.ts:pageTypesForAllowed",
+      "kind": "moved",
+      "facade": "src/commands/extract-conversation-facts.ts:pageTypesForAllowed",
+      "wasExported": true,
+      "new": [
+        "src/core/facts/conversation-types.ts:pageTypesForAllowed"
+      ]
+    },
+    {
       "old": "src/commands/extract-conversation-facts.ts:runExtractConversationFacts",
       "kind": "extracted",
       "facade": "src/commands/extract-conversation-facts.ts:runExtractConversationFacts",
@@ -683,6 +748,7 @@
       "facade": "src/commands/extract.ts:extractLinksFromDB",
       "wasExported": false,
       "new": [
+        "src/commands/extract-timeline-db.ts:extractTimelineFromDB",
         "src/core/link-reconciliation.ts:lookupRefsForSlugs"
       ]
     },
@@ -696,6 +762,15 @@
       ]
     },
     {
+      "old": "src/commands/extract.ts:extractMentionsFromDb",
+      "kind": "extracted",
+      "facade": "src/commands/extract.ts:extractMentionsFromDb",
+      "wasExported": false,
+      "new": [
+        "src/commands/extract-timeline-db.ts:extractTimelineFromDB"
+      ]
+    },
+    {
       "old": "src/commands/extract.ts:extractStaleFromDB",
       "kind": "extracted",
       "facade": "src/commands/extract.ts:extractStaleFromDB",
@@ -705,21 +780,12 @@
       ]
     },
     {
-      "old": "src/commands/extract.ts:extractTimelineForSlugs",
-      "kind": "extracted",
-      "facade": "src/commands/extract.ts:extractTimelineForSlugs",
-      "wasExported": true,
-      "new": [
-        "src/core/persistence/links-maintenance.ts:extractManagedStaleLinks"
-      ]
-    },
-    {
       "old": "src/commands/extract.ts:extractTimelineFromDB",
-      "kind": "extracted",
-      "facade": "src/commands/extract.ts:extractTimelineFromDB",
+      "kind": "moved",
+      "facade": null,
       "wasExported": false,
       "new": [
-        "src/core/persistence/links-maintenance.ts:extractManagedStaleLinks"
+        "src/commands/extract-timeline-db.ts:extractTimelineFromDB"
       ]
     },
     {
@@ -1095,15 +1161,6 @@
       ]
     },
     {
-      "old": "src/commands/migrate-embeddings.ts:planMigrationFlow",
-      "kind": "extracted",
-      "facade": "src/commands/migrate-embeddings.ts:planMigrationFlow",
-      "wasExported": true,
-      "new": [
-        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan"
-      ]
-    },
-    {
       "old": "src/commands/migrate-embeddings.ts:runMigrateEmbeddings",
       "kind": "extracted",
       "facade": "src/commands/migrate-embeddings.ts:runMigrateEmbeddings",
@@ -1119,6 +1176,42 @@
       "wasExported": false,
       "new": [
         "src/commands/autopilot/jobs.ts:stripBootstrapLines"
+      ]
+    },
+    {
+      "old": "src/commands/migrations/v0_12_0.ts:__testing",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/planner-stats.ts:__testing"
+      ]
+    },
+    {
+      "old": "src/commands/migrations/v0_12_2.ts:__testing",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/planner-stats.ts:__testing"
+      ]
+    },
+    {
+      "old": "src/commands/migrations/v0_13_0.ts:__testing",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/planner-stats.ts:__testing"
+      ]
+    },
+    {
+      "old": "src/commands/migrations/v0_21_0.ts:__testing",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/planner-stats.ts:__testing"
       ]
     },
     {
@@ -1146,6 +1239,24 @@
       "wasExported": false,
       "new": [
         "src/core/minions/handlers/unify-types.ts:makeUnifyTypesHandler"
+      ]
+    },
+    {
+      "old": "src/commands/orphans.ts:findOrphans",
+      "kind": "extracted",
+      "facade": "src/commands/orphans.ts:findOrphans",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:findOrphanPages"
+      ]
+    },
+    {
+      "old": "src/commands/orphans.ts:queryOrphanPages",
+      "kind": "extracted",
+      "facade": "src/commands/orphans.ts:queryOrphanPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:findOrphanPages"
       ]
     },
     {
@@ -1323,6 +1434,7 @@
         "src/commands/serve-http-admin-api.ts:mountAdminKeyApi",
         "src/commands/serve-http-admin-api.ts:mountAdminLogin",
         "src/commands/serve-http-admin-api.ts:mountAdminOverviewApi",
+        "src/commands/serve-http-admin-api.ts:queryHealthIndicators",
         "src/commands/serve-http-grants.ts:mountAdminGrantEdits",
         "src/commands/serve-http-mcp.ts:callMcpTool",
         "src/commands/serve-http-mcp.ts:createMcpRequestServer",
@@ -1839,6 +1951,7 @@
       "new": [
         "src/cli/commands/apply-migrations.ts:run",
         "src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider",
+        "src/commands/upgrade.ts:printSearchModeUpgradeBanner",
         "src/core/import-contextual-mode.ts:resolveImportContextualMode"
       ]
     },
@@ -1942,6 +2055,24 @@
       ]
     },
     {
+      "old": "src/core/bootstrap/harness.ts:defaultMint",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/bootstrap/harness.ts:mintHarnessToken"
+      ]
+    },
+    {
+      "old": "src/core/bootstrap/harness.ts:resolveDeps",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/bootstrap/harness.ts:resolveHarnessDeps"
+      ]
+    },
+    {
       "old": "src/core/budget/budget-tracker.ts:BudgetKind",
       "kind": "moved",
       "facade": "src/core/budget/budget-tracker.ts:BudgetKind",
@@ -2042,6 +2173,33 @@
       ]
     },
     {
+      "old": "src/core/chronicle/extract-events.ts:defaultJudge",
+      "kind": "extracted",
+      "facade": "src/core/chronicle/extract-events.ts:defaultJudge",
+      "wasExported": false,
+      "new": [
+        "src/core/facts/relink.ts:runModelTier"
+      ]
+    },
+    {
+      "old": "src/core/chronicle/extract-events.ts:runChronicleExtract",
+      "kind": "extracted",
+      "facade": "src/core/chronicle/extract-events.ts:runChronicleExtract",
+      "wasExported": true,
+      "new": [
+        "src/core/chronicle/extract-events.ts:chronicleJudgeContext"
+      ]
+    },
+    {
+      "old": "src/core/chronicle/extract-events.ts:safeDate",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/chronicle/publish.ts:safeDate"
+      ]
+    },
+    {
       "old": "src/core/chunkers/token-estimate.ts:estimateTokens",
       "kind": "extracted",
       "facade": "src/core/chunkers/token-estimate.ts:estimateTokens",
@@ -2070,6 +2228,15 @@
       ]
     },
     {
+      "old": "src/core/config.ts:loadConfig",
+      "kind": "extracted",
+      "facade": "src/core/config.ts:loadConfig",
+      "wasExported": true,
+      "new": [
+        "src/core/persistence/publication-failure.ts:guardDetail"
+      ]
+    },
+    {
       "old": "src/core/context/turn-context.ts:assembleTurnContext",
       "kind": "extracted",
       "facade": "src/core/context/turn-context.ts:assembleTurnContext",
@@ -2094,6 +2261,7 @@
       "wasExported": true,
       "new": [
         "src/core/cycle/phase-containment.ts:timeContainedPhase",
+        "src/core/minions/handlers/autopilot-global-maintenance.ts:makeAutopilotGlobalMaintenanceHandler",
         "src/core/persistence/atom-retry.ts:retryManagedAtomBatch"
       ]
     },
@@ -2103,6 +2271,7 @@
       "facade": "src/core/cycle.ts:runPhaseExtract",
       "wasExported": false,
       "new": [
+        "src/core/cycle/connector-extract.ts:runPhaseExtractDatabaseOnly",
         "src/core/extract-frontmatter.ts:resolveIncludeFrontmatter"
       ]
     },
@@ -2121,7 +2290,6 @@
       "facade": "src/core/cycle.ts:runPhaseSync",
       "wasExported": false,
       "new": [
-        "src/commands/sync/run.ts:runSingleSourceSync",
         "src/core/minions/handlers/sync.ts:makeSyncHandler"
       ]
     },
@@ -2135,12 +2303,12 @@
       ]
     },
     {
-      "old": "src/core/cycle/conversation-facts-backfill.ts:runPhaseConversationFactsBackfill",
+      "old": "src/core/cycle/conversation-facts-backfill.ts:loadCfg",
       "kind": "extracted",
-      "facade": "src/core/cycle/conversation-facts-backfill.ts:runPhaseConversationFactsBackfill",
-      "wasExported": true,
+      "facade": "src/core/cycle/conversation-facts-backfill.ts:loadCfg",
+      "wasExported": false,
       "new": [
-        "src/core/embedding-migration-budget.ts:authorizeMigrationBudget"
+        "src/core/minions/handlers/extract-conversation-facts.ts:makeExtractConversationFactsHandler"
       ]
     },
     {
@@ -2353,15 +2521,6 @@
       ]
     },
     {
-      "old": "src/core/cycle/extract-atoms.ts:resolveExtractAtomsBudgetPricingPolicy",
-      "kind": "extracted",
-      "facade": "src/core/cycle/extract-atoms.ts:resolveExtractAtomsBudgetPricingPolicy",
-      "wasExported": true,
-      "new": [
-        "src/core/embedding-migration-budget.ts:authorizeMigrationBudget"
-      ]
-    },
-    {
       "old": "src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms",
       "kind": "extracted",
       "facade": "src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms",
@@ -2377,7 +2536,26 @@
       "facade": "src/core/cycle/extract-takes.ts:extractTakesFromDb",
       "wasExported": true,
       "new": [
+        "src/commands/extract-timeline-db.ts:extractTimelineFromDB",
         "src/core/cycle/extract-takes.ts:reconcilePageTakes"
+      ]
+    },
+    {
+      "old": "src/core/cycle/grade-takes.ts:defaultEvidenceRetriever",
+      "kind": "extracted",
+      "facade": "src/core/cycle/grade-takes.ts:defaultEvidenceRetriever",
+      "wasExported": true,
+      "new": [
+        "src/core/search/evidence-delivery.ts:deliverEvidence"
+      ]
+    },
+    {
+      "old": "src/core/cycle/patterns.ts:buildPatternsPrompt",
+      "kind": "extracted",
+      "facade": "src/core/cycle/patterns.ts:buildPatternsPrompt",
+      "wasExported": false,
+      "new": [
+        "src/core/repair/captured-facts.ts:strikeFencedRows"
       ]
     },
     {
@@ -2405,6 +2583,15 @@
       "wasExported": true,
       "new": [
         "src/core/ai/decide/sweep.ts:conflictSweepTail"
+      ]
+    },
+    {
+      "old": "src/core/cycle/synthesize.ts:reverseWriteRefs",
+      "kind": "extracted",
+      "facade": "src/core/cycle/synthesize.ts:reverseWriteRefs",
+      "wasExported": false,
+      "new": [
+        "src/commands/extract-timeline-db.ts:extractTimelineFromDB"
       ]
     },
     {
@@ -2492,6 +2679,7 @@
         "src/core/engine-sql/code-edges.ts:getCallersOf",
         "src/core/engine-sql/code-edges.ts:getEdgesByChunk",
         "src/core/engine-sql/links.ts:addLink",
+        "src/core/engine-sql/links.ts:findOrphanPages",
         "src/core/engine-sql/links.ts:listLinkSources",
         "src/core/engine-sql/links.ts:removeLink",
         "src/core/engine-sql/links.ts:removeLinksByPagesAndSource",
@@ -2525,6 +2713,15 @@
       ]
     },
     {
+      "old": "src/core/enrichment/completeness.ts:parseDate",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/chronicle/publish.ts:safeDate"
+      ]
+    },
+    {
       "old": "src/core/extract-timeline-from-meetings.ts:AttendedEdgeRow",
       "kind": "extracted",
       "facade": "src/core/extract-timeline-from-meetings.ts:AttendedEdgeRow",
@@ -2539,8 +2736,7 @@
       "facade": "src/core/facts/backstop.ts:runFactsBackstop",
       "wasExported": true,
       "new": [
-        "src/commands/doctor/checks/knowledge-health.ts:runFactsExtraction",
-        "src/core/minions/handlers/facts-absorb.ts:makeFactsAbsorbHandler"
+        "src/commands/doctor/checks/knowledge-health.ts:runFactsExtraction"
       ]
     },
     {
@@ -2551,15 +2747,6 @@
       "new": [
         "src/core/facts/subject-infer-write.ts:writesDatabaseOnly",
         "src/core/persistence/facts-maintenance.ts:collectManagedFacts"
-      ]
-    },
-    {
-      "old": "src/core/facts/fence-write.ts:writeFactsToFence",
-      "kind": "extracted",
-      "facade": "src/core/facts/fence-write.ts:writeFactsToFence",
-      "wasExported": true,
-      "new": [
-        "src/core/facts/proposal-supersede.ts:PairFact"
       ]
     },
     {
@@ -2578,8 +2765,7 @@
       "wasExported": true,
       "new": [
         "src/core/facts/single-prepare.ts:assertFactNotWithdrawn",
-        "src/core/facts/subject-infer-write.ts:linkAllowed",
-        "src/core/persistence/memory-mutations.ts:submitRememberMutation"
+        "src/core/facts/subject-infer-write.ts:linkAllowed"
       ]
     },
     {
@@ -2711,12 +2897,22 @@
       ]
     },
     {
-      "old": "src/core/google/loops-extract.ts:runLoopsExtract",
+      "old": "src/core/google/loop-detect.ts:applyThreadLoopVerdict",
       "kind": "extracted",
-      "facade": "src/core/google/loops-extract.ts:runLoopsExtract",
+      "facade": "src/core/google/loop-detect.ts:applyThreadLoopVerdict",
       "wasExported": true,
       "new": [
-        "src/core/persistence/memory-mutations.ts:submitRememberMutation"
+        "src/core/google/loop-detect.ts:upsertThreadLoop"
+      ]
+    },
+    {
+      "old": "src/core/grants/cli.ts:parseRescopeGrantArgs",
+      "kind": "split",
+      "facade": "src/core/grants/cli.ts:parseRescopeGrantArgs",
+      "wasExported": true,
+      "new": [
+        "src/core/grants/cli.ts:parseClientRescopeArgs",
+        "src/core/grants/cli.ts:parseRescopeGrantFlags"
       ]
     },
     {
@@ -2781,7 +2977,8 @@
       "facade": "src/core/import-file.ts:importCodeFile",
       "wasExported": true,
       "new": [
-        "src/core/code-chunks.ts:prepareCodeChunks"
+        "src/core/code-chunks.ts:prepareCodeChunks",
+        "src/core/minions/handlers/loops-extract.ts:makeLoopsExtractHandler"
       ]
     },
     {
@@ -2821,6 +3018,15 @@
       "wasExported": true,
       "new": [
         "src/core/attendance-repair.ts:prepareOrigin"
+      ]
+    },
+    {
+      "old": "src/core/mcp-registration.ts:shellQuote",
+      "kind": "moved",
+      "facade": "src/core/mcp-registration.ts:shellQuote",
+      "wasExported": true,
+      "new": [
+        "src/core/shell-quote.ts:shellQuote"
       ]
     },
     {
@@ -3047,15 +3253,6 @@
       ]
     },
     {
-      "old": "src/core/minions/handlers/embed-backfill.ts:makeEmbedBackfillHandler",
-      "kind": "extracted",
-      "facade": "src/core/minions/handlers/embed-backfill.ts:makeEmbedBackfillHandler",
-      "wasExported": true,
-      "new": [
-        "src/core/embedding-migration-budget.ts:authorizeMigrationBudget"
-      ]
-    },
-    {
       "old": "src/core/minions/queue.ts:MinionQueue.add",
       "kind": "extracted",
       "facade": "src/core/minions/queue.ts:MinionQueue.add",
@@ -3109,6 +3306,15 @@
       "wasExported": false,
       "new": [
         "src/core/model-config.ts:subagentGate"
+      ]
+    },
+    {
+      "old": "src/core/ops/chronicle.ts:chronicle_backfill",
+      "kind": "moved",
+      "facade": "src/core/ops/chronicle.ts:chronicle_backfill",
+      "wasExported": false,
+      "new": [
+        "src/core/google/loop-catchup.ts:pageRevision"
       ]
     },
     {
@@ -3596,11 +3802,12 @@
     },
     {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getHealth",
-      "kind": "extracted",
+      "kind": "split",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getHealth",
       "wasExported": true,
       "new": [
         "src/commands/doctor/checks/graph-health.ts:runGraphCoverage",
+        "src/core/engine-sql/health.ts:getHealth",
         "src/core/engine-sql/links.ts:listLinkSources"
       ]
     },
@@ -4055,7 +4262,8 @@
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchKeyword",
       "wasExported": true,
       "new": [
-        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+        "src/core/engine-sql/titles.ts:searchTitles",
+        "src/core/search/title-statement.ts:buildSearchTitlesStatement"
       ]
     },
     {
@@ -4064,7 +4272,7 @@
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchKeywordChunks",
       "wasExported": true,
       "new": [
-        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+        "src/core/search/title-statement.ts:buildSearchTitlesStatement"
       ]
     },
     {
@@ -4087,16 +4295,17 @@
     },
     {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.searchTitles",
-      "kind": "extracted",
+      "kind": "split",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchTitles",
       "wasExported": true,
       "new": [
-        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+        "src/core/engine-sql/titles.ts:searchTitles",
+        "src/core/search/title-statement.ts:buildSearchTitlesStatement"
       ]
     },
     {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.searchVector",
-      "kind": "moved",
+      "kind": "extracted",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.searchVector",
       "wasExported": true,
       "new": [
@@ -4453,6 +4662,15 @@
       "wasExported": false,
       "new": [
         "src/core/engine-sql/facts.ts:rowToFact"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine/facts.ts:toDate",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": false,
+      "new": [
+        "src/core/chronicle/eligibility.ts:toDate"
       ]
     },
     {
@@ -5135,10 +5353,11 @@
     },
     {
       "old": "src/core/postgres-engine.ts:PostgresEngine.getHealth",
-      "kind": "extracted",
+      "kind": "split",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.getHealth",
       "wasExported": true,
       "new": [
+        "src/core/engine-sql/health.ts:getHealth",
         "src/core/engine-sql/links.ts:listLinkSources"
       ]
     },
@@ -5584,7 +5803,8 @@
       "facade": "src/core/postgres-engine.ts:PostgresEngine.searchKeyword",
       "wasExported": true,
       "new": [
-        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+        "src/core/engine-sql/titles.ts:searchTitles",
+        "src/core/search/title-statement.ts:buildSearchTitlesStatement"
       ]
     },
     {
@@ -5593,7 +5813,7 @@
       "facade": "src/core/postgres-engine.ts:PostgresEngine.searchKeywordChunks",
       "wasExported": true,
       "new": [
-        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+        "src/core/search/title-statement.ts:buildSearchTitlesStatement"
       ]
     },
     {
@@ -5616,11 +5836,12 @@
     },
     {
       "old": "src/core/postgres-engine.ts:PostgresEngine.searchTitles",
-      "kind": "extracted",
+      "kind": "split",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.searchTitles",
       "wasExported": true,
       "new": [
-        "src/core/search/vector-statement.ts:buildVectorSearchStatement"
+        "src/core/engine-sql/titles.ts:searchTitles",
+        "src/core/search/title-statement.ts:buildSearchTitlesStatement"
       ]
     },
     {
@@ -6288,7 +6509,6 @@
       "facade": "src/core/remediation/context.ts:loadRecommendationContext",
       "wasExported": true,
       "new": [
-        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan",
         "src/core/embed-facts.ts:embedStaleFacts",
         "src/core/embed-stale-images.ts:embedStaleImages"
       ]
@@ -6303,12 +6523,12 @@
       ]
     },
     {
-      "old": "src/core/schema-pack/unify-types-handler.ts:runUnifyTypes",
+      "old": "src/core/schema-pack/stats.ts:aggregateRows",
       "kind": "extracted",
-      "facade": "src/core/schema-pack/unify-types-handler.ts:runUnifyTypes",
-      "wasExported": true,
+      "facade": "src/core/schema-pack/stats.ts:aggregateRows",
+      "wasExported": false,
       "new": [
-        "src/commands/autopilot-dispatch.ts:computeAutopilotPlan"
+        "src/core/repair/captured-facts.ts:classifyCapturedFacts"
       ]
     },
     {
@@ -6486,6 +6706,15 @@
       ]
     },
     {
+      "old": "src/core/search/read-enrichment.ts:readAliases",
+      "kind": "extracted",
+      "facade": "src/core/search/read-enrichment.ts:readAliases",
+      "wasExported": true,
+      "new": [
+        "src/core/search/evidence-delivery.ts:resolveFrozenHits"
+      ]
+    },
+    {
       "old": "src/core/skill-catalog.ts:buildSkillCatalog",
       "kind": "extracted",
       "facade": "src/core/skill-catalog.ts:buildSkillCatalog",
@@ -6568,6 +6797,15 @@
       ]
     },
     {
+      "old": "src/core/sync-reconcile.ts:resolveSyncHardDeadline",
+      "kind": "extracted",
+      "facade": "src/core/sync-reconcile.ts:resolveSyncHardDeadline",
+      "wasExported": true,
+      "new": [
+        "src/commands/sync/args.ts:parseSyncFanoutFlags"
+      ]
+    },
+    {
       "old": "src/core/sync-status-report.ts:buildSyncStatusReport",
       "kind": "extracted",
       "facade": "src/core/sync-status-report.ts:buildSyncStatusReport",
@@ -6586,23 +6824,31 @@
       ]
     },
     {
+      "old": "src/core/think/index.ts:persistSynthesis",
+      "kind": "extracted",
+      "facade": "src/core/think/index.ts:persistSynthesis",
+      "wasExported": true,
+      "new": [
+        "src/core/repair/captured-facts.ts:strikeFencedRows"
+      ]
+    },
+    {
       "old": "src/core/think/index.ts:runThink",
       "kind": "extracted",
       "facade": "src/core/think/index.ts:runThink",
       "wasExported": true,
       "new": [
         "src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi",
-        "src/core/persistence/memory-mutations.ts:submitRememberMutation",
         "src/core/think/decide.ts:thinkAbstainResult"
       ]
     },
     {
-      "old": "src/core/timeline-extract.ts:extractTimelineFromContent",
+      "old": "src/core/token-mint.ts:mintLegacyToken",
       "kind": "extracted",
-      "facade": "src/core/timeline-extract.ts:extractTimelineFromContent",
+      "facade": "src/core/token-mint.ts:mintLegacyToken",
       "wasExported": true,
       "new": [
-        "src/core/persistence/links-maintenance.ts:extractManagedStaleLinks"
+        "src/core/token-mint.ts:insertUnifiedToken"
       ]
     },
     {
@@ -6682,6 +6928,7 @@
   "unmapped": [
     "src/cli.ts:_clearIdentityCacheForTest",
     "src/commands/autopilot.ts:systemdUnitPath",
+    "src/commands/doctor/checks/graph-embedding.ts:checkZeEmbeddingHealth",
     "src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringArgs",
     "src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringResult",
     "src/commands/eval-schema-authoring.ts:EvalVerdict",
@@ -6695,10 +6942,6 @@
     "src/commands/hook.ts:firstString",
     "src/commands/hook.ts:lastSessionLine",
     "src/commands/migrations/v0_11_0.ts:gbrainDir",
-    "src/commands/migrations/v0_12_0.ts:__testing",
-    "src/commands/migrations/v0_12_2.ts:__testing",
-    "src/commands/migrations/v0_13_0.ts:__testing",
-    "src/commands/migrations/v0_21_0.ts:__testing",
     "src/commands/migrations/v0_22_4.ts:gbrainDir",
     "src/commands/migrations/v0_46_3.ts:MIGRATION_VERSION",
     "src/commands/migrations/v0_46_3.ts:PLAYBOOK_SKILL",
@@ -6793,6 +7036,8 @@
     "src/core/calibration/take-forecast.ts:computeForecast",
     "src/core/calibration/take-forecast.ts:forecastForTake",
     "src/core/calibration/take-forecast.ts:resolveDomainPrefix",
+    "src/core/chronicle/backstop.ts:ChronicleBackstopResult",
+    "src/core/chronicle/backstop.ts:runChronicleBackstop",
     "src/core/code-graph-readiness.ts:effectiveSourceId",
     "src/core/code-graph-readiness.ts:pendingEdgeChunksExist",
     "src/core/code-graph-readiness.ts:symbolChunksExist",
@@ -6884,7 +7129,6 @@
     "src/core/enrichment/completeness.ts:hasTitle",
     "src/core/enrichment/completeness.ts:mediaRubric",
     "src/core/enrichment/completeness.ts:nonRedundancy",
-    "src/core/enrichment/completeness.ts:parseDate",
     "src/core/enrichment/completeness.ts:personRubric",
     "src/core/enrichment/completeness.ts:projectRubric",
     "src/core/enrichment/completeness.ts:recencyScore",
@@ -6904,6 +7148,7 @@
     "src/core/eval-contradictions/calibration-join.ts:computeDomainHint",
     "src/core/eval-contradictions/calibration-join.ts:tagFindingWithCalibration",
     "src/core/extract/rollup-writer.ts:_resetRollupErrorLogForTests",
+    "src/core/facts/backstop.ts:DEDUP_THRESHOLD",
     "src/core/fail-improve.ts:FailImproveLoop.analyzeFailures",
     "src/core/fail-improve.ts:FailImproveLoop.constructor",
     "src/core/fail-improve.ts:FailImproveLoop.ensureDir",
@@ -6987,7 +7232,6 @@
     "src/core/pglite-engine/code-edges.ts:PGLITE_EDGE_BATCH_MAX_BIND_PARAMS",
     "src/core/pglite-engine/facts.ts:PgliteFactsDeps",
     "src/core/pglite-engine/facts.ts:_listFacts",
-    "src/core/pglite-engine/facts.ts:toDate",
     "src/core/pglite-engine/salience.ts:PgliteSalienceDeps",
     "src/core/pglite-engine/takes.ts:PgliteTakesDeps",
     "src/core/pglite-lock.ts:LOCK_DIR_NAME",
@@ -7099,6 +7343,7 @@
     "src/core/calibration/nudge.ts",
     "src/core/calibration/recall-footer.ts",
     "src/core/calibration/take-forecast.ts",
+    "src/core/chronicle/backstop.ts",
     "src/core/conversation-parser/llm-polish.ts",
     "src/core/data-research.ts",
     "src/core/diarize/payload-fitter.ts",

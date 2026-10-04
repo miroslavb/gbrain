@@ -12,7 +12,7 @@ follow it. The map below is generated from the AST (`scripts/generate-wave-1-mov
 [`wave-1-moves.json`](wave-1-moves.json). Where a contribution goes today is in
 [CONTRIBUTING.md, "Where does my change go?"](../../CONTRIBUTING.md#where-does-my-change-go).
 
-Base `92e06c6c2cc3`, head `b75dea62671d`.
+Base `92e06c6c2cc3`, head `30e23a433b42`.
 
 ## Landing window
 
@@ -141,7 +141,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `THIN_CLIENT_REFUSED_COMMANDS` | moved | `src/cli.ts:THIN_CLIENT_REFUSED_COMMANDS` | `src/cli/command-table.ts:THIN_CLIENT_REFUSED_COMMANDS` |
 | `applyThinClientSourceScope` | extracted | `src/cli.ts:applyThinClientSourceScope` | `src/cli/source-scope.ts:assertSingleSourceScopeFlag` |
 | `formatResult` | extracted | `src/cli.ts:formatResult` | `src/cli/remember-format.ts:formatRememberResult`<br>`src/commands/persistence-admin.ts:runPersistenceAdminCli` |
-| `handleCliOnly` | split | `src/cli.ts:handleCliOnly` | `src/cli.ts:connectCliOnlyEngine`<br>`src/cli.ts:prepareConnectedDispatch`<br>`src/cli.ts:routeCliOnlyBeforeTable`<br>`src/cli.ts:routeEngineFreeSubcommands`<br>`src/cli.ts:runReadOnlyTimeoutDispatch`<br>`src/cli/commands/advisor.ts:run`<br>`src/cli/commands/agent.ts:run`<br>`src/cli/commands/anomalies.ts:run`<br>… and 87 more (see the JSON) |
+| `handleCliOnly` | split | `src/cli.ts:handleCliOnly` | `src/cli.ts:connectCliOnlyEngine`<br>`src/cli.ts:routeCliOnlyBeforeTable`<br>`src/cli.ts:routeEngineFreeSubcommands`<br>`src/cli.ts:runReadOnlyTimeoutDispatch`<br>`src/cli/commands/advisor.ts:run`<br>`src/cli/commands/agent.ts:run`<br>`src/cli/commands/anomalies.ts:run`<br>`src/cli/commands/apply-migrations.ts:run`<br>… and 86 more (see the JSON) |
 | `isBooleanLiteral` | moved | module-private | `src/core/op-flag-tokens.ts:isBooleanLiteral` |
 | `main` | extracted | `src/cli.ts:main` | `src/cli.ts:runSharedOperation`<br>`src/core/cli-preflight.ts:runCliPreflight` |
 | `makeContext` | extracted | `src/cli.ts:makeContext` | `src/commands/serve-http-mcp.ts:callMcpTool` |
@@ -150,7 +150,14 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `parseArgs` | extracted | `src/commands/apply-migrations.ts:parseArgs` | `src/commands/pricing.ts:runSet` |
 | `runApplyMigrations` | moved | `src/commands/apply-migrations.ts:runApplyMigrations` | `src/commands/apply-migrations.ts:runLockedMigrations` |
+
+### `src/commands/auth.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `rescopeClient` | moved | `src/commands/auth.ts:rescopeClient` | `src/commands/auth.ts:rescopeClientWith` |
 
 ### `src/commands/autopilot.ts`
 
@@ -166,7 +173,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `installSystemd` | extracted | `src/commands/autopilot.ts:installSystemd` | `src/commands/autopilot/jobs.ts:systemdUnitPath` |
 | `parseArg` | extracted | `src/commands/autopilot.ts:parseArg` | `src/commands/jobs/shared.ts:parseFlag` |
 | `plistPath` | moved | module-private | `src/commands/autopilot/jobs.ts:plistPath` |
-| `runAutopilot` | split | `src/commands/autopilot.ts:runAutopilot` | `src/commands/autopilot-daemon.ts:acquireAutopilotLock`<br>`src/commands/autopilot-daemon.ts:adaptiveInterval`<br>`src/commands/autopilot-daemon.ts:probeDatabaseOrReconnect`<br>`src/commands/autopilot-daemon.ts:probeNoWorkerPeer`<br>`src/commands/autopilot-daemon.ts:runAutopilotDaemon`<br>`src/commands/autopilot-daemon.ts:runInlineCycle`<br>`src/commands/autopilot-daemon.ts:startAutopilotWorker`<br>`src/commands/autopilot-daemon.ts:warnNoChatProviderOnce`<br>… and 6 more (see the JSON) |
+| `runAutopilot` | split | `src/commands/autopilot.ts:runAutopilot` | `src/commands/autopilot-daemon.ts:acquireAutopilotLock`<br>`src/commands/autopilot-daemon.ts:adaptiveInterval`<br>`src/commands/autopilot-daemon.ts:probeDatabaseOrReconnect`<br>`src/commands/autopilot-daemon.ts:probeNoWorkerPeer`<br>`src/commands/autopilot-daemon.ts:runAutopilotDaemon`<br>`src/commands/autopilot-daemon.ts:runInlineCycle`<br>`src/commands/autopilot-daemon.ts:startAutopilotWorker`<br>`src/commands/autopilot-daemon.ts:warnNoChatProviderOnce`<br>… and 7 more (see the JSON) |
 | `uninstallDaemon` | extracted | `src/commands/autopilot.ts:uninstallDaemon` | `src/commands/autopilot-daemon.ts:runAutopilotDaemon`<br>`src/commands/autopilot/jobs.ts:detectInstalledJob`<br>`src/commands/autopilot/jobs.ts:stripBootstrapLines` |
 
 ### `src/commands/backup.ts`
@@ -185,7 +192,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runConfig` | extracted | `src/commands/config.ts:runConfig` | `src/commands/doctor/checks/embedding-health.ts:runEmbeddingColumnRegistry`<br>`src/commands/sync/trigger.ts:runSyncTrigger`<br>`src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler` |
+| `runConfig` | extracted | `src/commands/config.ts:runConfig` | `src/commands/config.ts:setFilePlaneKey`<br>`src/commands/doctor/checks/embedding-health.ts:runEmbeddingColumnRegistry`<br>`src/commands/sync/trigger.ts:runSyncTrigger`<br>`src/core/minions/handlers/autopilot-cycle.ts:makeAutopilotCycleHandler` |
 
 ### `src/commands/doctor.ts`
 
@@ -211,25 +218,30 @@ module path when it keeps exporting the name; "module-private" means the old mod
 |---|---|---|---|
 | `checkRerankerHealth` | extracted | `src/commands/doctor/checks/calibration.ts:checkRerankerHealth` | `src/core/import-contextual-mode.ts:resolveImportContextualMode` |
 
+### `src/commands/doctor/checks/core-health.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `childTableOrphansCheck` | extracted | `src/commands/doctor/checks/core-health.ts:childTableOrphansCheck` | `src/core/repair/orphan-children.ts:PAGE_CHILD_FK_TARGETS` |
+
 ### `src/commands/doctor/checks/extraction-sync.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `checkLinksExtractionLag` | extracted | `src/commands/doctor/checks/extraction-sync.ts:checkLinksExtractionLag` | `src/commands/sync/report.ts:maybeExtractionNudge` |
-| `checkSyncFreshness` | extracted | `src/commands/doctor/checks/extraction-sync.ts:checkSyncFreshness` | `src/commands/doctor/checks/extraction-sync.ts:loadSyncFreshnessSources` |
+| `checkSyncFreshness` | extracted | `src/commands/doctor/checks/extraction-sync.ts:checkSyncFreshness` | `src/core/source-health.ts:loadSyncFreshnessSources` |
 
 ### `src/commands/doctor/checks/graph-embedding.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `checkProviderSunset` | split | **not re-exported** | `src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider`<br>`src/core/import-contextual-mode.ts:resolveImportContextualMode` |
-| `checkZeEmbeddingHealth` | moved | **not re-exported** | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan` |
 
 ### `src/commands/doctor/report-remote.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `doctorReportRemote` | extracted | `src/commands/doctor/report-remote.ts:doctorReportRemote` | `src/commands/doctor/checks/embedding-health.ts:runEmbeddingEnvOverride`<br>`src/commands/doctor/checks/local-audits.ts:runDefaultSourcePath`<br>`src/commands/doctor/checks/local-runtime.ts:runMinionsMigration`<br>`src/commands/doctor/checks/queue-assets.ts:runQueueHealth`<br>`src/commands/doctor/checks/schema-health.ts:runPgvector`<br>`src/commands/doctor/checks/schema-health.ts:runSchemaVersion`<br>`src/commands/doctor/checks/sync-search.ts:runSearchMode`<br>`src/commands/doctor/checks/sync-search.ts:runSyncFreshness` |
+| `doctorReportRemote` | extracted | `src/commands/doctor/report-remote.ts:doctorReportRemote` | `src/commands/doctor/checks/embedding-health.ts:runEmbeddingEnvOverride`<br>`src/commands/doctor/checks/local-audits.ts:runDefaultSourcePath`<br>`src/commands/doctor/checks/local-runtime.ts:runMinionsMigration`<br>`src/commands/doctor/checks/queue-assets.ts:runQueueHealth`<br>`src/commands/doctor/checks/schema-health.ts:runPgvector`<br>`src/commands/doctor/checks/schema-health.ts:runSchemaVersion`<br>`src/commands/doctor/checks/sync-search.ts:runSearchMode`<br>`src/commands/doctor/checks/sync-search.ts:runSyncFreshness`<br>… and 1 more (see the JSON) |
 
 ### `src/commands/dream-retriage.ts`
 
@@ -241,7 +253,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runDrain` | extracted | `src/commands/dream.ts:runDrain` | `src/cli/commands/reindex.ts:run`<br>`src/commands/autopilot-dispatch.ts:dispatchAutoDrain`<br>`src/core/minions/handlers/extract-atoms-drain.ts:makeExtractAtomsDrainHandler` |
+| `runDrain` | extracted | `src/commands/dream.ts:runDrain` | `src/cli/commands/reindex.ts:run`<br>`src/commands/autopilot-dispatch.ts:submitAutoDrains`<br>`src/core/minions/handlers/extract-atoms-drain.ts:makeExtractAtomsDrainHandler` |
 
 ### `src/commands/embed.ts`
 
@@ -250,6 +262,14 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `embedAll` | extracted | `src/commands/embed.ts:embedAll` | `src/commands/sync/imports.ts:importOnePath` |
 | `embedAllStale` | extracted | `src/commands/embed.ts:embedAllStale` | `src/commands/sync/imports.ts:importOnePath` |
 | `healChunklessPages` | extracted | `src/commands/embed.ts:healChunklessPages` | `src/commands/sync/imports.ts:importOnePath` |
+| `recordFailure` | extracted | `src/commands/embed.ts:recordFailure` | `src/core/minions/handlers/loops-extract.ts:makeLoopsExtractHandler` |
+
+### `src/commands/enrich.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `runEnrich` | extracted | `src/commands/enrich.ts:runEnrich` | `src/commands/dream-reset-key.ts:runDreamResetKey` |
+| `runEnrichCore` | extracted | `src/commands/enrich.ts:runEnrichCore` | `src/core/chronicle/execute.ts:executeChronicleRow` |
 
 ### `src/commands/eval-brainbench.ts`
 
@@ -273,6 +293,8 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `ALLOWED_TYPE_ALIASES` | moved | `src/commands/extract-conversation-facts.ts:ALLOWED_TYPE_ALIASES` | `src/core/facts/conversation-types.ts:ALLOWED_TYPE_ALIASES` |
+| `pageTypesForAllowed` | moved | `src/commands/extract-conversation-facts.ts:pageTypesForAllowed` | `src/core/facts/conversation-types.ts:pageTypesForAllowed` |
 | `runExtractConversationFacts` | extracted | `src/commands/extract-conversation-facts.ts:runExtractConversationFacts` | `src/commands/dream-reset-key.ts:runDreamResetKey` |
 
 ### `src/commands/extract.ts`
@@ -280,11 +302,11 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `CandidateSourceResolution` | moved | `src/commands/extract.ts:CandidateSourceResolution` | `src/core/link-reconciliation.ts:CandidateSourceResolution` |
-| `extractLinksFromDB` | extracted | `src/commands/extract.ts:extractLinksFromDB` | `src/core/link-reconciliation.ts:lookupRefsForSlugs` |
+| `extractLinksFromDB` | extracted | `src/commands/extract.ts:extractLinksFromDB` | `src/commands/extract-timeline-db.ts:extractTimelineFromDB`<br>`src/core/link-reconciliation.ts:lookupRefsForSlugs` |
 | `extractMarkdownLinks` | moved | `src/commands/extract.ts:extractMarkdownLinks` | `src/core/link-extraction.ts:extractMarkdownLinks` |
+| `extractMentionsFromDb` | extracted | `src/commands/extract.ts:extractMentionsFromDb` | `src/commands/extract-timeline-db.ts:extractTimelineFromDB` |
 | `extractStaleFromDB` | extracted | `src/commands/extract.ts:extractStaleFromDB` | `src/core/link-reconciliation.ts:lookupRefsForSlugs` |
-| `extractTimelineForSlugs` | extracted | `src/commands/extract.ts:extractTimelineForSlugs` | `src/core/persistence/links-maintenance.ts:extractManagedStaleLinks` |
-| `extractTimelineFromDB` | extracted | `src/commands/extract.ts:extractTimelineFromDB` | `src/core/persistence/links-maintenance.ts:extractManagedStaleLinks` |
+| `extractTimelineFromDB` | moved | module-private | `src/commands/extract-timeline-db.ts:extractTimelineFromDB` |
 | `resolveCandidateSources` | moved | `src/commands/extract.ts:resolveCandidateSources` | `src/core/link-reconciliation.ts:resolveCandidateSources` |
 | `resolveLinkFallbackDefault` | moved | `src/commands/extract.ts:resolveLinkFallbackDefault` | `src/core/link-reconciliation.ts:resolveLinkFallbackDefault` |
 | `runExtract` | extracted | `src/commands/extract.ts:runExtract` | `src/cli/commands/reindex.ts:run`<br>`src/core/minions/handlers/extract-ner.ts:makeExtractNerHandler`<br>`src/core/minions/handlers/extract-timeline-from-meetings.ts:makeExtractTimelineFromMeetingsHandler` |
@@ -370,7 +392,6 @@ module path when it keeps exporting the name; "module-private" means the old mod
 |---|---|---|---|
 | `MigrateEmbeddingsFlags` | moved | `src/commands/migrate-embeddings.ts:MigrateEmbeddingsFlags` | `src/core/embedding-migration-cli.ts:MigrateEmbeddingsFlags` |
 | `parseMigrateEmbeddingsFlags` | moved | `src/commands/migrate-embeddings.ts:parseMigrateEmbeddingsFlags` | `src/core/embedding-migration-cli.ts:parseMigrateEmbeddingsFlags` |
-| `planMigrationFlow` | extracted | `src/commands/migrate-embeddings.ts:planMigrationFlow` | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan` |
 | `runMigrateEmbeddings` | extracted | `src/commands/migrate-embeddings.ts:runMigrateEmbeddings` | `src/cli/commands/projections.ts:run` |
 
 ### `src/commands/migrations/v0_11_0.ts`
@@ -378,6 +399,30 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `rewriteCronManifest` | extracted | `src/commands/migrations/v0_11_0.ts:rewriteCronManifest` | `src/commands/autopilot/jobs.ts:stripBootstrapLines` |
+
+### `src/commands/migrations/v0_12_0.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `__testing` | moved | **not re-exported** | `src/core/planner-stats.ts:__testing` |
+
+### `src/commands/migrations/v0_12_2.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `__testing` | moved | **not re-exported** | `src/core/planner-stats.ts:__testing` |
+
+### `src/commands/migrations/v0_13_0.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `__testing` | moved | **not re-exported** | `src/core/planner-stats.ts:__testing` |
+
+### `src/commands/migrations/v0_21_0.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `__testing` | moved | **not re-exported** | `src/core/planner-stats.ts:__testing` |
 
 ### `src/commands/migrations/v0_32_2.ts`
 
@@ -396,6 +441,13 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `renderPackUpgradeExplain` | extracted | `src/commands/onboard.ts:renderPackUpgradeExplain` | `src/core/minions/handlers/unify-types.ts:makeUnifyTypesHandler` |
+
+### `src/commands/orphans.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `findOrphans` | extracted | `src/commands/orphans.ts:findOrphans` | `src/core/engine-sql/links.ts:findOrphanPages` |
+| `queryOrphanPages` | extracted | `src/commands/orphans.ts:queryOrphanPages` | `src/core/engine-sql/links.ts:findOrphanPages` |
 
 ### `src/commands/pages.ts`
 
@@ -444,7 +496,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `probeLiveness` | moved | `src/commands/serve-http.ts:probeLiveness` | `src/commands/serve-http-metrics.ts:probeLiveness` |
 | `queryAgentClientSpend` | moved | `src/commands/serve-http.ts:queryAgentClientSpend` | `src/commands/serve-http-admin-api.ts:queryAgentClientSpend` |
 | `resolveCorsOrigin` | moved | `src/commands/serve-http.ts:resolveCorsOrigin` | `src/commands/serve-http-oauth.ts:resolveCorsOrigin` |
-| `runServeHttp` | split | `src/commands/serve-http.ts:runServeHttp` | `src/commands/serve-http-admin-api.ts:createRequireAdmin`<br>`src/commands/serve-http-admin-api.ts:mountAdminApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminClientApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminKeyApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminLogin`<br>`src/commands/serve-http-admin-api.ts:mountAdminOverviewApi`<br>`src/commands/serve-http-grants.ts:mountAdminGrantEdits`<br>… and 23 more (see the JSON) |
+| `runServeHttp` | split | `src/commands/serve-http.ts:runServeHttp` | `src/commands/serve-http-admin-api.ts:createRequireAdmin`<br>`src/commands/serve-http-admin-api.ts:mountAdminApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminClientApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminKeyApi`<br>`src/commands/serve-http-admin-api.ts:mountAdminLogin`<br>`src/commands/serve-http-admin-api.ts:mountAdminOverviewApi`<br>`src/commands/serve-http-admin-api.ts:queryHealthIndicators`<br>… and 24 more (see the JSON) |
 | `selectGitHubItemSources` | moved | `src/commands/serve-http.ts:selectGitHubItemSources` | `src/commands/serve-http-webhooks.ts:selectGitHubItemSources` |
 | `waitForHttpServerLifecycle` | extracted | `src/commands/serve-http.ts:waitForHttpServerLifecycle` | `src/core/persistence/ipc.ts:startPersistenceIpcServer` |
 
@@ -523,7 +575,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runPostUpgrade` | extracted | `src/commands/upgrade.ts:runPostUpgrade` | `src/cli/commands/apply-migrations.ts:run`<br>`src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider`<br>`src/core/import-contextual-mode.ts:resolveImportContextualMode` |
+| `runPostUpgrade` | extracted | `src/commands/upgrade.ts:runPostUpgrade` | `src/cli/commands/apply-migrations.ts:run`<br>`src/commands/doctor/checks/embedding-health.ts:runEmbeddingProvider`<br>`src/commands/upgrade.ts:printSearchModeUpgradeBanner`<br>`src/core/import-contextual-mode.ts:resolveImportContextualMode` |
 
 ### `src/core/agent-install/setup.ts`
 
@@ -560,6 +612,8 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `applyHarness` | extracted | `src/core/bootstrap/harness.ts:applyHarness` | `src/core/bootstrap/harness.ts:logAmbientPostureNotes` |
+| `defaultMint` | moved | module-private | `src/core/bootstrap/harness.ts:mintHarnessToken` |
+| `resolveDeps` | moved | module-private | `src/core/bootstrap/harness.ts:resolveHarnessDeps` |
 
 ### `src/core/budget/budget-tracker.ts`
 
@@ -577,6 +631,14 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `lookupPricing` | moved | module-private | `src/core/budget/reservation-cost.ts:lookupPricing` |
 | `overrideFor` | moved | module-private | `src/core/budget/reservation-cost.ts:overrideFor` |
 
+### `src/core/chronicle/extract-events.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `defaultJudge` | extracted | `src/core/chronicle/extract-events.ts:defaultJudge` | `src/core/facts/relink.ts:runModelTier` |
+| `runChronicleExtract` | extracted | `src/core/chronicle/extract-events.ts:runChronicleExtract` | `src/core/chronicle/extract-events.ts:chronicleJudgeContext` |
+| `safeDate` | moved | module-private | `src/core/chronicle/publish.ts:safeDate` |
+
 ### `src/core/chunkers/token-estimate.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
@@ -589,6 +651,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 |---|---|---|---|
 | `CWD_DOTENV_FILES` | moved | `src/core/config.ts:CWD_DOTENV_FILES` | `src/core/env-trust.ts:CWD_DOTENV_FILES` |
 | `dotenvValuesForKey` | split | `src/core/config.ts:dotenvValuesForKey` | `src/core/env-trust.ts:dotenvAssignments`<br>`src/core/env-trust.ts:dotenvValuesForKey` |
+| `loadConfig` | extracted | `src/core/config.ts:loadConfig` | `src/core/persistence/publication-failure.ts:guardDetail` |
 
 ### `src/core/context/turn-context.ts`
 
@@ -601,17 +664,17 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `anyAbortSignal` | moved | `src/core/cycle.ts:anyAbortSignal` | `src/core/abort-signals.ts:anyAbortSignal` |
-| `runCycle` | extracted | `src/core/cycle.ts:runCycle` | `src/core/cycle/phase-containment.ts:timeContainedPhase`<br>`src/core/persistence/atom-retry.ts:retryManagedAtomBatch` |
-| `runPhaseExtract` | extracted | `src/core/cycle.ts:runPhaseExtract` | `src/core/extract-frontmatter.ts:resolveIncludeFrontmatter` |
+| `runCycle` | extracted | `src/core/cycle.ts:runCycle` | `src/core/cycle/phase-containment.ts:timeContainedPhase`<br>`src/core/minions/handlers/autopilot-global-maintenance.ts:makeAutopilotGlobalMaintenanceHandler`<br>`src/core/persistence/atom-retry.ts:retryManagedAtomBatch` |
+| `runPhaseExtract` | extracted | `src/core/cycle.ts:runPhaseExtract` | `src/core/cycle/connector-extract.ts:runPhaseExtractDatabaseOnly`<br>`src/core/extract-frontmatter.ts:resolveIncludeFrontmatter` |
 | `runPhasePurge` | extracted | `src/core/cycle.ts:runPhasePurge` | `src/core/minions/handlers/purge.ts:makePurgeHandler` |
-| `runPhaseSync` | extracted | `src/core/cycle.ts:runPhaseSync` | `src/commands/sync/run.ts:runSingleSourceSync`<br>`src/core/minions/handlers/sync.ts:makeSyncHandler` |
+| `runPhaseSync` | extracted | `src/core/cycle.ts:runPhaseSync` | `src/core/minions/handlers/sync.ts:makeSyncHandler` |
 | `timePhase` | moved | module-private | `src/core/cycle/phase-containment.ts:timeContainedPhase` |
 
 ### `src/core/cycle/conversation-facts-backfill.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runPhaseConversationFactsBackfill` | extracted | `src/core/cycle/conversation-facts-backfill.ts:runPhaseConversationFactsBackfill` | `src/core/embedding-migration-budget.ts:authorizeMigrationBudget` |
+| `loadCfg` | extracted | `src/core/cycle/conversation-facts-backfill.ts:loadCfg` | `src/core/minions/handlers/extract-conversation-facts.ts:makeExtractConversationFactsHandler` |
 
 ### `src/core/cycle/drift.ts`
 
@@ -650,19 +713,25 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `parseAtomsOutcome` | moved | `src/core/cycle/extract-atoms.ts:parseAtomsOutcome` | `src/core/cycle/extract-atoms-output.ts:parseAtomsOutcome` |
 | `parseAtomsOutcomeInner` | split | module-private | `src/core/cycle/extract-atoms-output.ts:atomsFromParsedArray`<br>`src/core/cycle/extract-atoms-output.ts:parseArrayAtOffset`<br>`src/core/cycle/extract-atoms-output.ts:parseAtomsOutcomeInner` |
 | `parseAtomsResponse` | moved | `src/core/cycle/extract-atoms.ts:parseAtomsResponse` | `src/core/cycle/extract-atoms-output.ts:parseAtomsResponse` |
-| `resolveExtractAtomsBudgetPricingPolicy` | extracted | `src/core/cycle/extract-atoms.ts:resolveExtractAtomsBudgetPricingPolicy` | `src/core/embedding-migration-budget.ts:authorizeMigrationBudget` |
 | `runPhaseExtractAtoms` | extracted | `src/core/cycle/extract-atoms.ts:runPhaseExtractAtoms` | `src/core/cycle/extract-atoms.ts:emptyAtomScanResult`<br>`src/core/persistence/atom-maintenance.ts:readAtomOrigin` |
 
 ### `src/core/cycle/extract-takes.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `extractTakesFromDb` | extracted | `src/core/cycle/extract-takes.ts:extractTakesFromDb` | `src/core/cycle/extract-takes.ts:reconcilePageTakes` |
+| `extractTakesFromDb` | extracted | `src/core/cycle/extract-takes.ts:extractTakesFromDb` | `src/commands/extract-timeline-db.ts:extractTimelineFromDB`<br>`src/core/cycle/extract-takes.ts:reconcilePageTakes` |
+
+### `src/core/cycle/grade-takes.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `defaultEvidenceRetriever` | extracted | `src/core/cycle/grade-takes.ts:defaultEvidenceRetriever` | `src/core/search/evidence-delivery.ts:deliverEvidence` |
 
 ### `src/core/cycle/patterns.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `buildPatternsPrompt` | extracted | `src/core/cycle/patterns.ts:buildPatternsPrompt` | `src/core/repair/captured-facts.ts:strikeFencedRows` |
 | `runPhasePatterns` | extracted | `src/core/cycle/patterns.ts:runPhasePatterns` | `src/commands/sync/finalize.ts:finalizeIncrementalSync` |
 
 ### `src/core/cycle/phantom-redirect.ts`
@@ -681,6 +750,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `reverseWriteRefs` | extracted | `src/core/cycle/synthesize.ts:reverseWriteRefs` | `src/commands/extract-timeline-db.ts:extractTimelineFromDB` |
 | `runPhaseSynthesizeInner` | extracted | `src/core/cycle/synthesize.ts:runPhaseSynthesizeInner` | `src/commands/sync/finalize.ts:finalizeIncrementalSync` |
 | `runTriagePass` | extracted | `src/core/cycle/synthesize.ts:runTriagePass` | `src/core/cycle/triage-decide.ts:resolveTriageDecide` |
 | `stampDreamProvenance` | moved | module-private | `src/core/cycle/dream-provenance.ts:stampDreamProvenance` |
@@ -709,13 +779,19 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `BrainEngine` | extracted | `src/core/engine.ts:BrainEngine` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:listChunklessPagesWithContent`<br>`src/core/engine-sql/chunks.ts:listStaleChunks`<br>`src/core/engine-sql/chunks.ts:setPageEmbeddingSignature`<br>`src/core/engine-sql/code-edges.ts:getCallersOf`<br>`src/core/engine-sql/code-edges.ts:getEdgesByChunk`<br>`src/core/engine-sql/links.ts:addLink`<br>`src/core/engine-sql/links.ts:listLinkSources`<br>… and 20 more (see the JSON) |
+| `BrainEngine` | extracted | `src/core/engine.ts:BrainEngine` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:listChunklessPagesWithContent`<br>`src/core/engine-sql/chunks.ts:listStaleChunks`<br>`src/core/engine-sql/chunks.ts:setPageEmbeddingSignature`<br>`src/core/engine-sql/code-edges.ts:getCallersOf`<br>`src/core/engine-sql/code-edges.ts:getEdgesByChunk`<br>`src/core/engine-sql/links.ts:addLink`<br>`src/core/engine-sql/links.ts:findOrphanPages`<br>… and 21 more (see the JSON) |
 
 ### `src/core/enrichment/budget.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `toNum` | moved | module-private | `src/core/ai/decide/store.ts:toNum` |
+
+### `src/core/enrichment/completeness.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `parseDate` | moved | module-private | `src/core/chronicle/publish.ts:safeDate` |
 
 ### `src/core/extract-timeline-from-meetings.ts`
 
@@ -727,14 +803,8 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runFactsBackstop` | extracted | `src/core/facts/backstop.ts:runFactsBackstop` | `src/commands/doctor/checks/knowledge-health.ts:runFactsExtraction`<br>`src/core/minions/handlers/facts-absorb.ts:makeFactsAbsorbHandler` |
+| `runFactsBackstop` | extracted | `src/core/facts/backstop.ts:runFactsBackstop` | `src/commands/doctor/checks/knowledge-health.ts:runFactsExtraction` |
 | `runPipelineBodyInner` | extracted | `src/core/facts/backstop.ts:runPipelineBodyInner` | `src/core/facts/subject-infer-write.ts:writesDatabaseOnly`<br>`src/core/persistence/facts-maintenance.ts:collectManagedFacts` |
-
-### `src/core/facts/fence-write.ts`
-
-| Old symbol | Kind | Still importable from | New location(s) |
-|---|---|---|---|
-| `writeFactsToFence` | extracted | `src/core/facts/fence-write.ts:writeFactsToFence` | `src/core/facts/proposal-supersede.ts:PairFact` |
 
 ### `src/core/facts/withdrawal.ts`
 
@@ -746,7 +816,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `writeSingleFact` | extracted | `src/core/facts/write-single.ts:writeSingleFact` | `src/core/facts/single-prepare.ts:assertFactNotWithdrawn`<br>`src/core/facts/subject-infer-write.ts:linkAllowed`<br>`src/core/persistence/memory-mutations.ts:submitRememberMutation` |
+| `writeSingleFact` | extracted | `src/core/facts/write-single.ts:writeSingleFact` | `src/core/facts/single-prepare.ts:assertFactNotWithdrawn`<br>`src/core/facts/subject-infer-write.ts:linkAllowed` |
 
 ### `src/core/github-source.ts`
 
@@ -772,11 +842,17 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `runExtractAndEmbed` | extracted | `src/core/google/google-source.ts:runExtractAndEmbed` | `src/core/minions/handlers/sync.ts:makeSyncHandler` |
 | `runGoogleSync` | split | `src/core/google/google-source.ts:runGoogleSync` | `src/core/github-source.ts:runGitHubSyncInner`<br>`src/core/google/google-source.ts:runGoogleSyncInner` |
 
-### `src/core/google/loops-extract.ts`
+### `src/core/google/loop-detect.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runLoopsExtract` | extracted | `src/core/google/loops-extract.ts:runLoopsExtract` | `src/core/persistence/memory-mutations.ts:submitRememberMutation` |
+| `applyThreadLoopVerdict` | extracted | `src/core/google/loop-detect.ts:applyThreadLoopVerdict` | `src/core/google/loop-detect.ts:upsertThreadLoop` |
+
+### `src/core/grants/cli.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `parseRescopeGrantArgs` | split | `src/core/grants/cli.ts:parseRescopeGrantArgs` | `src/core/grants/cli.ts:parseClientRescopeArgs`<br>`src/core/grants/cli.ts:parseRescopeGrantFlags` |
 
 ### `src/core/harness/install.ts`
 
@@ -793,7 +869,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `ImportResult` | extracted | `src/core/import-file.ts:ImportResult` | `src/commands/sync/sync-run.ts:noteTypeWarning` |
 | `extractFencedChunks` | moved | module-private | `src/core/markdown-chunks.ts:extractFencedChunks` |
 | `fenceTagToPseudoPath` | moved | module-private | `src/core/markdown-chunks.ts:fenceTagToPseudoPath` |
-| `importCodeFile` | extracted | `src/core/import-file.ts:importCodeFile` | `src/core/code-chunks.ts:prepareCodeChunks` |
+| `importCodeFile` | extracted | `src/core/import-file.ts:importCodeFile` | `src/core/code-chunks.ts:prepareCodeChunks`<br>`src/core/minions/handlers/loops-extract.ts:makeLoopsExtractHandler` |
 | `importFromContent` | extracted | `src/core/import-file.ts:importFromContent` | `src/core/import-contextual-mode.ts:resolveImportContextualMode`<br>`src/core/import-identity.ts:decideImportIdentity`<br>`src/core/markdown-chunks.ts:prepareMarkdownChunks`<br>`src/core/persistence/import-mutations.ts:importManagedFile` |
 | `importFromFile` | extracted | `src/core/import-file.ts:importFromFile` | `src/core/persistence/import-mutations.ts:importManagedFile` |
 | `withImportTransaction` | moved | `src/core/import-file.ts:withImportTransaction` | `src/core/import-file.ts:applyImportTransaction` |
@@ -803,6 +879,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `extractPageLinks` | extracted | `src/core/link-extraction.ts:extractPageLinks` | `src/core/attendance-repair.ts:prepareOrigin` |
+
+### `src/core/mcp-registration.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `shellQuote` | moved | `src/core/mcp-registration.ts:shellQuote` | `src/core/shell-quote.ts:shellQuote` |
 
 ### `src/core/migrate.ts`
 
@@ -831,12 +913,6 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `runDbProbe` | moved | `src/core/minions/db-probe.ts:runDbProbe` | `src/core/minions/db-probe.ts:probeLanes` |
-
-### `src/core/minions/handlers/embed-backfill.ts`
-
-| Old symbol | Kind | Still importable from | New location(s) |
-|---|---|---|---|
-| `makeEmbedBackfillHandler` | extracted | `src/core/minions/handlers/embed-backfill.ts:makeEmbedBackfillHandler` | `src/core/embedding-migration-budget.ts:authorizeMigrationBudget` |
 
 ### `src/core/minions/queue.ts`
 
@@ -868,6 +944,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
 | `enforceSubagentCapable` | moved | `src/core/model-config.ts:enforceSubagentCapable` | `src/core/model-config.ts:subagentGate` |
+
+### `src/core/ops/chronicle.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `chronicle_backfill` | moved | `src/core/ops/chronicle.ts:chronicle_backfill` | `src/core/google/loop-catchup.ts:pageRevision` |
 
 ### `src/core/ops/insights.ts`
 
@@ -961,7 +1043,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PGLiteEngine.getEmbeddingsByChunkIds` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getEmbeddingsByChunkIds` | `src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds` |
 | `PGLiteEngine.getFactsHealth` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getFactsHealth` | `src/core/engine-sql/facts.ts:getFactsHealth` |
 | `PGLiteEngine.getFile` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getFile` | `src/core/engine-sql/files.ts:getFile` |
-| `PGLiteEngine.getHealth` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.getHealth` | `src/commands/doctor/checks/graph-health.ts:runGraphCoverage`<br>`src/core/engine-sql/links.ts:listLinkSources` |
+| `PGLiteEngine.getHealth` | split | `src/core/pglite-engine.ts:PGLiteEngine.getHealth` | `src/commands/doctor/checks/graph-health.ts:runGraphCoverage`<br>`src/core/engine-sql/health.ts:getHealth`<br>`src/core/engine-sql/links.ts:listLinkSources` |
 | `PGLiteEngine.getLastSeen` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getLastSeen` | `src/core/engine-sql/timeline.ts:getLastSeen` |
 | `PGLiteEngine.getLinks` | split | `src/core/pglite-engine.ts:PGLiteEngine.getLinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PGLiteEngine.getOnThisDay` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getOnThisDay` | `src/core/engine-sql/timeline.ts:getOnThisDay` |
@@ -1011,12 +1093,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PGLiteEngine.resolveTake` | moved | `src/core/pglite-engine.ts:PGLiteEngine.resolveTake` | `src/core/engine-sql/takes.ts:resolveTake` |
 | `PGLiteEngine.restorePage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.restorePage` | `src/core/engine-sql/pages.ts:restorePage` |
 | `PGLiteEngine.revertToVersion` | moved | `src/core/pglite-engine.ts:PGLiteEngine.revertToVersion` | `src/core/engine-sql/pages.ts:revertToVersion` |
-| `PGLiteEngine.searchKeyword` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchKeyword` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
-| `PGLiteEngine.searchKeywordChunks` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchKeywordChunks` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PGLiteEngine.searchKeyword` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchKeyword` | `src/core/engine-sql/titles.ts:searchTitles`<br>`src/core/search/title-statement.ts:buildSearchTitlesStatement` |
+| `PGLiteEngine.searchKeywordChunks` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchKeywordChunks` | `src/core/search/title-statement.ts:buildSearchTitlesStatement` |
 | `PGLiteEngine.searchTakes` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchTakes` | `src/core/engine-sql/takes.ts:searchTakes` |
 | `PGLiteEngine.searchTakesVector` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchTakesVector` | `src/core/engine-sql/takes.ts:searchTakesVector` |
-| `PGLiteEngine.searchTitles` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchTitles` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
-| `PGLiteEngine.searchVector` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchVector` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PGLiteEngine.searchTitles` | split | `src/core/pglite-engine.ts:PGLiteEngine.searchTitles` | `src/core/engine-sql/titles.ts:searchTitles`<br>`src/core/search/title-statement.ts:buildSearchTitlesStatement` |
+| `PGLiteEngine.searchVector` | extracted | `src/core/pglite-engine.ts:PGLiteEngine.searchVector` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
 | `PGLiteEngine.setEmotionalWeightBatch` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setEmotionalWeightBatch` | `src/core/engine-sql/salience.ts:setEmotionalWeightBatch` |
 | `PGLiteEngine.setPageAliases` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setPageAliases` | `src/core/engine-sql/pages.ts:setPageAliases` |
 | `PGLiteEngine.setPageEmbeddingSignature` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setPageEmbeddingSignature` | `src/core/engine-sql/chunks.ts:setPageEmbeddingSignature` |
@@ -1071,6 +1153,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `listFactsSince` | moved | **old module removed** | `src/core/engine-sql/facts.ts:listFactsSince` |
 | `listSupersessions` | moved | **old module removed** | `src/core/engine-sql/facts.ts:listSupersessions` |
 | `rowToFact` | moved | module-private | `src/core/engine-sql/facts.ts:rowToFact` |
+| `toDate` | moved | module-private | `src/core/chronicle/eligibility.ts:toDate` |
 | `toPgVectorLiteral` | moved | module-private | `src/core/engine-sql/facts.ts:toPgVectorLiteral` |
 
 ### `src/core/pglite-engine/salience.ts`
@@ -1166,7 +1249,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PostgresEngine.getEmbeddingsByChunkIds` | moved | `src/core/postgres-engine.ts:PostgresEngine.getEmbeddingsByChunkIds` | `src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds` |
 | `PostgresEngine.getFactsHealth` | moved | `src/core/postgres-engine.ts:PostgresEngine.getFactsHealth` | `src/core/engine-sql/facts.ts:getFactsHealth` |
 | `PostgresEngine.getFile` | moved | `src/core/postgres-engine.ts:PostgresEngine.getFile` | `src/core/engine-sql/files.ts:getFile` |
-| `PostgresEngine.getHealth` | extracted | `src/core/postgres-engine.ts:PostgresEngine.getHealth` | `src/core/engine-sql/links.ts:listLinkSources` |
+| `PostgresEngine.getHealth` | split | `src/core/postgres-engine.ts:PostgresEngine.getHealth` | `src/core/engine-sql/health.ts:getHealth`<br>`src/core/engine-sql/links.ts:listLinkSources` |
 | `PostgresEngine.getLastSeen` | moved | `src/core/postgres-engine.ts:PostgresEngine.getLastSeen` | `src/core/engine-sql/timeline.ts:getLastSeen` |
 | `PostgresEngine.getLinks` | split | `src/core/postgres-engine.ts:PostgresEngine.getLinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PostgresEngine.getOnThisDay` | moved | `src/core/postgres-engine.ts:PostgresEngine.getOnThisDay` | `src/core/engine-sql/timeline.ts:getOnThisDay` |
@@ -1215,11 +1298,11 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `PostgresEngine.resolveTake` | moved | `src/core/postgres-engine.ts:PostgresEngine.resolveTake` | `src/core/engine-sql/takes.ts:resolveTake` |
 | `PostgresEngine.restorePage` | moved | `src/core/postgres-engine.ts:PostgresEngine.restorePage` | `src/core/engine-sql/pages.ts:restorePage` |
 | `PostgresEngine.revertToVersion` | moved | `src/core/postgres-engine.ts:PostgresEngine.revertToVersion` | `src/core/engine-sql/pages.ts:revertToVersion` |
-| `PostgresEngine.searchKeyword` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchKeyword` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
-| `PostgresEngine.searchKeywordChunks` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchKeywordChunks` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PostgresEngine.searchKeyword` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchKeyword` | `src/core/engine-sql/titles.ts:searchTitles`<br>`src/core/search/title-statement.ts:buildSearchTitlesStatement` |
+| `PostgresEngine.searchKeywordChunks` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchKeywordChunks` | `src/core/search/title-statement.ts:buildSearchTitlesStatement` |
 | `PostgresEngine.searchTakes` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchTakes` | `src/core/engine-sql/takes.ts:searchTakes` |
 | `PostgresEngine.searchTakesVector` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchTakesVector` | `src/core/engine-sql/takes.ts:searchTakesVector` |
-| `PostgresEngine.searchTitles` | extracted | `src/core/postgres-engine.ts:PostgresEngine.searchTitles` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
+| `PostgresEngine.searchTitles` | split | `src/core/postgres-engine.ts:PostgresEngine.searchTitles` | `src/core/engine-sql/titles.ts:searchTitles`<br>`src/core/search/title-statement.ts:buildSearchTitlesStatement` |
 | `PostgresEngine.searchVector` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchVector` | `src/core/search/vector-statement.ts:buildVectorSearchStatement` |
 | `PostgresEngine.setEmotionalWeightBatch` | moved | `src/core/postgres-engine.ts:PostgresEngine.setEmotionalWeightBatch` | `src/core/engine-sql/salience.ts:setEmotionalWeightBatch` |
 | `PostgresEngine.setPageAliases` | moved | `src/core/postgres-engine.ts:PostgresEngine.setPageAliases` | `src/core/engine-sql/pages.ts:setPageAliases` |
@@ -1333,7 +1416,7 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `loadRecommendationContext` | extracted | `src/core/remediation/context.ts:loadRecommendationContext` | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan`<br>`src/core/embed-facts.ts:embedStaleFacts`<br>`src/core/embed-stale-images.ts:embedStaleImages` |
+| `loadRecommendationContext` | extracted | `src/core/remediation/context.ts:loadRecommendationContext` | `src/core/embed-facts.ts:embedStaleFacts`<br>`src/core/embed-stale-images.ts:embedStaleImages` |
 
 ### `src/core/remediation/run.ts`
 
@@ -1341,11 +1424,11 @@ module path when it keeps exporting the name; "module-private" means the old mod
 |---|---|---|---|
 | `runRemediation` | extracted | `src/core/remediation/run.ts:runRemediation` | `src/core/facts/relink.ts:runModelTier` |
 
-### `src/core/schema-pack/unify-types-handler.ts`
+### `src/core/schema-pack/stats.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runUnifyTypes` | extracted | `src/core/schema-pack/unify-types-handler.ts:runUnifyTypes` | `src/commands/autopilot-dispatch.ts:computeAutopilotPlan` |
+| `aggregateRows` | extracted | `src/core/schema-pack/stats.ts:aggregateRows` | `src/core/repair/captured-facts.ts:classifyCapturedFacts` |
 
 ### `src/core/search/exact-lookup.ts`
 
@@ -1373,6 +1456,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 | `rrfFusionWeighted` | extracted | `src/core/search/hybrid.ts:rrfFusionWeighted` | `src/core/search/rrf-page-fusion.ts:accumulateRrf` |
 | `rrfKey` | moved | module-private | `src/core/search/rrf-page-fusion.ts:rrfKey` |
 | `stampBudgetStage` | moved | module-private | `src/core/search/hybrid/degraded.ts:stampBudgetStage` |
+
+### `src/core/search/read-enrichment.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `readAliases` | extracted | `src/core/search/read-enrichment.ts:readAliases` | `src/core/search/evidence-delivery.ts:resolveFrozenHits` |
 
 ### `src/core/skill-catalog.ts`
 
@@ -1418,6 +1507,12 @@ module path when it keeps exporting the name; "module-private" means the old mod
 |---|---|---|---|
 | `buildSingleSyncJsonEnvelope` | extracted | `src/core/sync-embed-backfill.ts:buildSingleSyncJsonEnvelope` | `src/core/repair/google-file-modes.ts:googleFileModesRepair` |
 
+### `src/core/sync-reconcile.ts`
+
+| Old symbol | Kind | Still importable from | New location(s) |
+|---|---|---|---|
+| `resolveSyncHardDeadline` | extracted | `src/core/sync-reconcile.ts:resolveSyncHardDeadline` | `src/commands/sync/args.ts:parseSyncFanoutFlags` |
+
 ### `src/core/sync-status-report.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
@@ -1434,13 +1529,14 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `runThink` | extracted | `src/core/think/index.ts:runThink` | `src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi`<br>`src/core/persistence/memory-mutations.ts:submitRememberMutation`<br>`src/core/think/decide.ts:thinkAbstainResult` |
+| `persistSynthesis` | extracted | `src/core/think/index.ts:persistSynthesis` | `src/core/repair/captured-facts.ts:strikeFencedRows` |
+| `runThink` | extracted | `src/core/think/index.ts:runThink` | `src/commands/serve-http-admin-api.ts:mountAdminCalibrationApi`<br>`src/core/think/decide.ts:thinkAbstainResult` |
 
-### `src/core/timeline-extract.ts`
+### `src/core/token-mint.ts`
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
-| `extractTimelineFromContent` | extracted | `src/core/timeline-extract.ts:extractTimelineFromContent` | `src/core/persistence/links-maintenance.ts:extractManagedStaleLinks` |
+| `mintLegacyToken` | extracted | `src/core/token-mint.ts:mintLegacyToken` | `src/core/token-mint.ts:insertUnifiedToken` |
 
 ### `src/core/types.ts`
 
@@ -1486,6 +1582,7 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 
 - `src/cli.ts:_clearIdentityCacheForTest`
 - `src/commands/autopilot.ts:systemdUnitPath`
+- `src/commands/doctor/checks/graph-embedding.ts:checkZeEmbeddingHealth`
 - `src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringArgs`
 - `src/commands/eval-schema-authoring.ts:EvalSchemaAuthoringResult`
 - `src/commands/eval-schema-authoring.ts:EvalVerdict`
@@ -1499,10 +1596,6 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/commands/hook.ts:firstString`
 - `src/commands/hook.ts:lastSessionLine`
 - `src/commands/migrations/v0_11_0.ts:gbrainDir`
-- `src/commands/migrations/v0_12_0.ts:__testing`
-- `src/commands/migrations/v0_12_2.ts:__testing`
-- `src/commands/migrations/v0_13_0.ts:__testing`
-- `src/commands/migrations/v0_21_0.ts:__testing`
 - `src/commands/migrations/v0_22_4.ts:gbrainDir`
 - `src/commands/migrations/v0_46_3.ts:MIGRATION_VERSION`
 - `src/commands/migrations/v0_46_3.ts:PLAYBOOK_SKILL`
@@ -1597,6 +1690,8 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/calibration/take-forecast.ts:computeForecast`
 - `src/core/calibration/take-forecast.ts:forecastForTake`
 - `src/core/calibration/take-forecast.ts:resolveDomainPrefix`
+- `src/core/chronicle/backstop.ts:ChronicleBackstopResult`
+- `src/core/chronicle/backstop.ts:runChronicleBackstop`
 - `src/core/code-graph-readiness.ts:effectiveSourceId`
 - `src/core/code-graph-readiness.ts:pendingEdgeChunksExist`
 - `src/core/code-graph-readiness.ts:symbolChunksExist`
@@ -1688,7 +1783,6 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/enrichment/completeness.ts:hasTitle`
 - `src/core/enrichment/completeness.ts:mediaRubric`
 - `src/core/enrichment/completeness.ts:nonRedundancy`
-- `src/core/enrichment/completeness.ts:parseDate`
 - `src/core/enrichment/completeness.ts:personRubric`
 - `src/core/enrichment/completeness.ts:projectRubric`
 - `src/core/enrichment/completeness.ts:recencyScore`
@@ -1708,6 +1802,7 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/eval-contradictions/calibration-join.ts:computeDomainHint`
 - `src/core/eval-contradictions/calibration-join.ts:tagFindingWithCalibration`
 - `src/core/extract/rollup-writer.ts:_resetRollupErrorLogForTests`
+- `src/core/facts/backstop.ts:DEDUP_THRESHOLD`
 - `src/core/fail-improve.ts:FailImproveLoop.analyzeFailures`
 - `src/core/fail-improve.ts:FailImproveLoop.constructor`
 - `src/core/fail-improve.ts:FailImproveLoop.ensureDir`
@@ -1791,7 +1886,6 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/pglite-engine/code-edges.ts:PGLITE_EDGE_BATCH_MAX_BIND_PARAMS`
 - `src/core/pglite-engine/facts.ts:PgliteFactsDeps`
 - `src/core/pglite-engine/facts.ts:_listFacts`
-- `src/core/pglite-engine/facts.ts:toDate`
 - `src/core/pglite-engine/salience.ts:PgliteSalienceDeps`
 - `src/core/pglite-engine/takes.ts:PgliteTakesDeps`
 - `src/core/pglite-lock.ts:LOCK_DIR_NAME`
