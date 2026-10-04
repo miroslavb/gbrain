@@ -200,14 +200,18 @@ describe('budget (C2/E4)', () => {
     expect(Number((await rows(engine))[0].cost_usd)).toBeGreaterThan(0.25);
   }), 120_000);
 
-  test('default cap + unpriced model: warns and runs, spend marked unpriced', () => brain(async ({ engine, ctx }) => {
+  test('host default cap refuses an unpriced model before any judge call', () => brain(async ({ engine, ctx }) => {
     configureGateway({ chat_model: 'openai:gpt-unpriced-example', env: { OPENAI_API_KEY: 'sk-test' } });
-    __setChatTransportForTests(async () => chatReply(JSON.stringify([ev('Alice agreed to ship the beta')]), 'openai:gpt-unpriced-example'));
+    let calls = 0;
+    __setChatTransportForTests(async () => { calls++; return chatReply('[]', 'openai:gpt-unpriced-example'); });
     await put(ctx, 'meetings/m1', meeting('M1'));
     await settle(engine);
     const r = await runPhaseChronicle(engine);
-    expect(r.details).toMatchObject({ judged: 1, extracted: 1, unpriced_calls: 1 });
-    expect((await rows(engine))[0]).toMatchObject({ state: 'extracted', unpriced: true });
+    expect(calls).toBe(0);
+    expect(r.status).toBe('warn');
+    expect(r.details).toMatchObject({ reason: 'no_pricing', events_written: 0, unpriced_calls: 0 });
+    expect((await rows(engine))[0]).toMatchObject({ state: 'pending', attempts: 0 });
+    expect(await events(engine)).toEqual([]);
   }), 120_000);
 
   test('explicit cap + unpriced model: refuses with the no_pricing register command, zero calls', () => brain(async ({ engine, ctx }) => {

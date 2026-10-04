@@ -731,3 +731,7 @@ scoped curated-health counters and aggregate maintenance progress. Tests pending
 
 Chronicle backfill preserves global hot-first keyset selection by updated_at/id,
 with max_total<=0/nonfinite admitting zero. New real-PGlite tests cover those bounds.
+
+Integration1: typecheck PASS;337targeted tests334PASS/3FAIL. Failures retained in
+external receipts. Adapted obsolete Chronicle queue-result tests to the ledger
+and strengthened default-unpriced test to assert zero judge calls/publications.

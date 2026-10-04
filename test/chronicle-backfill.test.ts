@@ -35,7 +35,7 @@ beforeAll(async () => {
 afterAll(async () => { await engine.disconnect(); });
 beforeEach(async () => {
   await engine.executeRaw('DELETE FROM chronicle_page_state');
-  await engine.executeRaw(`DELETE FROM pages WHERE slug LIKE 'meetings/%' OR slug LIKE 'conversations/%' OR slug LIKE 'life/%'`);
+  await engine.executeRaw(`DELETE FROM pages WHERE slug LIKE 'meetings/%' OR slug LIKE 'conversations/%' OR slug LIKE 'life/%' OR slug LIKE 'calendar/%'`);
 });
 
 describe('chronicle_backfill op', () => {
@@ -159,28 +159,14 @@ describe('#5876 discovery and filters (D6/E10)', () => {
       frontmatter: { message_count: 1 },
     });
 
-    const preview = await operationsByName.chronicle_backfill.handler(mkCtx(), { dry_run: true }) as {
-      scanned: number; eligible: number; enqueued: number;
-    };
-    expect(preview.scanned).toBe(7);
-    expect(preview.eligible).toBe(5);
-    expect(preview.enqueued).toBe(0);
-
-    const applied = await operationsByName.chronicle_backfill.handler(mkCtx(), {}) as {
-      eligible: number; enqueued: number; errors: unknown[];
-    };
-    expect(applied.eligible).toBe(5);
-    expect(applied.enqueued).toBe(5);
-    expect(applied.errors).toHaveLength(0);
-    const jobs = await engine.executeRaw<{ data: { slug: string } }>(
-      `SELECT data FROM minion_jobs WHERE name='chronicle_extract' ORDER BY data->>'slug'`,
-    );
-    expect(jobs.map((j) => j.data.slug)).toEqual([
-      'calendar/tiny',
-      'conversations/legacy',
-      'conversations/rescue-threshold',
-      'conversations/threshold',
-      'meetings/tiny',
+    const preview = await run({ dry_run: true });
+    expect(preview).toMatchObject({ eligible: 5, queued: 5, dry_run: true });
+    expect(await queued()).toEqual([]);
+    const applied = await run({ yes: true });
+    expect(applied).toMatchObject({ eligible: 5, queued: 5, dry_run: false });
+    expect(await queued()).toEqual([
+      'default:calendar/tiny', 'default:conversations/legacy',
+      'default:conversations/rescue-threshold', 'default:conversations/threshold', 'default:meetings/tiny',
     ]);
   });
 
@@ -199,23 +185,12 @@ describe('#5876 discovery and filters (D6/E10)', () => {
     await engine.executeRaw(`UPDATE pages SET updated_at = '2026-01-02T00:00:00Z' WHERE slug = 'calendar/middle'`);
     await engine.executeRaw(`UPDATE pages SET updated_at = '2026-01-03T00:00:00Z' WHERE slug = 'conversations/new'`);
 
-    const preview = await operationsByName.chronicle_backfill.handler(mkCtx(), {
-      dry_run: true, limit: 1, max_total: 2,
-    }) as { scanned: number; eligible: number; enqueued: number; limit_reached: boolean };
-    expect(preview).toMatchObject({ scanned: 2, eligible: 2, enqueued: 0, limit_reached: true });
-
-    const applied = await operationsByName.chronicle_backfill.handler(mkCtx(), {
-      limit: 1, max_total: 2,
-    }) as { scanned: number; eligible: number; enqueued: number; limit_reached: boolean; errors: unknown[] };
-    expect(applied).toMatchObject({ scanned: 2, eligible: 2, enqueued: 2, limit_reached: true });
-    expect(applied.errors).toHaveLength(0);
-    const jobs = await engine.executeRaw<{ data: { slug: string } }>(
-      `SELECT data FROM minion_jobs WHERE name='chronicle_extract'`,
-    );
-    expect(jobs.map((j) => j.data.slug).sort()).toEqual([
-      'calendar/middle',
-      'conversations/new',
-    ]);
+    const preview = await run({ dry_run: true, max_total: 2 });
+    expect(preview).toMatchObject({ eligible: 3, queued: 2, dry_run: true, limit_reached: true });
+    expect(await queued()).toEqual([]);
+    const applied = await run({ yes: true, max_total: 2 });
+    expect(applied).toMatchObject({ eligible: 3, queued: 2, dry_run: false, limit_reached: true });
+    expect(await queued()).toEqual(['default:calendar/middle', 'default:conversations/new']);
   });
 });
 
