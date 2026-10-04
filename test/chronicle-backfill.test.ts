@@ -218,3 +218,24 @@ describe('#5876 discovery and filters (D6/E10)', () => {
     ]);
   });
 });
+
+
+describe('host bounded hot-first Chronicle admission', () => {
+  test('shared metadata threshold and zero/invalid caps fail closed', async () => {
+    await engine.putPage('conversations/short', { type: 'conversation', title: 'short', compiled_truth: LONG, frontmatter: { message_count: 99 } });
+    await engine.putPage('conversations/long', { type: 'conversation', title: 'long', compiled_truth: LONG, frontmatter: { message_count: 100 } });
+    expect((await run({ dry_run: true })).skipped.short_conversation).toBe(1);
+    for (const max_total of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect((await run({ max_total, yes: true })).queued).toBe(0);
+      expect(await queued()).toEqual([]);
+    }
+  });
+
+  test('max_total chooses newest content globally rather than first page ID', async () => {
+    await engine.putPage('meetings/older', { type: 'meeting', title: 'older', compiled_truth: LONG });
+    await engine.putPage('conversations/newer', { type: 'conversation', title: 'newer', compiled_truth: LONG, frontmatter: { message_count: 100 } });
+    await engine.executeRaw("UPDATE pages SET updated_at=now()-interval '2 days' WHERE slug='meetings/older'");
+    expect((await run({ yes: true, max_total: 1 })).queued).toBe(1);
+    expect(await queued()).toEqual(['default:conversations/newer']);
+  });
+});

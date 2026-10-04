@@ -728,3 +728,6 @@ new upstream workers, hot-fact collapse and restore-path helpers. No live CLI pr
 2026-10-04 v45 merge: append migrations198..207, preserve world-only/source grants,
 100-message Chronicle eligibility, fail-closed prices, atom semantic validator,
 scoped curated-health counters and aggregate maintenance progress. Tests pending.
+
+Chronicle backfill preserves global hot-first keyset selection by updated_at/id,
+with max_total<=0/nonfinite admitting zero. New real-PGlite tests cover those bounds.

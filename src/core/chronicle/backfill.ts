@@ -94,22 +94,25 @@ export async function runChronicleBackfill(engine: BrainEngine, opts: ChronicleB
   let estimate = 0;
   let unpriced = false;
   let lastId = 0;
+  let lastUpdated: string | null = null;
   for (;;) {
-    params.push(lastId);
+    params.push(lastUpdated, lastId);
     const cursor = params.length;
     const pages = await engine.executeRaw<{
       id: number; source_id: string; slug: string; type: string; compiled_truth: string | null; frontmatter: Record<string, unknown> | null;
-      effective_date: Date | string | null; effective_date_source: string | null; content_hash: string | null; done: boolean;
+      updated_cursor: string; effective_date: Date | string | null; effective_date_source: string | null; content_hash: string | null; done: boolean;
     }>(
-      `SELECT p.id, p.source_id, p.slug, p.type, p.compiled_truth, p.frontmatter, p.effective_date, p.effective_date_source, p.content_hash,
+      `SELECT p.updated_at::text AS updated_cursor, p.id, p.source_id, p.slug, p.type, p.compiled_truth, p.frontmatter, p.effective_date, p.effective_date_source, p.content_hash,
               EXISTS (SELECT 1 FROM chronicle_page_state c WHERE c.page_id=p.id AND c.content_hash=p.content_hash
                 AND c.extractor_version=$3 AND (c.state='extracted' OR (c.state IN ('pending','failed') AND c.trigger='backfill' AND c.attempts < ${CHRONICLE_DEFAULTS.maxAttempts}))) AS done
          FROM pages p
-        WHERE p.deleted_at IS NULL AND (p.type = ANY($1::text[]) OR p.slug LIKE ANY($2::text[]))${scope} AND p.id > $${cursor}
-        ORDER BY p.id LIMIT ${PAGE_BATCH}`, params);
-    params.pop();
+        WHERE p.deleted_at IS NULL AND (p.type = ANY($1::text[]) OR p.slug LIKE ANY($2::text[]))${scope}
+          AND ($${cursor - 1}::timestamptz IS NULL OR (p.updated_at,p.id) < ($${cursor - 1}::timestamptz,$${cursor}))
+        ORDER BY p.updated_at DESC,p.id DESC LIMIT ${PAGE_BATCH}`, params);
+    params.splice(-2);
     if (pages.length === 0) break;
     lastId = Number(pages[pages.length - 1].id);
+    lastUpdated = pages[pages.length - 1].updated_cursor;
     for (const page of pages) {
       result.scanned++;
       const eligible = isChronicleEligible({
@@ -140,7 +143,7 @@ export async function runChronicleBackfill(engine: BrainEngine, opts: ChronicleB
   const flags = [opts.since ? `--since ${quote(opts.since)}` : '', opts.datedSince ? `--dated-since ${quote(opts.datedSince)}` : '',
     opts.recent ? '--recent' : '', `--limit ${limit}`].filter(Boolean).join(' ');
   const cost = result.estimated_usd === 'unpriced'
-    ? 'The chat model has no registered price, so the cost is unknown and no per-page cap applies'
+    ? 'The chat model has no registered price, so extraction is blocked until its price is registered'
     : `Estimated cost ~$${result.estimated_usd.toFixed(2)} (each page capped at $${settings.jobBudgetUsd.toFixed(2)})`;
   if (dryRun || !opts.yes) {
     result.next_command = result.queued > 0 ? `gbrain chronicle-backfill ${flags} --yes` : '';
