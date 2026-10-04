@@ -137,12 +137,12 @@ Every non-localOnly operation on the MCP surface: 136 tools across 23 areas. **S
 
 | Tool | Description | Scope | Starter | Gate |
 |---|---|---|---|---|
-| `context_pack` | MEMORY VERB (v1): budget-packed session-boundary bundle for a set of standing entities — entity cards + open threads + hot facts, zero-LLM, sub-second. | read | yes |  |
-| `delta` | MEMORY VERB (v1): "what changed since T" for heartbeats — pages updated after `since` + hot facts newer than `since` + open-thread events after `since`, zero-LLM. | read | yes |  |
-| `entity` | MEMORY VERB (v1): inspect ONE known person/company/project card — zero LLM calls, sub-100ms. | read | yes |  |
+| `context_pack` | Bundle entity cards, facts and threads at session start or compaction, zero LLM. | read | yes |  |
+| `delta` | Changes since time/session_id, zero LLM. | read | yes |  |
+| `entity` | Inspect one known card by name or slug, zero LLM. | read | yes |  |
 | `forget` | MEMORY VERB (v1): expire a remembered fact by its fact_id (never a page slug). | write | yes |  |
-| `recall` | MEMORY VERB (v1): retrieve saved facts/snippets — the protocol read verb. | read | yes |  |
-| `remember` | MEMORY VERB (v1): save one fact to durable agent memory — the protocol write verb. | write | yes |  |
+| `recall` | Read saved facts by entity, since or session. | read | yes |  |
+| `remember` | Save one fact with required provenance. | write | yes |  |
 | `synthesize` | [EXPENSIVE / SLOW: LLM calls, costs money] MEMORY VERB (v1): answer a broad question across pages with citations. | read | yes |  |
 
 ## ontology

@@ -12,7 +12,7 @@ follow it. The map below is generated from the AST (`scripts/generate-wave-1-mov
 [`wave-1-moves.json`](wave-1-moves.json). Where a contribution goes today is in
 [CONTRIBUTING.md, "Where does my change go?"](../../CONTRIBUTING.md#where-does-my-change-go).
 
-Base `92e06c6c2cc3`, head `30e23a433b42`.
+Base `92e06c6c2cc3`, head `28566be5847e`.
 
 ## Landing window
 
