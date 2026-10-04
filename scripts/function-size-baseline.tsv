@@ -10,12 +10,12 @@ src/commands/bootstrap.ts	runHooks	600	seed: W5 baseline, refactor wave 1 (decom
 src/commands/bootstrap.ts	runHooks>withLock(#1)	449	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/config.ts	runConfig	767	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); +2 #5232: persistence.write_wait_ms dispatch line (logic in setFileWriteWait)
 src/commands/doctor/bootstrap-checks.ts	bootstrapDoctorChecks	476	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/doctor/checks/extraction-sync.ts	checkSyncFreshness	333	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
+src/commands/doctor/checks/extraction-sync.ts	checkSyncFreshness	333	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261004 upstream integration size inventory; see fork-memory-contracts.md
 src/commands/doctor/report-remote.ts	doctorReportRemote	429	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261002 preserve audited local contracts during upstream split; decomposition tracked in docs/architecture/key-files/fork-memory-contracts.md
-src/commands/dream-retriage.ts	runDreamRetriage	524	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
+src/commands/dream-retriage.ts	runDreamRetriage	524	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261004 upstream integration size inventory; see fork-memory-contracts.md
 src/commands/embed.ts	embedAllStale	566	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); +9 #5804: a null projection snapshot is a counted failure (archived sources left to reportArchived) with one end-of-run batch summary; +4 wave 8 lane D1 #5527: subtract current-model chunks from the mixed-space warning; +2 Foundations 1 F4d: a time-budget stop with stale chunks left records reason, remaining count and resume command (src/core/embed-budget-stop.ts)
 src/commands/embed.ts	runEmbedCore	397	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261002 preserve audited local contracts during upstream split; decomposition tracked in docs/architecture/key-files/fork-memory-contracts.md
-src/commands/eval-longmemeval.ts	runEvalLongMemEval	740	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
+src/commands/eval-longmemeval.ts	runEvalLongMemEval	740	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261004 upstream integration size inventory; see fork-memory-contracts.md
 src/commands/extract-conversation-facts.ts	processPage	398	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261002 preserve audited local contracts during upstream split; decomposition tracked in docs/architecture/key-files/fork-memory-contracts.md
 src/commands/extract-conversation-facts.ts	runExtractConversationFactsCore	428	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); +1 #5757: managed flag threaded into ExtractCoreState; TODO: FORK-20261002 preserve audited local contracts during upstream split; decomposition tracked in docs/architecture/key-files/fork-memory-contracts.md
 src/commands/extract.ts	runExtract	413	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261002 preserve audited local contracts during upstream split; decomposition tracked in docs/architecture/key-files/fork-memory-contracts.md
@@ -26,7 +26,7 @@ src/commands/migrate-engine.ts	runMigrateEngine	405	seed: W5 baseline, refactor 
 src/commands/serve.ts	installStdioLifecycle	315	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/sources.ts	runAdd	365	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); +3 fix wave 4 #5673: connector sources print that autopilot keeps them synced after the first sync
 src/core/ai/gateway.ts	chatOnce	311	TODO: FORK-20261002 preserve audited local contracts during upstream split; decomposition tracked in docs/architecture/key-files/fork-memory-contracts.md
-src/core/bootstrap/harness.ts	applyHarness	1167	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
+src/core/bootstrap/harness.ts	applyHarness	1167	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261004 upstream integration size inventory; see fork-memory-contracts.md
 src/core/brainstorm/orchestrator.ts	_runBrainstormInner	413	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); +1 #5890 close-set spreads INTERNAL_BREADTH_SEARCH_OPTS
 src/core/check-resolvable.ts	checkResolvable	419	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/config.ts	loadConfigWithEngine	362	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); +2 #5824: search.vector_legacy_guard DB-plane merge
@@ -53,7 +53,7 @@ src/core/minions/queue.ts	MinionQueue.add	470	seed: W5 baseline, refactor wave 1
 src/core/minions/queue.ts	MinionQueue.add>result=this.engine.transaction(#0)	331	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261002 preserve audited local contracts during upstream split; decomposition tracked in docs/architecture/key-files/fork-memory-contracts.md
 src/core/minions/worker.ts	MinionWorker.executeJob	303	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/minions/worker.ts	MinionWorker.start	470	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/core/ops/facts.ts	recall.handler	348	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
+src/core/ops/facts.ts	recall.handler	348	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261004 upstream integration size inventory; see fork-memory-contracts.md
 src/core/ops/search.ts	query.handler	336	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1); TODO: FORK-20261004 upstream integration size inventory; see fork-memory-contracts.md
 src/core/progressive-batch/orchestrator.ts	runProgressiveBatch	348	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/remediation/run.ts	runRemediation	428	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)

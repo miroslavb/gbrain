@@ -745,3 +745,6 @@ Structural golden refresh:30/30 PASS across7 targeted files. Only catalogs, CLI,
 doctor and migration metadata updated; retrieval quality gold and thresholds unchanged.
 Existing v174 fingerprint changes through shared upstream writer-guard SQL; migration
 source and ID are unchanged, with the late repair at207-chain migration205 retained.
+
+Verify2:66/67 PASS. Five inherited size rows still require the documented port
+exception relative to accepted b7, even though unchanged from the merge commit.
