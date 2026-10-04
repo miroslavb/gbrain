@@ -735,3 +735,13 @@ with max_total<=0/nonfinite admitting zero. New real-PGlite tests cover those bo
 Integration1: typecheck PASS;337targeted tests334PASS/3FAIL. Failures retained in
 external receipts. Adapted obsolete Chronicle queue-result tests to the ledger
 and strengthened default-unpriced test to assert zero judge calls/publications.
+
+Verify1:63/67PASS; failures were missing isolated admin packages, stale tool catalog,
+and exact function/module size inventories after port. Admin dependencies are
+installed frozen; catalog regenerated; reviewed FORK-20261004 inventory retains
+behavioral tests and lowers both engine ceilings after shared health extraction.
+
+Structural golden refresh:30/30 PASS across7 targeted files. Only catalogs, CLI,
+doctor and migration metadata updated; retrieval quality gold and thresholds unchanged.
+Existing v174 fingerprint changes through shared upstream writer-guard SQL; migration
+source and ID are unchanged, with the late repair at207-chain migration205 retained.

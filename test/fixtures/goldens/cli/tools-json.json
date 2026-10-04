@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 205918,
-    "stdoutSha256": "1bec2cca490b3fc545d637196f36b226f42b1c4bafa27564e936150f33af5047",
+    "stdoutBytes": 179606,
+    "stdoutSha256": "d0c955a1648985641151adfd47b3c6108fcf029e9002b97a5c75abe9b2657c89",
     "toolNames": [
       "remember",
       "entity",
@@ -163,7 +163,7 @@
     ],
     "tools": [
       {
-        "description": "MEMORY VERB (v1): save one fact to durable agent memory — the protocol write verb. provenance is REQUIRED (free text, e.g. \"conversation 2026-06-12\", \"user said in chat\", \"import: notes.md\"). Set `entity` whenever the fact is about a specific person/company/project — entity-scoped recall will not find it otherwise. ttl accepts duration shorthand (\"30d\", \"12h\") or an absolute ISO 8601 timestamp; ISO-8601 durations like \"P30D\" are rejected with a fix. visibility is always \"world\" (readable by every agent connected to this brain). Response: branch on `status` (inserted|duplicate|superseded), never on `status_text` (human rendering only). On duplicate, `id` is the EXISTING fact's id. For bulk extraction from a raw transcript use extract_facts instead.",
+        "description": "MEMORY VERB (v1): save one fact to durable agent memory — the protocol write verb. provenance is REQUIRED (free text, e.g. \"conversation 2026-06-12\", \"user said in chat\", \"import: notes.md\"). Set `entity` whenever the fact is about a specific person/company/project — entity-scoped recall will not find it otherwise. ttl accepts duration shorthand (\"30d\", \"12h\") or an absolute ISO 8601 timestamp; ISO-8601 durations like \"P30D\" are rejected with a fix. visibility is always \"world\" (readable by every agent connected to this brain). Response: branch on `status` (inserted|duplicate|superseded), never on `status_text` (human rendering only). write_pending carries a receipt: poll get_write_request. On duplicate, `id` is the EXISTING fact's id. For bulk extraction from a raw transcript use extract_facts instead.",
         "name": "remember",
         "parameters": {
           "entity": "string?",
@@ -971,7 +971,7 @@
               "type": "string"
             },
             "detail": {
-              "description": "low (compiled truth only), medium (default) or high (all chunks).",
+              "description": "Result detail level: low (compiled truth only), medium (default, all with dedup), high (all chunks)",
               "type": "string"
             },
             "embedding_column": {
@@ -1007,7 +1007,7 @@
               "type": "number"
             },
             "mode": {
-              "description": "Local callers only.",
+              "description": "Search mode (conservative|balanced|tokenmax). Local callers only; remote uses configured mode.",
               "type": "string"
             },
             "near_symbol": {
@@ -1076,7 +1076,7 @@
               "type": "string"
             },
             "token_budget": {
-              "description": "Token cap on the returned evidence.",
+              "description": "Token budget. Chunk mode, and whenever return_unit is omitted: caps the cumulative chunk payload (results that would overflow are skipped). Explicit non-chunk return_unit: the budget for delivered evidence (default search.return_budget_default = 6000, auto 24000; remote max search.return_budget_max_remote = 32000).",
               "type": "number"
             },
             "types": {
@@ -4092,14 +4092,16 @@
         }
       },
       {
-        "description": "Life Chronicle: sweep existing meeting/conversation/calendar pages into timeline events by enqueuing chronicle_extract jobs (one per eligible page). --dry-run counts without enqueuing. Local-only bulk op. CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--limit N] [--max-total N] [--dry-run]`.",
+        "description": "Life Chronicle: queue existing meeting/conversation/calendar pages (by type or under meetings/, conversations/, cal/, calendar/) for timeline-event extraction. One paid chat call per page, so it needs --yes; --dry-run reports the candidates, an estimated cost and skip reasons. The chronicle_page_state ledger skips content already extracted or queued, so repeats never pay twice. Queued pages run in the `chronicle` cycle phase (`gbrain dream --phase chronicle`), exempt from the daily limit. Local-only bulk op. CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--dated-since YYYY-MM-DD] [--recent] [--limit N] [--dry-run | --yes]`.",
         "name": "chronicle_backfill",
         "parameters": {
           "dated_since": "string?",
           "dry_run": "boolean?",
           "limit": "number?",
           "max_total": "number?",
-          "since": "string?"
+          "recent": "boolean?",
+          "since": "string?",
+          "yes": "boolean?"
         },
         "schema": {
           "properties": {
@@ -4116,8 +4118,12 @@
               "type": "number"
             },
             "max_total": {
-              "description": "Global max eligible pages to count/enqueue, newest first across all types.",
+              "description": "Compatibility hard cap across all sources and types; zero queues nothing.",
               "type": "number"
+            },
+            "recent": {
+              "description": "Only pages within chronicle.auto_recent_days (the automatic path's window).",
+              "type": "boolean"
             },
             "since": {
               "description": "Only pages UPDATED on/after this date (YYYY-MM-DD). Use --dated-since for the page's own date.",
@@ -4522,11 +4528,11 @@
         "schema": {
           "properties": {
             "budget_tokens": {
-              "description": "Token budget; cards pack first.",
+              "description": "Server-side token budget (char/4). Cards pack first, then facts; each item costs its rendered line and the envelope + section headers are reserved, so `text` fits the budget. Response adds budget_tokens, budget_used (tokens of `text`), dropped_count.",
               "type": "number"
             },
             "entities": {
-              "description": "Comma-separated names or slugs (max 8).",
+              "description": "Comma-separated entity names/slugs to bundle. Capped at 8.",
               "type": "string"
             },
             "include_private": {
@@ -4534,11 +4540,11 @@
               "type": "boolean"
             },
             "session_id": {
-              "description": "Opaque session id.",
+              "description": "Opaque session id; keys the hot-memory cache and (on the push path) the session cursor.",
               "type": "string"
             },
             "since": {
-              "description": "Only open-thread events after this ISO time.",
+              "description": "ISO 8601 datetime. When set, open-thread events are filtered to those after this cursor.",
               "type": "string"
             }
           },
@@ -4562,11 +4568,11 @@
         "schema": {
           "properties": {
             "budget_tokens": {
-              "description": "Token budget; pages pack first.",
+              "description": "Server-side token budget (char/4). Pages pack first, then facts; each item costs its rendered line and the envelope + section headers + every thread line are reserved, so `text` fits the budget. Threads are never dropped (budget_used can exceed the budget only when the header + threads alone do). Response adds budget_tokens, budget_used (tokens of `text`), dropped_count.",
               "type": "number"
             },
             "entities": {
-              "description": "Entity scope for thread events (max 8).",
+              "description": "Optional comma-separated entity scope for thread-event deltas. Capped at 8.",
               "type": "string"
             },
             "include_private": {
@@ -4574,15 +4580,15 @@
               "type": "boolean"
             },
             "session_id": {
-              "description": "Opaque session id; keeps a cursor.",
+              "description": "Opaque session id. Drives the per-session cursor: the first call establishes it, each call advances it to the newest DELIVERED change (at-least-once — with has_more:true the undelivered tail returns on the next wake). Without it, pass an explicit `since` for a stateless delta.",
               "type": "string"
             },
             "since": {
-              "description": "ISO 8601 cursor (or use session_id).",
+              "description": "ISO 8601 cursor. Returns pages/facts/thread-events newer than this timestamp. Optional when session_id carries an established cursor.",
               "type": "string"
             },
             "since_slug": {
-              "description": "next_cursor.slug from the previous response.",
+              "description": "Stateless keyset resume: pass back `next_cursor.slug` from the previous response (paired with `since`=next_cursor.since) to page through pages sharing one timestamp. Ignored when session_id is set (the session cursor carries it).",
               "type": "string"
             }
           },
@@ -5092,7 +5098,7 @@
         }
       },
       {
-        "description": "v0.40.6.0: list pages with no active-pack type match. Typeless pages return as {orphan_count, orphans: [{slug, source_id}]}. Pack-aware arm: pages whose STORED type is neither a declared page_type nor an alias in the active pack return as {undeclared_page_count, undeclared_types: [{type, count, sample_slugs}]} — the stored_type_undeclared lint semantics, previously invisible over MCP. Best-effort: when the active pack cannot load, the pack-aware arm degrades to empty with pack: null.",
+        "description": "v0.40.6.0: list pages with no active-pack type match. Returns {orphan_count, orphans: [{slug, source_id}]}.",
         "name": "schema_review_orphans",
         "parameters": {
           "limit": "number?"

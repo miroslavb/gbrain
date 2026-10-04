@@ -198,3 +198,10 @@ automatic Chronicle must be explicitly off in deployed config. Paid atom and
 Chronicle routes remain fail-closed when a price is unknown; atoms retain the
 semantic validator under the same attempt-wide cap. Global maintenance adopts
 upstream durable phase resume and retains aggregate job progress.
+
+TODO: FORK-20261004 carries forward the prior fork decomposition exception.
+The v45 port retains epoch/source guards in conversation backfill, facts/takes
+embedding paths, shared validator budgets, managed sync and scoped search.
+Exact combined function/module bounds are recorded in the staging size-inventory
+receipt; obsolete chat/upgrade/oauth baselines are removed and both engines'
+ceilings shrink after health extraction. Runtime behavior gates are unchanged.

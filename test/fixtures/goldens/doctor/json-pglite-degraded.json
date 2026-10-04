@@ -416,13 +416,13 @@
         },
         {
           "category": "meta",
-          "message": "Version 197 (latest: 197)",
+          "message": "Version 207 (latest: 207)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "825 column(s) verified against live schema",
+          "message": "868 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -1516,7 +1516,7 @@
         },
         {
           "category": "meta",
-          "message": "Active pack gbrain-base-v2@1.2.1+99de63c4 is current (no successor declared)",
+          "message": "Active pack gbrain-base-v2@1.2.1+700f7ac1 is current (no successor declared)",
           "name": "pack_upgrade_available",
           "status": "ok"
         },

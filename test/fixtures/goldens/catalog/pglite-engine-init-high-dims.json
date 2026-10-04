@@ -211,6 +211,8 @@
       "persistence_writer_protocols.persistence_writer_protocols_pkey": "p PRIMARY KEY (worktree_id, host_id)",
       "persistence_writer_protocols.persistence_writer_protocols_protocol_version_check": "c CHECK ((protocol_version = 2))",
       "persistence_writer_protocols.persistence_writer_protocols_worktree_id_fkey": "f FOREIGN KEY (worktree_id) REFERENCES persistence_worktrees(id)",
+      "planner_stats_deltas.planner_stats_deltas_pkey": "p PRIMARY KEY (id)",
+      "planner_stats_state.planner_stats_state_pkey": "p PRIMARY KEY (table_name)",
       "proposal_page_runs.proposal_page_runs_evidence_span_count_check": "c CHECK ((evidence_span_count >= 0))",
       "proposal_page_runs.proposal_page_runs_pkey": "p PRIMARY KEY (id)",
       "proposal_page_runs.proposal_page_runs_proposal_count_check": "c CHECK ((proposal_count >= 0))",
@@ -562,6 +564,12 @@
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "persistence_writer_protocols": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "planner_stats_deltas": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "planner_stats_state": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "proposal_page_runs": [
@@ -916,6 +924,8 @@
       "persistence_worktree_refreshes_pkey": "CREATE UNIQUE INDEX persistence_worktree_refreshes_pkey ON public.persistence_worktree_refreshes USING btree (id)",
       "persistence_worktrees_pkey": "CREATE UNIQUE INDEX persistence_worktrees_pkey ON public.persistence_worktrees USING btree (id)",
       "persistence_writer_protocols_pkey": "CREATE UNIQUE INDEX persistence_writer_protocols_pkey ON public.persistence_writer_protocols USING btree (worktree_id, host_id)",
+      "planner_stats_deltas_pkey": "CREATE UNIQUE INDEX planner_stats_deltas_pkey ON public.planner_stats_deltas USING btree (id)",
+      "planner_stats_state_pkey": "CREATE UNIQUE INDEX planner_stats_state_pkey ON public.planner_stats_state USING btree (table_name)",
       "proposal_page_runs_cache_idx": "CREATE INDEX proposal_page_runs_cache_idx ON public.proposal_page_runs USING btree (source_id, page_slug, source_hash, prompt_version) WHERE (status = ANY (ARRAY['completed'::text, 'empty'::text]))",
       "proposal_page_runs_identity_idx": "CREATE UNIQUE INDEX proposal_page_runs_identity_idx ON public.proposal_page_runs USING btree (source_id, page_slug, source_hash, prompt_version, proposal_run_id)",
       "proposal_page_runs_pkey": "CREATE UNIQUE INDEX proposal_page_runs_pkey ON public.proposal_page_runs USING btree (id)",
@@ -1026,6 +1036,7 @@
       "pages_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=pages.id",
       "persistence_effects_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=persistence_effects.id",
       "persistence_requests_sequence_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=persistence_requests.sequence",
+      "planner_stats_deltas_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=planner_stats_deltas.id",
       "proposal_page_runs_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=proposal_page_runs.id",
       "raw_data_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=raw_data.id",
       "slug_aliases_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=slug_aliases.id",
@@ -2296,6 +2307,23 @@
           "5 registered_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=true force_rls=false"
+      },
+      "planner_stats_deltas": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('planner_stats_deltas_id_seq'::regclass)",
+          "2 table_name text/text NOT NULL",
+          "3 n bigint/int8 NOT NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "planner_stats_state": {
+        "columns": [
+          "1 table_name text/text NOT NULL",
+          "2 analyzed_through bigint/int8 NOT NULL DEFAULT 0",
+          "3 analyzed_at timestamp with time zone/timestamptz NULL",
+          "4 last_analyze_ms integer/int4 NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "proposal_page_runs": {
         "columns": [
