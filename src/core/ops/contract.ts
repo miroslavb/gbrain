@@ -133,6 +133,8 @@ export interface ParamDef {
   default?: unknown;
   enum?: string[];
   items?: ParamDef;
+  /** Object members (O-DX-3); a member with `required: true` lands in the schema's `required`. */
+  properties?: Record<string, ParamDef>;
 }
 
 export interface Logger {
@@ -275,6 +277,16 @@ export interface AuthInfo {
   surfaceSetBy?: string;
 }
 
+/**
+ * Transport a verified caller authenticated through. The verifier-set
+ * `principal` is authoritative; the `gbrain_cl_` client-id prefix is only a
+ * fallback for AuthInfo built without one.
+ */
+export function authTransport(auth: AuthInfo): 'oauth' | 'legacy' {
+  if (auth.principal) return auth.principal.kind === 'oauth_client' ? 'oauth' : 'legacy';
+  return auth.clientId.startsWith('gbrain_cl_') ? 'oauth' : 'legacy';
+}
+
 export interface OperationContext {
   engine: BrainEngine;
   config: GBrainConfig;
@@ -371,6 +383,22 @@ export interface OperationContext {
    * tokens from comments.)
    */
   deferEmbeds?: boolean;
+  /**
+   * #5232: how long a coordinated write waits for its commit before returning
+   * `write_pending` with its receipt. Unset keeps the agent default (5 s);
+   * CLI entry points and the resident owner's CLI lane set it
+   * (persistence/write-wait.ts).
+   */
+  writeWaitMs?: number;
+  /**
+   * Row shape for `search`/`query` results in content[0]. Set by the MCP
+   * transports: 'full' for gbrain's own thin client (X-Gbrain-Client header)
+   * and for hosts with `mcp.result_rows: full`, otherwise 'lean'. Unset means
+   * 'lean' for remote callers; trusted local callers (`remote === false`)
+   * always get full rows. A per-call `fields: "full"` overrides 'lean'.
+   * Shape only, never authority: nothing security-relevant reads it.
+   */
+  resultRows?: 'lean' | 'full';
   /**
    * Resolved global CLI options (--quiet / --progress-json / --progress-interval).
    * CLI callers populate this from `getCliOptions()`. MCP / library callers

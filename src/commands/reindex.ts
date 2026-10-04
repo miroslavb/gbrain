@@ -91,6 +91,8 @@ export interface ReindexResult {
   prefix: string | null;
   retrievedSince: string | null;
   hotFirst: boolean;
+  /** Parallel writers used for the run; absent when nothing ran. */
+  workers?: number;
 }
 
 function emptyReindexResult(
@@ -146,8 +148,10 @@ OPTIONS
                     --markdown only: include pages retrieved since UTC day
   --hot-first       --markdown only: newest retrieval, then update, then id
   --limit N         Cap pages/chunks processed this run
-  --workers N       --markdown/--multimodal: parallel work per batch
-                    (--concurrency is an alias)
+  --workers N       --markdown and --multimodal: parallel writers per batch
+                    (--concurrency is an alias). --markdown on Postgres
+                    defaults to 4 when more than 100 pages are pending;
+                    PGLite always uses 1
   --dry-run         Report what would change; write nothing
   --cost-estimate   --multimodal only: print the embed cost estimate and stop
   --no-embed        Skip re-embedding (chunk-only reindex)
@@ -467,6 +471,9 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
   let hotCursor: ReindexHotCursor | null = null;
   const BATCH = 100;
   const repoPath = opts.repoPath ? resolve(opts.repoPath) : null;
+  // #5181: size the pool from the whole run, not one batch. A full batch is
+  // exactly the auto threshold (100), so batch length never enabled it.
+  const { workers } = resolveWorkersWithClamp(engine, opts.workers, 'reindex', target);
 
   while (reindexed + skipped + failed < target) {
     const remaining = target - (reindexed + skipped + failed);
@@ -489,15 +496,9 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
     // v0.41.15.0 (T10, D9): per-batch sliding pool. Counters are JS-
     // single-thread atomic so reindexed++ / failed++ are race-free
     // across workers.
-    const writersResolved = resolveWorkersWithClamp(
-      engine,
-      opts.workers,
-      'reindex',
-      batch.length,
-    );
     await runSlidingPool({
       items: batch,
-      workers: writersResolved.workers,
+      workers,
       failureLabel: (row) => row.slug,
       onItem: async (row) => {
         reporter.tick();
@@ -586,6 +587,7 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
     prefix: selectionScope.prefix,
     retrievedSince: selectionScope.retrievedSince,
     hotFirst: opts.hotFirst === true,
+    workers,
   };
 
   if (opts.json) {
@@ -593,10 +595,11 @@ export async function runReindex(engine: BrainEngine, args: string[]): Promise<R
       pending, pending_after: pendingAfter, reindexed, skipped, failed,
       chunker_version: MARKDOWN_CHUNKER_VERSION,
       ...scopeJson,
+      workers,
     }) + '\n');
   } else {
     const label = reindexScopeLabel(selectionScope, opts.hotFirst === true);
-    process.stderr.write(`[reindex] Done.${label ? ` ${label}` : ''} reindexed=${reindexed} skipped=${skipped} failed=${failed} pending_before=${pending} pending_after=${pendingAfter}\n`);
+    process.stderr.write(`[reindex] Done.${label ? ` ${label}` : ''} reindexed=${reindexed} skipped=${skipped} failed=${failed} pending_before=${pending} pending_after=${pendingAfter} workers=${workers}\n`);
   }
 
   return result;

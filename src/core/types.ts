@@ -376,6 +376,13 @@ export interface PageFilters {
    * (search/private-visibility.ts) in BOTH engines.
    */
   excludePrivate?: boolean;
+  /**
+   * #5154: select only the listing columns (identity, type, title, dates).
+   * `compiled_truth` and `timeline` come back as '' and `frontmatter` as {},
+   * so a listing never detoasts or ships page bodies. Only for callers that
+   * read none of those fields (list_pages).
+   */
+  listColumnsOnly?: boolean;
 }
 
 /** v0.26.5 — opts for getPage / softDeletePage / restorePage. */
@@ -1666,6 +1673,17 @@ export interface RawData {
 }
 
 export type { PageVersion } from './page-state/version-types.ts';
+
+/** Who wrote a row, joined at read time (`ops/attribution.ts`); `unrecorded` = pre-attribution or an unattributed legacy writer. */
+export interface WriteAttributionView {
+  request_id: string | null; operation: string | null; at: string | null;
+  principal: { kind: string; id: string; name: string | null } | null;
+  origin: 'request' | 'maintenance' | 'unrecorded';
+}
+/** A `get_versions` row as trusted local and admin callers see it. */
+export type AttributedPageVersion = import('./page-state/version-types.ts').PageVersion & {
+  written_by: WriteAttributionView; archived_by: WriteAttributionView;
+};
 
 // Stats + Health
 export interface BrainStats {

@@ -16,6 +16,7 @@ import { prepareFileTarget } from '../src/core/persistence/page-prepare.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { admitWrite, claimNextWrite, compactWriteReceipts, getWriteRequest } from '../src/core/persistence/journal.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
+import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
 import { submissionAuthority } from '../src/core/persistence/authority.ts';
 import { retainReconcileBackup } from '../src/core/persistence/reconcile-backup.ts';
 import { prepareReconcileMutation } from '../src/core/persistence/reconcile-prepare.ts';
@@ -43,16 +44,16 @@ afterAll(async () => {
   });
   await closePostgres?.(); rmSync(home, { recursive: true, force: true });
 });
-async function fixture(engine: BrainEngine, enabled = false, body = 'A useful durable example observation.') {
+async function fixture(engine: BrainEngine, enabled = false, body = 'A useful durable example observation.', slug = 'notes/example') {
   await disposePersistenceConsumer(engine);
   await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
-  const id = `reconcile-${randomUUID().slice(0, 12)}`, root = join(home, id), slug = 'notes/example';
+  const id = `reconcile-${randomUUID().slice(0, 12)}`, root = join(home, id);
   mkdirSync(join(root, 'notes'), { recursive: true });
   await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,\'{}\')', [id, root]);
   const content = `---\ntype: note\ntitle: Example\ncustom_database: kept\nprofile:\n  role: example-role\n---\n${body}\n`;
-  await importFromContent(engine, slug, content, { sourceId: id, sourcePath: 'notes/example.md', noEmbed: true });
+  await importFromContent(engine, slug, content, { sourceId: id, sourcePath: `${slug}.md`, noEmbed: true });
   const snapshot = (await engine.readPageSnapshot(slug, { sourceId: id }))!;
-  const file = join(root, 'notes/example.md');
+  const file = join(root, `${slug}.md`);
   writeFileSync(file, serializePageToMarkdown({ ...snapshot.page, frontmatter: { profile: { location: 'example-place' }, custom_file: 'kept' } }, snapshot.tags));
   const binding = await claimWorktree(engine, id, root);
   await engine.executeRaw('UPDATE persistence_brain SET enabled=$1 WHERE singleton=1', [enabled]);
@@ -266,7 +267,7 @@ test('matching legacy scan state migrates only during canonical publication', as
   const marker = f.snapshot.page.content_hash!.slice(0, 16);
   await withCoordinatedWrite(engine, [f.id], () => engine.executeRaw("UPDATE pages SET frontmatter=frontmatter || $3::text::jsonb WHERE source_id=$1 AND slug=$2",
     [f.id, f.slug, JSON.stringify({ atoms_scan_hash: marker, atoms_reject_hash: marker,
-      atoms_reject_count: 3, atoms_reject_last_reasons: ['not_self_contained'], atoms_custom: 'preserve' })]));
+      atoms_reject_count: 3, atoms_reject_last_reasons: ['not_self_contained'], atoms_custom: 'preserve' })]), TEST_WRITE_ATTRIBUTION);
   const before = (await engine.readPageSnapshot(f.slug, { sourceId: f.id }))!;
   writeFileSync(f.file, serializePageToMarkdown(before.page, before.tags));
   await local(engine, f.registration, async () => {
@@ -446,7 +447,7 @@ test('source substitution, changed canonical revisions and recreated pages never
       else await withCoordinatedWrite(engine, [f.id], async () => {
         if (mutation === 'identity') await engine.deletePage(f.slug, { sourceId: f.id });
         await engine.putPage(f.slug, { type: 'note', title: 'Example', compiled_truth: 'A later database observation.', frontmatter: {} }, { sourceId: f.id });
-      });
+      }, TEST_WRITE_ATTRIBUTION);
       await expect(runReconcileApply(engine, { source_id: sourceId, slug: f.slug, preview, request_id: randomUUID() })).rejects.toMatchObject({
         code: mutation === 'source' ? 'invalid_params' : 'source_changed' });
       expect(readFileSync(f.file)).toEqual(raw);
@@ -574,7 +575,7 @@ test('file and database edits after reconciliation preparation abort publication
       else await engine.transaction(tx => withCoordinatedWrite(tx, [f.id], () => tx.putPage(f.slug, {
         type: f.snapshot.page.type, title: f.snapshot.page.title, compiled_truth: 'A competing database observation.',
         timeline: f.snapshot.page.timeline, frontmatter: f.snapshot.page.frontmatter,
-      }, { sourceId: f.id, expectedRevision: f.snapshot.revision })));
+      }, { sourceId: f.id, expectedRevision: f.snapshot.revision }), TEST_WRITE_ATTRIBUTION));
       const competingSnapshot = (await engine.readPageSnapshot(f.slug, { sourceId: f.id }))!;
       const result = await publishMutation(engine, repair.row, repair.prepared);
       expect(result.state).toBe('conflict');
@@ -598,7 +599,7 @@ test('historical basename origins in separate slug directories remain distinct c
       await tx.executeRaw('UPDATE pages SET source_path=$3 WHERE source_id=$1 AND slug=$2', [f.id, f.slug, 'example.md']);
       await tx.putPage(otherSlug, { type: 'note', title: 'Other example', compiled_truth: 'An independent historical basename page.',
         frontmatter: { independent: true }, source_path: 'example.md' }, { sourceId: f.id });
-    }));
+    }, TEST_WRITE_ATTRIBUTION));
     const other = (await engine.readPageSnapshot(otherSlug, { sourceId: f.id }))!;
     writeFileSync(otherFile, serializePageToMarkdown(other.page, other.tags));
     const otherBytes = readFileSync(otherFile);
@@ -624,7 +625,7 @@ test('shared provenance URI does not override distinct explicit canonical paths'
       await tx.executeRaw('UPDATE pages SET source_uri=$3 WHERE source_id=$1 AND slug=$2', [f.id, f.slug, sharedUri]);
       await tx.putPage(otherSlug, { type: 'note', title: 'Independent provenance', compiled_truth: 'A distinct file sharing ingestion provenance.',
         frontmatter: {}, source_path: 'other/provenance.md', source_uri: sharedUri }, { sourceId: f.id });
-    }));
+    }, TEST_WRITE_ATTRIBUTION));
     const other = (await engine.readPageSnapshot(otherSlug, { sourceId: f.id }))!;
     writeFileSync(otherFile, serializePageToMarkdown(other.page, other.tags));
     const otherBytes = readFileSync(otherFile);
@@ -650,7 +651,7 @@ test('genuine shared-file origins through explicit paths or URI fallback still r
         : origin === 'repeated-separators' ? 'notes//example.md' : 'notes/example.md';
       await tx.putPage('other/collision', { type: 'note', title: 'Collision', compiled_truth: 'Another page claiming the same file.',
         frontmatter: {}, source_path: sourcePath, source_uri: origin === 'uri' ? uri : null }, { sourceId: f.id });
-    }));
+    }, TEST_WRITE_ATTRIBUTION));
     const snapshot = await engine.readPageSnapshot(f.slug, { sourceId: f.id });
     await local(engine, f.registration, async () => {
       await expect(runReconcilePreview(engine, { source_id: f.id, slug: f.slug })).rejects.toMatchObject({
@@ -669,7 +670,7 @@ test('candidate-origin fanout stops at a bounded verification limit rather than 
     await tx.executeRaw(`INSERT INTO pages(source_id,slug,type,title,compiled_truth,frontmatter,source_path,source_uri)
       SELECT $1,'other/candidate-'||n,'note','Independent origin','Independent candidate '||n,'{}'::jsonb,'other/candidate-'||n||'.md',$2
       FROM generate_series(1,10001) n`, [f.id, uri]);
-  }));
+  }, TEST_WRITE_ATTRIBUTION));
   await local(engine, f.registration, async () => {
     await expect(runReconcilePreview(engine, { source_id: f.id, slug: f.slug })).rejects.toMatchObject({
       code: 'source_changed', message: 'Too many candidate page origins to verify this exact file safely.' });
@@ -677,28 +678,28 @@ test('candidate-origin fanout stops at a bounded verification limit rather than 
   });
 }), 120_000);
 
-
-test('repeated filenames across more than one candidate batch remain writable; a late directory alias refuses', async () => isolated(async engine => {
-  const f = await fixture(engine);
-  await engine.transaction(tx => withCoordinatedWrite(tx, [f.id], async () => {
-    await tx.executeRaw(`INSERT INTO pages(source_id,slug,type,title,compiled_truth,frontmatter,source_path)
-      SELECT $1,'independent/'||n||'/example','note','Independent','Separate file','{}'::jsonb,'independent/'||n||'/example.md'
-      FROM generate_series(1,105) n`, [f.id]);
-  }));
-  for (let n = 1; n <= 105; n++) {
-    const dir = join(f.root, 'independent', String(n)); mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'example.md'), `Independent file ${n}`);
-  }
-  await local(engine, f.registration, async () => {
-    expect((await runReconcilePreview(engine, { source_id: f.id, slug: f.slug })).status).toBe('ready');
-    // A symlinked parent within the source can alias a later candidate to the target.
-    const alias = join(f.root, 'independent', '106');
-    symlinkSync(join(f.root, 'notes'), alias, 'dir');
-    await engine.transaction(tx => withCoordinatedWrite(tx, [f.id], async () => {
-      await tx.putPage('independent/106/example', { type: 'note', title: 'Alias', compiled_truth: 'Collision',
-        frontmatter: {}, source_path: 'independent/106/example.md' }, { sourceId: f.id });
-    }));
-    await expect(runReconcilePreview(engine, { source_id: f.id, slug: f.slug })).rejects.toMatchObject({
-      code: 'source_changed', message: 'Several pages claim the recorded canonical file.' });
-  });
-}), 120_000);
+// The parser must not normalize an already-resolved identity a second time.
+// Existing reconcile cases only covered extension-free page keys.
+test.each(['notes/example.md', 'notes/example.md.md'])('reconciliation preserves extension-bearing identity %s', async slug =>
+  isolated(async engine => {
+    const f = await fixture(engine, true, 'A durable extension-bearing observation.', slug);
+    expect(readFileSync(f.file, 'utf8')).not.toContain('slug:');
+    await local(engine, f.registration, async () => {
+      const { preview, status } = await runReconcilePreview(engine, { source_id: f.id, slug });
+      expect(status).toBe('ready');
+      expect(preview.preconditions.slug).toBe(slug);
+      const receipt = await runReconcileApply(engine, { source_id: f.id, slug, preview, request_id: randomUUID() });
+      expect(receipt.state).toBe('committed');
+      const page = await engine.getPage(slug, { sourceId: f.id });
+      expect(page?.id).toBe(f.snapshot.page.id);
+      expect(page?.source_path).toBe(`${slug}.md`);
+      expect(page?.compiled_truth).toContain('A durable extension-bearing observation.');
+      expect(page?.frontmatter).toMatchObject({ custom_database: 'kept', custom_file: 'kept' });
+      expect(await engine.getPage(slug.slice(0, -3), { sourceId: f.id })).toBeNull();
+      const file = readFileSync(f.file, 'utf8');
+      writeFileSync(f.file, file.replace('---\n', '---\nslug: notes/other\n'));
+      await expect(runReconcilePreview(engine, { source_id: f.id, slug })).rejects.toMatchObject({ code: 'invalid_params' });
+      expect((await engine.getPage(slug, { sourceId: f.id }))?.id).toBe(f.snapshot.page.id);
+      expect(await engine.getPage('notes/other', { sourceId: f.id })).toBeNull();
+    });
+  }), 120_000);

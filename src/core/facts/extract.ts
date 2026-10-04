@@ -371,7 +371,8 @@ export function buildExtractorSystem(admitsLow: boolean): string {
 /** Fork compatibility: the historical single prompt constant (skips low-tier facts). */
 export const EXTRACTOR_SYSTEM = EXTRACTOR_SYSTEM_SKIPS_LOW;
 
-const MAX_TURN_TEXT_CHARS = 8000;
+/** Extractor input ceiling; corpus windows (context/corpus-windows.ts) are cut to fit it. */
+export const MAX_TURN_TEXT_CHARS = 8000;
 
 /**
  * #4863 — JSON Schema for the extractor reply, sent as `responseSchema` on

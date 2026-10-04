@@ -218,18 +218,12 @@ describe('E2E synthesize — no API key skip path', () => {
 
   test('3A: a time-boxed cold pass labels deferred files "not yet triaged" in the headline', async () => {
     const rig = await setupRig();
-    let restoreCache: (() => void) | undefined;
     try {
       await rig.engine.setConfig('dream.synthesize.enabled', 'true');
       await rig.engine.setConfig('dream.synthesize.session_corpus_dir', rig.corpusDir);
-      // Exercise the real time budget with a bounded slow cache read, independent
-      // of machine speed. The other files remain uncached and must be deferred.
-      const readVerdict = rig.engine.getDreamVerdict.bind(rig.engine);
-      const cacheRead = spyOn(rig.engine, 'getDreamVerdict').mockImplementation(async (...args) => {
-        await Bun.sleep(5);
-        return readVerdict(...args);
-      });
-      restoreCache = () => cacheRead.mockRestore();
+      // Advance the triage clock past the 1ms budget on the first cache miss.
+      // Cache lookup speed varies with machine load, so real elapsed time
+      // cannot guarantee that any file is deferred.
       await rig.engine.setConfig('dream.triage.max_ms', '1');
       for (let i = 0; i < 25; i++) {
         writeFileSync(
@@ -238,19 +232,23 @@ describe('E2E synthesize — no API key skip path', () => {
         );
       }
       await withoutAnthropicKey(async () => {
+        let triageClock = 0;
         const result = await runPhaseSynthesize(rig.engine, {
           brainDir: rig.brainDir,
           dryRun: true,
+          triageNow: () => (triageClock += 2),
         });
         expect(result.status).toBe('ok');
+        // The phase must have read the injected clock; otherwise the counts
+        // below would again depend on real elapsed time.
+        expect(triageClock).toBeGreaterThan(0);
         const triage = (result.details as { triage: { deferred: number; degraded: number } }).triage;
-        expect(triage.deferred).toBeGreaterThanOrEqual(1);
-        expect(triage.deferred + triage.degraded).toBe(25);
+        expect(triage.deferred).toBe(25);
+        expect(triage.degraded).toBe(0);
         expect(result.summary).toContain('not yet triaged');
         expect(result.summary).toContain('dream retriage');
       });
     } finally {
-      restoreCache?.();
       await rig.cleanup();
     }
   }, 30_000);

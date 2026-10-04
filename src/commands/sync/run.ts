@@ -31,6 +31,7 @@ import {
   maybeBackupCoverageRefresh,
   printSyncResult,
   shouldNudgeAfterSync,
+  isFailedPartial,
 } from './report.ts';
 import { runSyncTrigger } from './trigger.ts';
 
@@ -527,7 +528,7 @@ async function runSyncAll(
   // green exit would hide it from cron/monitoring. Timeout-class partials
   // keep the pre-existing exit-0 behavior (they converge on retry).
   const pullFailedCount = perSourceResults.filter(
-    (r) => r.status === 'ok' && r.result?.status === 'partial' && r.result.reason === 'pull_failed',
+    (r) => r.status === 'ok' && r.result && isFailedPartial(r.result),
   ).length;
   if (errCount > 0 || pullFailedCount > 0) process.exit(1);
   return;
@@ -783,7 +784,7 @@ async function runSingleSourceSync(
     // Routed through the owned verdict channel (NOT bare `process.exitCode`,
     // which PGLite's Emscripten runtime clobbers mid-run — see
     // src/core/cli-force-exit.ts).
-    if (result.managedWrite || result.status === 'blocked_by_failures' || (result.status === 'partial' && result.reason === 'pull_failed')) {
+    if (result.managedWrite || result.status === 'blocked_by_failures' || isFailedPartial(result)) {
       const { setCliExitVerdict } = await import('../../core/cli-force-exit.ts');
       setCliExitVerdict(1);
     }
@@ -816,10 +817,18 @@ async function runSingleSourceSync(
     // v0.42.42.0 (#2139, Step 4b): the inline gate auto-deferred this run's
     // embeds (non-TTY, above floor) — enqueue a capped backfill job so the
     // NULL-embedded chunks get embedded out of band instead of being stranded.
+    // Mirror --all: an intrinsic >100-file deferral is delivered on a worker-backed
+    // engine when federated v2 is on, and as a manual drain when no worker exists.
+    // An explicit --no-embed never submits a backfill.
+    let singleV2Enabled = false;
+    if (result.embedDeferralReason === 'large_sync' && !noEmbed && !singleSourceNoWorkerSurface) {
+      const { isFederatedV2Enabled } = await import('../../core/feature-flags.ts');
+      singleV2Enabled = await isFederatedV2Enabled(engine);
+    }
     let singleEmbedBackfill: SyncEmbedBackfillOutcome | undefined;
     if (
       !companyPolicy && (singleSourceAutoDefer || (
-        singleSourceNoWorkerSurface && result.embedDeferralReason === 'large_sync'
+        result.embedDeferralReason === 'large_sync' && (singleSourceNoWorkerSurface || singleV2Enabled)
       )) &&
       result.status !== 'dry_run' &&
       result.status !== 'up_to_date' &&

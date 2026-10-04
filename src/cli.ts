@@ -34,6 +34,7 @@ import { operations, OperationError } from './core/operations.ts';
 import { resolveSourceIdEngineFree } from './core/source-resolver.ts';
 import { formatVolunteeredPage } from './core/context/volunteer.ts';
 import type { Operation, OperationContext } from './core/operations.ts';
+import { currentCliWriteWait } from './core/persistence/write-wait.ts';
 import { shouldForceExitAfterMain, finishCliTeardown, flushThenExit, currentExitCode, setCliExitVerdict, writeStdoutFinal, installStdoutPipeDelivery } from './core/cli-force-exit.ts';
 import { serializeMarkdown } from './core/markdown.ts';
 import { parseGlobalFlags, setCliOptions, getCliOptions } from './core/cli-options.ts';
@@ -710,11 +711,12 @@ async function runSharedOperation(command: string, subArgs: string[], cliOpts: C
     // (leaves facts/cache/eval-capture writes racing teardown). The finally's
     // drain bounds teardown; the hard-deadline timer armed at teardown entry
     // bounds a hung one.
+    // #5232: the reporter owns the write verdict; never overwrite it.
     const { reportPersistenceCliError } = await import('./commands/persistence-delegate.ts');
     if (!await reportPersistenceCliError(e, params.json === true || !!(e as OperationError)?.writeRequest)) {
       console.error(e instanceof Error ? e.message : String(e));
+      setCliExitVerdict(1);
     }
-    setCliExitVerdict(1);
   } finally {
     // 1s per-sink drain budget: read paths with no pending work pay the ~0ms
     // fast path; capture/import that DO enqueue pay up to 1s (+ facts shutdown
@@ -776,6 +778,7 @@ async function runThinClientRouted(
     const raw = await callRemoteTool(cfg, op.name, params, {
       timeoutMs,
       signal: sigintController.signal,
+      ...(op.mutating ? { writeWaitMs: currentCliWriteWait().waitMs } : {}),
     });
     // T15/FOV-1: lift the server's retrieval meta off the envelope before
     // unpacking (old servers lack _meta — capture is simply skipped).
@@ -795,7 +798,7 @@ async function runThinClientRouted(
       const { reportPersistenceCliError } = await import('./commands/persistence-delegate.ts');
       if (await reportPersistenceCliError(e, params.json === true)) {
         process.off('SIGINT', onSigint);
-        process.exit(sigintController.signal.aborted ? 130 : 1);
+        process.exit(sigintController.signal.aborted ? 130 : currentExitCode());
       }
       const url = cfg.remote_mcp!.mcp_url;
       switch (e.reason) {
@@ -1532,6 +1535,7 @@ export async function makeContext(engine: BrainEngine, params: Record<string, un
     // confinement (e.g., cwd-locked file_upload).
     remote: false,
     cliOpts: getCliOptions(),
+    writeWaitMs: currentCliWriteWait().waitMs, // #5232
     // v0.34 D4: sourceId is REQUIRED at the type level. Fall back to 'default'
     // when resolveSourceId returned undefined (fresh pre-init brain, no sources
     // table). Matches dispatch.ts's auto-fill so the contract holds across
@@ -1649,8 +1653,12 @@ export function formatResult(
     case 'list_pages': {
       const pages = result as any[];
       if (pages.length === 0) return 'No pages found.\n';
+      const cell = (v: unknown): string => {
+        const s = v === null || v === undefined ? '' : String(v);
+        return s.replace(/\\/g, '\\\\').replace(/\t/g, '\\t').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+      };
       return pages.map(p =>
-        `${p.slug}\t${p.type}\t${p.updated_at?.toString().slice(0, 10) || '?'}\t${p.title}`,
+        `${cell(p.slug)}\t${cell(p.type)}\t${cell(p.updated_at?.toString().slice(0, 10) || '?')}\t${cell(p.title)}`,
       ).join('\n') + '\n';
     }
     case 'search':
@@ -1891,7 +1899,8 @@ const THIN_CLIENT_REFUSE_HINTS: Record<string, string> = {
   'code-callers': '`code-callers` has no MCP op yet. Run on the host.',
   'code-callees': '`code-callees` has no MCP op yet. Run on the host.',
   // scratch-DB audit additions
-  config: "config reads/writes the host brain's config plane. Edit the host's .gbrain/config.json (file-plane keys) or run on the host with GBRAIN_HOME set.",
+  pricing: "pricing registers model prices in the host brain's config and is trusted-local only (a remote caller could void a cost cap). Ask the brain's operator to run `gbrain pricing set <model> ...` on the host.",
+  config: "config reads/writes the host brain's config plane. Edit the host's .gbrain/config.json (file-plane keys) or run on the host with GBRAIN_HOME set. self_upgrade.* keys are machine-local and work here.",
   jobs: '`jobs list`, `jobs get <id>`, and `jobs stats` are thin-client routable; this subcommand runs against the host queue. Use the submit_job / list_jobs / get_job / get_job_stats MCP tools from your agent, or run on the host with GBRAIN_HOME set.',
   // Gap-closure wave [OV6]: routable subcommands are intercepted before this
   // hint fires — these fire only for the host-bound remainder.
@@ -2430,16 +2439,10 @@ async function prepareConnectedDispatch(command: string, args: string[]): Promis
       });
       if (res) {
         const { installProcessWatchdog } = await import('./core/process-watchdog.ts');
-        syncWatchdog = installProcessWatchdog({
-          deadlineMs: res.deadlineMs,
-          graceMs: res.graceMs,
-          label: 'sync-watchdog',
-          heartbeatMs: 60_000,
-        });
-        process.stderr.write(
-          `[sync-watchdog] hard deadline armed: ${Math.round(res.deadlineMs / 1000)}s ` +
-          `+ ${Math.round(res.graceMs / 1000)}s grace (${res.reason}); disable with --no-hard-deadline\n`,
-        );
+        const { syncWatchdogPlan } = await import('./core/sync-reconcile.ts');
+        const plan = syncWatchdogPlan(args, res);
+        syncWatchdog = installProcessWatchdog(plan.watchdog);
+        process.stderr.write(plan.armedLine);
       }
     } catch (e) {
       // A bad --hard-deadline value throws here (same posture as --timeout).
@@ -3096,6 +3099,7 @@ ADMIN
   features [--json] [--auto-fix]     Scan usage + recommend unused features
   autopilot [--repo] [--interval N]  Self-maintaining brain daemon
   config [show|get|set] <key> [val]  Brain config
+  pricing [set|list|unset] <model>   Register model prices for cost caps (host only)
   protocol [conformance|stats]       MEMORY_VERBS v1: schemas, conformance
                                      certification, local usage stats + TTHW
   storage status [--repo <path>]     Storage tier status and health
@@ -3104,6 +3108,7 @@ ADMIN
     --surface verbs|starter|full     Tool surface: the 7 memory verbs, the ~20-op
                                      starter set, or every op (default full).
                                      On --http this is the per-client CEILING.
+    --access read-only|full          stdio: list and dispatch only read operations
   serve --http [--port N]            HTTP MCP server with OAuth 2.1
     --token-ttl N                    Access token TTL in seconds (default: 3600)
     --enable-dcr                     Enable Dynamic Client Registration (DCR clients default to authorization_code)
@@ -3113,7 +3118,7 @@ ADMIN
         [--install] [--json]         Print the paste-ready command, or --install to run it
   auth <create|list|revoke|...>      Manage legacy tokens + OAuth 2.1 clients
   auth --help                        Full subcommand list (register-client,
-                                     rescope-client, revoke-client, permissions, test, ...)
+                                     rescope, rescope-client, rescope-token, revoke-client, ...)
   watch [--json]                     Push-based context: pipe conversation turns in,
                                      volunteered brain pages stream out (#2095)
   call <tool> '<json>'               Raw tool invocation

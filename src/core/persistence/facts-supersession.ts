@@ -4,10 +4,10 @@ import { decideSingleFact, type FactCandidate, type FactDecision, type SingleFac
 
 /** Explicit IDs never bypass the source, subject, visibility or live-row boundary. */
 export async function decideManagedFact(engine: BrainEngine, sourceId: string,
-  fact: SingleFactIntent & Pick<NewFact, 'embedding_model'> & { supersedes_fact_id?: number; entity_inferred?: unknown },
+  fact: SingleFactIntent & Pick<NewFact, 'embedding_model' | 'source'> & { supersedes_fact_id?: number; entity_inferred?: unknown },
   embedding: Float32Array | null): Promise<FactDecision> {
   const id = fact.supersedes_fact_id;
-  if (id === undefined) return decideSingleFact(engine, sourceId, fact, embedding, fact.embedding_model);
+  if (id === undefined) return decideSingleFact(engine, sourceId, fact, embedding, fact.embedding_model, fact.source);
   if (!Number.isSafeInteger(id) || id <= 0 || !fact.entity_slug || fact.entity_inferred) {
     throw new OperationError('invalid_params', 'Explicit supersession requires a valid fact ID and a resolved entity.');
   }

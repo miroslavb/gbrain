@@ -716,3 +716,15 @@ matching its PGLite twin when testing legacy private-page exclusion. Source
 grants and archived/non-federated exclusions remain asserted independently.
 
 Finite code maintenance is classified as coordinator-owned in canonical-writers.tsv; its PostgreSQL twin belongs to the persistence E2E map. Keep these inventories current when adding a writer or a new E2E file.
+
+## v0.60.45 isolated port in progress
+
+Operator authorized production transition after cleanup on2026-10-04. This merge
+is unaccepted until fresh compatibility/migration/retrieval gates pass. Preserve
+per-page DB-only selection, curated graph metrics, scoped literal-prefix reindex,
+source/private/audit fact filtering and operator pricing overrides when adopting
+new upstream workers, hot-fact collapse and restore-path helpers. No live CLI probes.
+
+2026-10-04 v45 merge: append migrations198..207, preserve world-only/source grants,
+100-message Chronicle eligibility, fail-closed prices, atom semantic validator,
+scoped curated-health counters and aggregate maintenance progress. Tests pending.

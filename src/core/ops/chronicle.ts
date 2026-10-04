@@ -277,96 +277,42 @@ const chronicle_backfill: Operation = {
   name: 'chronicle_backfill',
   outputRedaction: 'no_stored_text',
   description:
-    'Life Chronicle: sweep existing meeting/conversation/calendar pages into timeline events by ' +
-    'enqueuing chronicle_extract jobs (one per eligible page). --dry-run counts without enqueuing. ' +
-    'Local-only bulk op. CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--limit N] ' +
-    '[--max-total N] [--dry-run]`.',
+    'Life Chronicle: queue existing meeting/conversation/calendar pages (by type or under meetings/, conversations/, ' +
+    'cal/, calendar/) for timeline-event extraction. One paid chat call per page, so it needs --yes; --dry-run ' +
+    'reports the candidates, an estimated cost and skip reasons. The chronicle_page_state ledger skips content ' +
+    'already extracted or queued, so repeats never pay twice. Queued pages run in the `chronicle` cycle phase ' +
+    '(`gbrain dream --phase chronicle`), exempt from the daily limit. Local-only bulk op. ' +
+    'CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--dated-since YYYY-MM-DD] [--recent] [--limit N] [--dry-run | --yes]`.',
   scope: 'admin',
   mutating: true,
   localOnly: true,
   params: {
-    since: { type: 'string', description: 'Only pages updated on/after this date (YYYY-MM-DD).' },
-    limit: { type: 'number', description: 'Max pages per type to sweep (default 1000).' },
-    max_total: {
-      type: 'number',
-      description: 'Global max eligible pages to count/enqueue, newest first across all types.',
-    },
-    dry_run: { type: 'boolean', description: 'Count eligible pages without enqueuing.' },
+    since: { type: 'string', description: 'Only pages UPDATED on/after this date (YYYY-MM-DD). Use --dated-since for the page\'s own date.' },
+    dated_since: { type: 'string', description: "Only pages whose own date (authored effective date, else frontmatter date/start) is on/after this date (YYYY-MM-DD)." },
+    recent: { type: 'boolean', description: 'Only pages within chronicle.auto_recent_days (the automatic path\'s window).' },
+    max_total: { type: 'number', description: 'Compatibility hard cap across all sources and types; zero queues nothing.' },
+    limit: { type: 'number', description: 'Max pages queued in this run, across all types and sources (default 1000).' },
+    dry_run: { type: 'boolean', description: 'Count candidates, estimate cost and report skip reasons without queuing.' },
+    yes: { type: 'boolean', description: 'Consent to queue paid extraction (one chat call per page). Ask the user first.' },
   },
   handler: async (ctx, p) => {
-    const { isChronicleEligible, CHRONICLE_RESCUE_SLUG_PREFIXES } = await import('../chronicle/eligibility.ts');
-    const TYPES = ['meeting', 'conversation', 'calendar-event'] as const;
-    const limit = typeof p.limit === 'number' ? p.limit : 1000;
-    // Fail closed for non-finite/negative canary caps. `limit` remains the
-    // backwards-compatible per-scan discovery bound; max_total is the hard
-    // cross-type admission bound.
-    const maxTotal = typeof p.max_total === 'number'
-      ? (Number.isFinite(p.max_total) ? Math.max(0, Math.floor(p.max_total)) : 0)
-      : undefined;
-    const updated_after = typeof p.since === 'string' ? p.since : undefined;
-    const dryRun = p.dry_run === true;
+    const { runChronicleBackfill } = await import('../chronicle/backfill.ts');
+    const { getChatModel } = await import('../ai/gateway.ts');
+    let model: string | undefined;
+    try { model = getChatModel(); } catch { model = undefined; }
     const scope = sourceScopeOpts(ctx);
-    type QueueLike = { add: (n: string, d: Record<string, unknown>) => Promise<unknown> };
-    let queue: QueueLike | null = null;
-    if (!dryRun) {
-      const { MinionQueue } = await import('../minions/queue.ts');
-      queue = new MinionQueue(ctx.engine) as unknown as QueueLike;
-    }
-    let scanned = 0, eligible = 0, enqueued = 0;
-    const errors: { slug: string; error: string }[] = [];
-    const scans: Array<{ type?: typeof TYPES[number]; slugPrefix?: string }> = [
-      ...TYPES.map((type) => ({ type })),
-      ...CHRONICLE_RESCUE_SLUG_PREFIXES.map((slugPrefix) => ({ slugPrefix })),
-    ];
-    const seen = new Set<string>();
-    const candidates: Page[] = [];
-    for (const scan of scans) {
-      const pages = await ctx.engine.listPages({ ...scan, updated_after, limit, ...scope });
-      for (const page of pages) {
-        const pageKey = `${page.source_id}\u0000${page.slug}`;
-        if (seen.has(pageKey)) continue;
-        seen.add(pageKey);
-        candidates.push(page);
-      }
-    }
-    // A bounded canary must be hot-first globally, not biased by the order of
-    // the per-type scans above. Stable source/slug ties keep selection
-    // reproducible when pages share an updated_at timestamp.
-    candidates.sort((a, b) =>
-      b.updated_at.getTime() - a.updated_at.getTime()
-      || a.source_id.localeCompare(b.source_id)
-      || a.slug.localeCompare(b.slug));
-    for (const page of candidates) {
-      if (maxTotal !== undefined && eligible >= maxTotal) break;
-      scanned++;
-      const frontmatter = page.frontmatter as Record<string, unknown> | undefined;
-      const dreamGenerated = frontmatter?.dream_generated === true;
-      const elig = isChronicleEligible({
-        type: page.type,
-        slug: page.slug,
-        body: page.compiled_truth,
-        dreamGenerated,
-        messageCount: frontmatter?.message_count,
-      });
-      if (!elig.ok) continue;
-      eligible++;
-      if (dryRun || !queue) continue;
-      try {
-        await queue.add('chronicle_extract', { slug: page.slug, sourceId: page.source_id });
-        enqueued++;
-      } catch (e) {
-        // Never swallow — surface per-page failures (the #2057 no-swallow pattern).
-        errors.push({ slug: page.slug, error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    return {
-      scanned,
-      eligible,
-      enqueued,
-      dry_run: dryRun,
-      limit_reached: maxTotal !== undefined && eligible >= maxTotal,
-      errors,
-    };
+    return runChronicleBackfill(ctx.engine, {
+      since: typeof p.since === 'string' ? p.since : undefined,
+      datedSince: typeof p.dated_since === 'string' ? p.dated_since : undefined,
+      recent: p.recent === true,
+      maxTotal: typeof p.max_total === 'number' ? p.max_total : undefined,
+      limit: typeof p.limit === 'number' ? p.limit : undefined,
+      dryRun: p.dry_run === true,
+      yes: p.yes === true,
+      sourceId: scope.sourceId,
+      sourceIds: scope.sourceIds,
+      model,
+    });
   },
   cliHints: { name: 'chronicle-backfill' },
 };

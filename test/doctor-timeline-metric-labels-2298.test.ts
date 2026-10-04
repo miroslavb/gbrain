@@ -18,7 +18,7 @@
  *   - CLI rendered-output assertions (exact lines, guard matrix)
  *   - red/green: same assertions FAIL on origin/master, PASS on this branch
  *
- * Scoring formula UNCHANGED. Canonical PGLite fixture via resetPgliteState.
+ * Canonical PGLite fixture via resetPgliteState.
  */
 
 import { describe, expect, test, beforeAll, afterAll, beforeEach } from 'bun:test';

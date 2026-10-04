@@ -34,6 +34,12 @@ import { embeddingEffectsRepair } from './embedding-effects.ts';
 import { googleFileModesRepair } from './google-file-modes.ts';
 import { staleAtomsRepair } from './stale-atoms.ts';
 import { extractorFactsRepair } from './extractor-facts.ts';
+import { capturedFactsRepair } from './captured-facts.ts';
+import { loopFactsRepair } from './loop-facts.ts';
+import { orphanChildrenRepair } from './orphan-children.ts';
+import { failedWritesRepair } from './failed-writes.ts';
+import { attributionBackfillRepair } from './attribution-backfill.ts';
+import { plannerStatsRepair } from './planner-stats.ts';
 import { ERROR_CATALOGUE, catalogueError } from '../error-catalogue.ts';
 import type { OperationError } from '../ops/contract.ts';
 
@@ -96,6 +102,13 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
       + 'Each effect is reconciled (current vectors pass the effect verifier), superseded (page deleted, or a newer revision owns its own effect), '
       + 'retry_queued for its owner (paid; a consumed retry allowance gets one new bounded cycle per explicit run) or blocked with the reason. Never drops an obligation.',
   },
+  'attribution-backfill': {
+    handler: attributionBackfillRepair, embeds: 'none', checks: [],
+    summary: 'Fill write attribution (who wrote it) on pages, page versions and facts written before attribution was recorded, only where exactly one '
+      + 'committed request in the write journal proves the writer: the page mutation whose outcome revision is the row\'s revision, or the remember '
+      + 'that inserted the fact. Fills NULLs only, in committed batches of 1,000 that resume after an interruption. Everything else stays NULL and reads '
+      + 'as unrecorded. Bookkeeping only; no journal admission, no content or revision change.',
+  },
   'google-file-modes': {
     handler: googleFileModesRepair, embeds: 'none', checks: ['google_file_modes'], explicit_only: true,
     summary: 'Clear group and other permission bits on files and directories gbrain wrote under a Google source directory outside ~/.gbrain '
@@ -114,6 +127,40 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
       + '(a committed write of the page completed in the same transaction, by an older consumer); --include-ambiguous widens the hashed set to facts '
       + 'without that evidence. Preview-bound: --apply --expect <hash> restores exactly the previewed set; a fact that changed since reports '
       + 'changed_since_preview and stays expired. Superseded, withdrawn and duplicated facts are never restored. Database-only; no page is rewritten.',
+  },
+  'captured-facts': {
+    handler: capturedFactsRepair, embeds: 'effect', checks: ['captured_facts_active'], explicit_only: true,
+    summary: 'Expire facts the capture lanes (writeback, compact, corpus sweep) extracted before v0.60.30.0 from gbrain\'s own claude-cli sessions '
+      + '(evidence: a scratch-project harness transcript or a quarantined corpus file). Paste-derived facts are found by a heuristic over the retained '
+      + 'corpus file and expire only with --include-ambiguous. A claim that also has an active copy from another lane is kept. Preview-bound: --apply '
+      + '--expect <hash> expires exactly the previewed set; a fact that changed since reports changed_since_preview. Rows are expired, never withdrawn, '
+      + 'so remember can save the same claim again; fenced rows are struck in their page, which is re-embedded by its publication.',
+  },
+  'loop-facts': {
+    handler: loopFactsRepair, embeds: 'effect', checks: ['loop_facts_drift'], explicit_only: true,
+    summary: 'Retire the commitment facts of loops closed before this release (#5869): expires each fact and strikes its fence row in one coordinated write, '
+      + 'only when no open loop shares the fact. Preview-bound: --apply --expect <hash> retires exactly the previewed set; a loop or fact that changed since '
+      + 'reports changed_since_preview and is kept. Never writes a withdrawal, so the same promise made again is stored normally.',
+  },
+  'orphan-children': {
+    handler: orphanChildrenRepair, embeds: 'none', checks: ['child_table_orphans'], explicit_only: true,
+    summary: 'Delete rows of page child tables (chunks, versions, tags, takes, raw data, timeline, links) whose page no longer exists, and clear dangling '
+      + 'links.origin_page_id and files.page_id references (#5216, #4738). The preview also probes every page body and reports torn TOAST rows '
+      + '(SQLSTATE XX000) as torn_pages without changing them. Bookkeeping only; no journal admission. Brain-wide; runs only when named.',
+  },
+  'failed-writes': {
+    handler: failedWritesRepair, embeds: 'effect', checks: [], explicit_only: true,
+    summary: 'Resubmit caller writes (put_page, add_timeline_entry, remember) that the managed writer guard refused before v0.60.38.0 (#5983), from the '
+      + 'intent their failed receipt retains until receipt compaction. A write is kept when a later request with the same intent committed (already_written) '
+      + 'or is pending (duplicate), or a later write or delete of the page committed (superseded). Writes gbrain itself produced (sync and file imports, '
+      + 'reconcile, relink, maintenance) are counted with the command that produces them again. Preview-bound: --apply --expect <hash> replays exactly '
+      + 'the previewed set under new request ids, after re-checking each write\'s original authority; the failed receipts stay as history.',
+  },
+  'planner-stats': {
+    handler: plannerStatsRepair, embeds: 'none', checks: ['planner_stats_stale'],
+    summary: 'ANALYZE the hot tables (pages, links, facts, takes, content_chunks, timeline_entries) whose planner statistics are stale (F4b), '
+      + 'so search and graph reads stop planning as slow nested loops. PGLite also resets each table\'s pending row count; Postgres runs each '
+      + 'ANALYZE with a 60 s statement and 2 s lock timeout. No journal admission and no user data changes. Brain-wide.',
   },
 };
 

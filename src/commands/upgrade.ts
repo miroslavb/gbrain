@@ -1,4 +1,5 @@
-import { execSync, execFileSync } from 'child_process';
+import type { BrainEngine } from '../core/engine.ts';
+import { execSync, execFileSync, spawnSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, realpathSync } from 'fs';
 import { basename, join, dirname, resolve } from 'path';
 import { parseSemver, semverGt } from '../core/semver.ts';
@@ -6,6 +7,15 @@ import { setCliExitVerdict } from '../core/cli-force-exit.ts';
 import { VERSION } from '../version.ts';
 import { migrationLedgerSummary } from '../core/migration-ledger.ts';
 import { MIGRATIONS_RUNNING_EXIT_CODE, readMigrationLockHolder } from '../core/migration-orchestration-lock.ts';
+import {
+  BUN_FLOOR_EXIT_CODE,
+  evaluateBunFloor,
+  globalGbrainSpec,
+  readBunLinkTarget,
+  readHostBun,
+  readPackageTarget,
+  type TargetFloor,
+} from '../core/bun-floor.ts';
 
 const GBRAIN_GITHUB_REPO = 'garrytan/gbrain';
 
@@ -29,7 +39,7 @@ export function assessUpgradeOutcome(
 
 export async function runUpgrade(args: string[], opts: { targetVersion?: string } = {}) {
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: gbrain upgrade [--swap-only] [--no-autopilot-install]\n\nSelf-update the CLI.\n\nDetects install method (bun, binary, clawhub) and runs the appropriate update.\nAfter upgrading, shows what\'s new and offers to set up new features.\n\n--no-autopilot-install  Skip autopilot installation and service rewrites, including package postinstall.\n                       Also supported as GBRAIN_NO_AUTOPILOT_INSTALL=1.\n--swap-only  Perform ONLY the binary/source swap and skip post-upgrade\n             (migrations run on the next launch). Used by the autopilot\n             silent self-upgrade channel so the daemon can swap + relaunch\n             without a 30-min blocking post-upgrade inside its tick.');
+    console.log('Usage: gbrain upgrade [--swap-only] [--no-autopilot-install] [--no-bun-floor-check]\n\nSelf-update the CLI.\n\nDetects install method (bun, binary, clawhub) and runs the appropriate update.\nAfter upgrading, shows what\'s new and offers to set up new features.\n\n--no-autopilot-install  Skip autopilot installation and service rewrites, including package postinstall.\n                       Also supported as GBRAIN_NO_AUTOPILOT_INSTALL=1.\n--no-bun-floor-check    Upgrade even when the target release\'s Bun floor cannot be read or is above\n                       this host\'s Bun (manual upgrades only). Docs: docs/guides/upgrades-auto-update.md#bun-floor.\n--swap-only  Perform ONLY the binary/source swap and skip post-upgrade\n             (migrations run on the next launch). Used by the autopilot\n             silent self-upgrade channel so the daemon can swap + relaunch\n             without a 30-min blocking post-upgrade inside its tick.');
     return;
   }
 
@@ -37,6 +47,7 @@ export async function runUpgrade(args: string[], opts: { targetVersion?: string 
   // relaunched binary runs migrations on boot (split-brain guard). v0.42.
   const swapOnly = args.includes('--swap-only');
   const noAutopilotInstall = args.includes('--no-autopilot-install') || process.env.GBRAIN_NO_AUTOPILOT_INSTALL === '1';
+  const checkBunFloor = !args.includes('--no-bun-floor-check');
   // #5693: post-upgrade owns migrations, so package postinstall skips them.
   const upgradeEnv = { ...process.env, GBRAIN_UPGRADE_OWNS_MIGRATIONS: '1', ...(noAutopilotInstall ? { GBRAIN_NO_AUTOPILOT_INSTALL: '1' } : {}) };
 
@@ -47,6 +58,7 @@ export async function runUpgrade(args: string[], opts: { targetVersion?: string 
   console.log(`Detected install method: ${method}`);
 
   let upgraded = false;
+  const recovery: SmokeRecovery = { method, oldVersion };
   switch (method) {
     case 'bun-link': {
       const linkInfo = detectBunLink();
@@ -55,8 +67,14 @@ export async function runUpgrade(args: string[], opts: { targetVersion?: string 
         break;
       }
       console.log(`Upgrading bun-link source clone at ${linkInfo.repoRoot}...`);
+      // #5855: fast-forward to the exact commit whose Bun floor was checked.
+      const checked = checkBunFloor ? readBunLinkTarget(linkInfo.repoRoot) : null;
+      if (checked && refuseForBunFloor(checked.target, opts.targetVersion)) return;
+      const sha = checked?.sha;
+      try { recovery.previousSha = execFileSync('git', ['-C', linkInfo.repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf-8', timeout: 10_000 }).trim(); } catch { /* recovery text falls back */ }
+      recovery.repoRoot = linkInfo.repoRoot;
       try {
-        execFileSync('git', ['-C', linkInfo.repoRoot, 'pull', '--ff-only'], { stdio: 'inherit', timeout: 120_000 });
+        execFileSync('git', ['-C', linkInfo.repoRoot, ...(sha ? ['merge', '--ff-only', sha] : ['pull', '--ff-only'])], { stdio: 'inherit', timeout: 120_000 });
         execFileSync('bun', ['install'], { cwd: linkInfo.repoRoot, env: upgradeEnv, stdio: 'inherit', timeout: 120_000 });
         upgraded = true;
       } catch {
@@ -72,6 +90,7 @@ export async function runUpgrade(args: string[], opts: { targetVersion?: string 
     case 'bun': {
       console.log('Upgrading via bun...');
       const bunGlobalRoot = resolveBunGlobalRoot();
+      if (checkBunFloor && refuseForBunFloor(await readPackageTarget(globalGbrainSpec(bunGlobalRoot)), opts.targetVersion)) return;
       try {
         execFileSync('bun', ['update', 'gbrain'], { cwd: bunGlobalRoot, env: upgradeEnv, stdio: 'inherit', timeout: 120_000 });
         upgraded = true;
@@ -141,6 +160,7 @@ export async function runUpgrade(args: string[], opts: { targetVersion?: string 
 
     case 'clawhub':
       console.log('Upgrading via ClawHub...');
+      if (checkBunFloor && refuseForBunFloor(await readPackageTarget(null), opts.targetVersion)) return;
       try {
         execSync('clawhub update gbrain', { env: upgradeEnv, stdio: 'inherit', timeout: 120_000 });
         upgraded = true;
@@ -207,6 +227,8 @@ export async function runUpgrade(args: string[], opts: { targetVersion?: string 
   }
   // Save old version for post-upgrade migration detection
   saveUpgradeState(oldVersion, newVersion);
+  // #5855: `--version` answers on any Bun, so prove the new release starts.
+  if (!postSwapSmoke(newVersion, recovery)) return;
 
   // Self-upgrade breadcrumb + cache reset (covers both the full and
   // --swap-only paths, so the autopilot silent channel benefits too):
@@ -268,6 +290,70 @@ export async function runUpgrade(args: string[], opts: { targetVersion?: string 
 }
 
 /**
+ * #5855: the Bun floor of the release `gbrain upgrade` would install for this
+ * install method (the autopilot channel's pre-swap check). The swap re-reads
+ * it, so a floor raised in between still refuses there.
+ */
+export async function readInstallTargetFloor(method: string): Promise<TargetFloor> {
+  if (method === 'bun-link') {
+    const link = detectBunLink();
+    return link ? readBunLinkTarget(link.repoRoot).target : { ok: false, failedRead: 'the bun-link source clone could not be found' };
+  }
+  return readPackageTarget(method === 'bun' ? globalGbrainSpec(resolveBunGlobalRoot()) : null);
+}
+
+/**
+ * #5855: refuse a swap whose target the host's Bun cannot start, or whose
+ * floor cannot be read. Prints the refusal and sets the floor exit code,
+ * which the autopilot channel treats as a hold rather than a failed version.
+ */
+function refuseForBunFloor(target: TargetFloor, targetVersion: string | undefined): boolean {
+  const verdict = evaluateBunFloor(target, readHostBun(), targetVersion);
+  if (verdict.ok) return false;
+  console.error(verdict.message);
+  console.error(verdict.kind === 'unreadable'
+    ? 'Nothing was changed. Re-run with --no-bun-floor-check to upgrade without this check.'
+    : 'Nothing was changed.');
+  setCliExitVerdict(BUN_FLOOR_EXIT_CODE);
+  return true;
+}
+
+interface SmokeRecovery { method: string; oldVersion: string; repoRoot?: string; previousSha?: string }
+
+/**
+ * #5855: after the swap, run a command that passes the CLI's runtime gate
+ * (`--version` is exempt from it). A failure prints per-method recovery and
+ * exits non-zero; nothing is rolled back automatically.
+ */
+function postSwapSmoke(newVersion: string, r: SmokeRecovery): boolean {
+  const run = spawnSync('gbrain', ['--help'], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'ignore', 'pipe'],
+    timeout: 60_000,
+    env: { ...process.env, GBRAIN_SKIP_STARTUP_HOOKS: '1' },
+  });
+  if (run.status === 0) return true;
+  const why = run.error ? run.error.message : `exit ${run.status ?? run.signal}`;
+  const detail = (run.stderr ?? '').trim().split('\n')[0];
+  const back = r.method === 'bun-link' && r.repoRoot && r.previousSha
+    ? `git -C ${r.repoRoot} checkout ${r.previousSha} && bun install`
+    : r.method === 'bun' ? `bun install -g github:${GBRAIN_GITHUB_REPO}#v${r.oldVersion}` : null;
+  console.error(`gbrain ${newVersion || '(new version)'} was installed but does not start: \`gbrain --help\` failed (${why}).${detail ? `\n  ${detail}` : ''}`);
+  console.error('Recovery:');
+  console.error('  If it names an old Bun: bun upgrade, then gbrain post-upgrade');
+  if (back) console.error(`  To return to ${r.oldVersion}: ${back}`);
+  recordUpgradeError({
+    phase: 'post-swap-smoke',
+    fromVersion: r.oldVersion,
+    toVersion: newVersion || 'unknown',
+    error: `gbrain --help failed after the swap (${why})${detail ? `: ${detail}` : ''}`,
+    hint: back ? `bun upgrade && gbrain post-upgrade, or return to ${r.oldVersion}: ${back}` : 'bun upgrade && gbrain post-upgrade',
+  });
+  setCliExitVerdict(1);
+  return false;
+}
+
+/**
  * #5693: an install step can fail or time out after the new version is
  * already in place (postinstall work outlived the install timeout). Treat a
  * newer `gbrain --version` as a completed swap instead of reporting failure.
@@ -284,7 +370,7 @@ function installedDespiteFailure(oldVersion: string): boolean {
   }
 }
 
-async function describeMigrationFailure(error: unknown, newVersion: string): Promise<string> {
+export async function describeMigrationFailure(error: unknown, newVersion: string): Promise<string> {
   if ((error as { status?: number }).status === MIGRATIONS_RUNNING_EXIT_CODE) {
     const { loadConfig } = await import('../core/config.ts');
     const config = loadConfig();
@@ -439,6 +525,58 @@ function saveUpgradeState(oldVersion: string, newVersion: string) {
  * installs do.
  */
 /**
+ * v0.32.3 search-lite mode banner, moved out of runPostUpgrade unchanged.
+ */
+async function printSearchModeUpgradeBanner(engine: BrainEngine): Promise<void> {
+  // v0.32.3 search-lite mode banner. One-shot: fires at most once per
+  // install (state persisted via `search.mode_upgrade_notice_shown`).
+  // Reframes from "behavior is regressing" to "named modes available"
+  // per [CDX-1+2+3]: the production query op still defaults expand=true
+  // and limit=20 — Garry's behavior is NOT regressing.
+  try {
+    const shown = await engine.getConfig('search.mode_upgrade_notice_shown');
+    const existingMode = await engine.getConfig('search.mode');
+    if (shown !== 'true' && !existingMode) {
+      console.log('');
+      console.log('═══════════════════════════════════════════════════════════════');
+      console.log('[gbrain] v0.32.3 added named search modes (conservative/balanced/tokenmax).');
+      console.log('[gbrain] Your current behavior is unchanged — the `query` op still defaults');
+      console.log('[gbrain] expand=true and limit=20, same as v0.31.x.');
+      console.log('═══════════════════════════════════════════════════════════════');
+      console.log('');
+      console.log('[AGENT] Relay this matrix to your operator and ask which mode they want.');
+      console.log('[AGENT] Recommended default: tokenmax (preserves current retrieval shape).');
+      console.log('[AGENT] Run `gbrain config set search.mode <mode>` after they decide.');
+      console.log('');
+      console.log('Per-query cost @ 10K queries/mo (typical single-user volume):');
+      console.log('');
+      console.log('                  Haiku 4.5    Sonnet 4.6   Opus 4.7');
+      console.log('                  ($1/M)       ($3/M)       ($5/M)');
+      console.log('  conservative    $40/mo       $120/mo      $200/mo');
+      console.log('  balanced        $100/mo      $300/mo      $500/mo');
+      console.log('  tokenmax        $200/mo      $600/mo      $1,000/mo');
+      console.log('');
+      console.log('  (scales linearly — multiply by 10 for 100K/mo)');
+      console.log('  25x corner-to-corner spread. Natural diagonal pairings span ~4x.');
+      console.log('');
+      console.log('To pick:');
+      console.log('  gbrain search modes              # see what is running');
+      console.log('  gbrain config set search.mode <conservative|balanced|tokenmax>');
+      console.log('  gbrain search tune               # data-driven recommendations');
+      console.log('');
+      console.log('tokenmax bumps limit to 50 (current default is 20). To preserve');
+      console.log('your EXACT current shape:');
+      console.log('  gbrain config set search.mode tokenmax');
+      console.log('  gbrain config set search.searchLimit 20');
+      console.log('');
+      await engine.setConfig('search.mode_upgrade_notice_shown', 'true');
+    }
+  } catch {
+    // Banner is cosmetic; never block the upgrade.
+  }
+}
+
+/**
  * v0.42 self-upgrade setup (file plane; idempotent). Default existing installs
  * to `notify` (a nudge, not autonomy — `auto` stays an explicit opt-in), show a
  * one-time informational banner, and rewrite an existing autopilot systemd unit
@@ -575,52 +713,11 @@ export async function runPostUpgrade(args: string[] = []): Promise<void> {
         await engine.initSchema();
         console.log('  Schema up to date.');
 
-        // v0.32.3 search-lite mode banner. One-shot: fires at most once per
-        // install (state persisted via `search.mode_upgrade_notice_shown`).
-        // Reframes from "behavior is regressing" to "named modes available"
-        // per [CDX-1+2+3]: the production query op still defaults expand=true
-        // and limit=20 — Garry's behavior is NOT regressing.
-        try {
-          const shown = await engine.getConfig('search.mode_upgrade_notice_shown');
-          const existingMode = await engine.getConfig('search.mode');
-          if (shown !== 'true' && !existingMode) {
-            console.log('');
-            console.log('═══════════════════════════════════════════════════════════════');
-            console.log('[gbrain] v0.32.3 added named search modes (conservative/balanced/tokenmax).');
-            console.log('[gbrain] Your current behavior is unchanged — the `query` op still defaults');
-            console.log('[gbrain] expand=true and limit=20, same as v0.31.x.');
-            console.log('═══════════════════════════════════════════════════════════════');
-            console.log('');
-            console.log('[AGENT] Relay this matrix to your operator and ask which mode they want.');
-            console.log('[AGENT] Recommended default: tokenmax (preserves current retrieval shape).');
-            console.log('[AGENT] Run `gbrain config set search.mode <mode>` after they decide.');
-            console.log('');
-            console.log('Per-query cost @ 10K queries/mo (typical single-user volume):');
-            console.log('');
-            console.log('                  Haiku 4.5    Sonnet 4.6   Opus 4.7');
-            console.log('                  ($1/M)       ($3/M)       ($5/M)');
-            console.log('  conservative    $40/mo       $120/mo      $200/mo');
-            console.log('  balanced        $100/mo      $300/mo      $500/mo');
-            console.log('  tokenmax        $200/mo      $600/mo      $1,000/mo');
-            console.log('');
-            console.log('  (scales linearly — multiply by 10 for 100K/mo)');
-            console.log('  25x corner-to-corner spread. Natural diagonal pairings span ~4x.');
-            console.log('');
-            console.log('To pick:');
-            console.log('  gbrain search modes              # see what is running');
-            console.log('  gbrain config set search.mode <conservative|balanced|tokenmax>');
-            console.log('  gbrain search tune               # data-driven recommendations');
-            console.log('');
-            console.log('tokenmax bumps limit to 50 (current default is 20). To preserve');
-            console.log('your EXACT current shape:');
-            console.log('  gbrain config set search.mode tokenmax');
-            console.log('  gbrain config set search.searchLimit 20');
-            console.log('');
-            await engine.setConfig('search.mode_upgrade_notice_shown', 'true');
-          }
-        } catch {
-          // Banner is cosmetic; never block the upgrade.
-        }
+        // v0.32.3 search-lite mode banner (one-shot, `search.mode_upgrade_notice_shown`).
+        await printSearchModeUpgradeBanner(engine);
+
+        // #5876: auto_chronicle now defaults on; one-shot [AGENT] cost + opt-out notice, best-effort.
+        await (await import('../core/chronicle/upgrade-notice.ts')).printAutoChronicleUpgradeNotice(engine);
 
         // Ambient-writeback consent ask (WP8): one-shot for EXISTING installs
         // upgrading into the feature. Personal brains only; double-gated on
@@ -967,7 +1064,7 @@ export function detectInstallMethod(): 'bun' | 'bun-link' | 'binary' | 'clawhub'
  * Returns { repoRoot } when confident; null otherwise (caller falls
  * through to the existing detection chain).
  */
-function detectBunLink(): { repoRoot: string } | null {
+export function detectBunLink(): { repoRoot: string } | null {
   try {
     const argv1 = process.argv[1];
     if (!argv1) return null;

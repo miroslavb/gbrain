@@ -11,7 +11,7 @@ import { classifyDuplicateReplicaGroup, type DuplicateReplicaClass } from '../co
 import { probeSourceGitState } from '../../../core/git-head.ts';
 // v0.41.32.0: remote staleness reads the stored newest_content_at column via
 // this pure comparator (no git subprocess on the HTTP MCP doctor path).
-import { lagFromContentMs, resolveStalenessCeilingSeconds } from '../../../core/source-health.ts';
+import { lagFromContentMs, loadSyncFreshnessSources, resolveStalenessCeilingSeconds } from '../../../core/source-health.ts';
 import { resolveEnvNumber, resolveHoursEnv, warnOnceForEnv } from '../../../core/env-number.ts';
 import { AUTOMATIC_CODE_CHUNKER_VERSION } from '../../../core/chunkers/code.ts';
 import { LINK_EXTRACTOR_VERSION_TS } from '../../../core/link-extraction.ts';
@@ -27,9 +27,12 @@ import { slugifyPath, slugifyCodePath, isCodeFilePath } from '../../../core/sync
 import { resolveSourceLocalFilePath } from '../../../core/markdown.ts';
 import { scannerSlugRootMode } from '../../../core/write-through.ts';
 import { unverifiedExtractionFragment } from '../../../core/extraction-review.ts';
-import { isSyncDisabledConfig } from '../../../core/sync-policy.ts';
+import { managedPersistenceEnabled } from '../../../core/persistence/ownership.ts';
+import { upstreamFreshness } from '../../../core/sync-upstream.ts';
 import type { Check } from '../../doctor.ts';
 import { ownedContentFreshness } from '../../../core/shared-skills/content-freshness.ts';
+import { connectorAuthorities } from '../../../core/persistence/connector-authority.ts';
+import { parseSourceConfig } from '../../../core/sources-load.ts';
 
 /** Local aliases; the shared warn-once memo lives in core so it can't fork per module. */
 const _resolveEnvNumber = resolveEnvNumber;
@@ -408,19 +411,22 @@ export async function checkUndeclaredDbOnlyPages(engine: BrainEngine): Promise<C
   try {
     // #3880: archived sources are out of scope for filesystem audits (v34
     // legacy fallback, house style per pickSoleNonDefaultSource).
-    let sources: Array<{ id: string; local_path: string | null }>;
+    let sources: Array<{ id: string; local_path: string | null; config: unknown }>;
     try {
-      sources = await engine.executeRaw<{ id: string; local_path: string | null }>(
-        `SELECT id, local_path FROM sources WHERE local_path IS NOT NULL AND archived IS NOT TRUE`,
+      sources = await engine.executeRaw<{ id: string; local_path: string | null; config: unknown }>(
+        `SELECT id, local_path, config FROM sources WHERE local_path IS NOT NULL AND archived IS NOT TRUE`,
       );
     } catch {
-      sources = await engine.executeRaw<{ id: string; local_path: string | null }>(
-        `SELECT id, local_path FROM sources WHERE local_path IS NOT NULL`,
+      sources = await engine.executeRaw<{ id: string; local_path: string | null; config: unknown }>(
+        `SELECT id, local_path, config FROM sources WHERE local_path IS NOT NULL`,
       );
     }
-    const checkable = sources.filter(s => s.local_path && existsSync(s.local_path));
+    const authorities = await connectorAuthorities(engine, sources.map(s => ({ id: s.id, kind: parseSourceConfig(s.config).kind })));
+    const connectorDb = new Set([...authorities].filter(([, a]) => a === 'connector_database').map(([id]) => id));
+    const connectorNote = connectorDb.size > 0 ? ` ${connectorDb.size} API connector source(s) skipped: connector_database pages are DB-only by design (recover them with gbrain sync --source <id> --full).` : '';
+    const checkable = sources.filter(s => s.local_path && existsSync(s.local_path) && !connectorDb.has(s.id));
     if (checkable.length === 0) {
-      return { name, status: 'ok', message: 'Not applicable (no sources with a local repo path on this host)' };
+      return { name, status: 'ok', message: `Not applicable (no sources with a local repo path on this host).${connectorNote}` };
     }
     let total = 0;
     const samples: string[] = [];
@@ -469,13 +475,13 @@ export async function checkUndeclaredDbOnlyPages(engine: BrainEngine): Promise<C
       return {
         name,
         status: 'ok',
-        message: `Every DB page is file-backed or under a declared/default db_only path (derive-phase defaults: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})`,
+        message: `Every DB page is file-backed or under a declared/default db_only path (derive-phase defaults: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')}).${connectorNote}`,
       };
     }
     return {
       name,
       status: 'warn',
-      message: `${total} DB page(s) have no backing file and sit outside every declared/default db_only path — invisible to file-lane backup/recovery. Sample: ${samples.join('; ')}. Fix: restore or export the files, declare their prefixes under storage.db_only in gbrain.yml, or set per-page storage_tier: db_only plus a non-empty storage_tier_reason after explicit review (derive-phase defaults already cover: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})`,
+      message: `${total} DB page(s) have no backing file and sit outside every declared/default db_only path — invisible to file-lane backup/recovery. Sample: ${samples.join('; ')}. Fix: restore or export the files, declare their prefixes under storage.db_only in gbrain.yml, or set per-page storage_tier: db_only plus a non-empty storage_tier_reason after explicit review (derive-phase defaults already cover: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})${connectorNote}`,
       details: { total, per_source: perSource, sample_slugs: samples },
     };
   } catch (e) {
@@ -957,7 +963,8 @@ export async function computeAtomProvenanceDriftCheck(
           `${drifted}/${total} atom(s) (${details.drift_pct}%) reference a source_hash no live page carries ` +
           `— ${sourceChanged} whose source page still exists (edited), ${sourceGone} whose source page is gone` +
           (oldestDays != null ? `; oldest ${oldestDays}d` : '') + su +
-          `. These still surface in search with a source_quote that no current page contains. Fix: ${fix}`,
+          `. This compares source_hash only (any edit to the source page changes it); it does not re-check whether ` +
+          `the atom's source_quote still appears in the page, so edited-source atoms may still be accurate. Fix: ${fix}`,
         details,
       };
     }
@@ -1217,30 +1224,6 @@ export async function computeExtractHealthCheck(
   }
 }
 
-async function loadSyncFreshnessSources(engine: BrainEngine) {
-  type FreshnessSourceRow = {
-    id: string;
-    name: string;
-    local_path: string | null;
-    last_sync_at: Date | null;
-    last_commit: string | null;
-    chunker_version: string | null;
-    newest_content_at: Date | null;
-    config: unknown;
-  };
-  let sources: FreshnessSourceRow[];
-  try {
-    sources = await engine.executeRaw<FreshnessSourceRow>(
-      `SELECT id, name, local_path, last_sync_at, last_commit, chunker_version, newest_content_at, config FROM sources WHERE local_path IS NOT NULL AND archived IS NOT TRUE`,
-    );
-  } catch {
-    sources = await engine.executeRaw<FreshnessSourceRow>(
-      `SELECT id, name, local_path, last_sync_at, last_commit, chunker_version, newest_content_at, config FROM sources WHERE local_path IS NOT NULL`,
-    );
-  }
-  return sources.filter((source) => !isSyncDisabledConfig(source.config));
-}
-
 export async function checkSyncFreshness(
   engine: BrainEngine,
   opts?: { nowMs?: number; localOnly?: boolean },
@@ -1338,6 +1321,10 @@ export async function checkSyncFreshness(
     // source is judged against the same number (and the env read + warn-once
     // machinery runs once, not once per source).
     const stalenessCeilingSeconds = resolveStalenessCeilingSeconds();
+    let managed = false;
+    try { managed = await managedPersistenceEnabled(engine); } catch { /* pre-persistence brain */ }
+    let upstream_unknown_count = 0;
+    let upstream_behind_count = 0;
     for (const source of sources) {
       if (ownedContent.has(source.id)) { writer_owned_count++; continue; }
       // Embed source.id in user-visible messages so `gbrain sync --source <id>`
@@ -1345,6 +1332,14 @@ export async function checkSyncFreshness(
       const display = source.name && source.name !== source.id
         ? `'${source.id}' (${source.name})`
         : `'${source.id}'`;
+
+      // O-DX-8: judged before (and independently of) the local projection buckets below.
+      const upstream = upstreamFreshness(source, display, now, managed);
+      if (upstream) {
+        issues.push(upstream.issue);
+        hasWarnings = true;
+        if (upstream.state === 'unknown') upstream_unknown_count++; else upstream_behind_count++;
+      }
 
       // BUG 4: actively syncing (live lock) → healthy, count as synced_recently
       // and skip the staleness checks. Keeps the 3-bucket invariant intact.
@@ -1487,7 +1482,8 @@ export async function checkSyncFreshness(
     }
 
     // D6 invariant: every source incremented exactly one bucket.
-    const details = { unchanged_count, synced_recently_count, stale_count, ...(writer_owned_count ? { writer_owned_count } : {}) };
+    const details = { unchanged_count, synced_recently_count, stale_count, ...(writer_owned_count ? { writer_owned_count } : {}),
+      ...(upstream_unknown_count ? { upstream_unknown_count } : {}), ...(upstream_behind_count ? { upstream_behind_count } : {}) };
     // BUG 4: append in-progress context when any source is actively syncing.
     // Empty otherwise, so steady-state messages are byte-for-byte unchanged.
     const inProgressNote = (inProgress.length ? `. ${inProgress.join('; ')}` : '')

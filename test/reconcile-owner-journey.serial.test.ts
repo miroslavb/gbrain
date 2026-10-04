@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { PENDING_WRITE_EXIT_CODE } from '../src/core/exit-codes.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -192,7 +193,7 @@ for (const transport of ['stdio', 'http'] as const) {
           held.lock = await acquireNativeLock(binding.coordination_path!, { timeoutMs: 1000 });
           expect(held.lock).not.toBeNull();
           const pending = await reconcile(applyArgs);
-          expect(pending.exitCode).toBe(1);
+          expect(pending.exitCode).toBe(PENDING_WRITE_EXIT_CODE); // #5232: admitted, still pending
           expect(JSON.parse(pending.stdout)).toMatchObject({ error: 'write_pending', write_request: { request_id: reconcileId } });
           expect(JSON.parse(pending.stdout).write_request.state).not.toBe('committed');
           privateSummary(pending);
@@ -201,7 +202,7 @@ for (const transport of ['stdio', 'http'] as const) {
           expect(pendingReceipt.request_id).toBe(reconcileId);
           expect(pendingReceipt.state).not.toBe('committed');
           const pendingReplay = await reconcile(applyArgs);
-          expect(pendingReplay.exitCode).toBe(1);
+          expect(pendingReplay.exitCode).toBe(PENDING_WRITE_EXIT_CODE);
           expect(JSON.parse(pendingReplay.stdout)).toMatchObject({ error: 'write_pending', write_request: {
             request_id: reconcileId, created_at: pendingReceipt.created_at,
           } });

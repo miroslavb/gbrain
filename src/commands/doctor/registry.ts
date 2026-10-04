@@ -78,10 +78,15 @@ import {
   salienceEntry,
 } from './checks/knowledge-health.ts';
 import { queueHealthEntry, indexAuditEntry, imageAssetsEntry } from './checks/queue-assets.ts';
+import { globalMaintenanceTimeoutsEntry } from './checks/global-maintenance-timeouts.ts';
 import { legacyJobAuthorityEntry } from './checks/legacy-job-authority.ts';
+import { legacyTokenGrantsEntry } from './checks/legacy-token-grants.ts';
 import { syncFreshnessEntry, searchModeEntry } from './checks/sync-search.ts';
+import { autoChronicleEntry } from './checks/auto-chronicle.ts';
+import { factTakeVectorsEntry } from './checks/vector-coverage.ts';
 import { decideHealthEntry } from './checks/decide.ts';
 import { unlinkedFactsEntry } from './checks/unlinked-facts.ts';
+import { plannerStatsEntry } from './checks/planner-stats.ts';
 import { STOP_DOCTOR, type DoctorContext, type DoctorEntry } from './context.ts';
 import type { Check } from '../doctor.ts';
 
@@ -133,12 +138,17 @@ export const DOCTOR_CHECK_REGISTRY: readonly DoctorEntry[] = [
   effectiveDateEntry,
   salienceEntry,
   queueHealthEntry,
+  globalMaintenanceTimeoutsEntry,
   legacyJobAuthorityEntry,
+  legacyTokenGrantsEntry,
   indexAuditEntry,
   imageAssetsEntry,
   syncFreshnessEntry,
   decideHealthEntry,
   unlinkedFactsEntry,
+  autoChronicleEntry,
+  factTakeVectorsEntry,
+  plannerStatsEntry,
   searchModeEntry,
 ];
 

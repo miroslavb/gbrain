@@ -198,6 +198,16 @@ import { v194 } from './v194-decide-proposals.ts';
 import { v195 } from './v195-fact-relink-attempts.ts';
 import { v196 } from './v196-facts-ontology-stint-dedup.ts';
 import { v197 } from './v197-pages-credential-projection-pending.ts';
+import { v198 } from './v198-sources-upstream-observation.ts';
+import { v199 } from './v199-alias-source-cascade.ts';
+import { v200 } from './v200-take-embedding-identity.ts';
+import { v201 } from './v201-f1-write-attribution.ts';
+import { v202 } from './v202-f0-worktree-refreshes.ts';
+import { v203 } from './v203-f3-access-token-grants.ts';
+import { v204 } from './v204-f4-planner-stats.ts';
+import { v205 } from './v205-managed-guard-null-source-fallback.ts';
+import { v206 } from './v206-publication-failure-detail.ts';
+import { v207 } from './v207-chronicle-page-state.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -394,4 +404,14 @@ export const MIGRATIONS: Migration[] = [
   v195,
   v196,
   v197,
+  v198,
+  v199,
+  v200,
+  v201,
+  v202,
+  v203,
+  v204,
+  v205,
+  v206,
+  v207,
 ];

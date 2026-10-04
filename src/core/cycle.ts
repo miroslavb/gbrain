@@ -45,17 +45,19 @@
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync, realpathSync } from 'fs';
 import { join } from 'path';
-import { gbrainPath } from './config.ts';
+import { gbrainPath, loadConfig } from './config.ts';
 import type { BrainEngine } from './engine.ts';
 import { createProgress, type ProgressReporter } from './progress.ts';
 import { getCliOptions, cliOptsToProgressOptions } from './cli-options.ts';
 import { tryAcquireDbLock, reapDeadHolderLocks, inspectLock, LockStolenError, type DbLockHandle } from './db-lock.ts';
 import { timeContainedPhase } from './cycle/phase-containment.ts';
 import { isManagedBrain } from './cycle/phase-table.ts';
+import { managedPullWarning, type UpstreamRefresh } from './sync-upstream.ts';
 import { assertValidSourceId } from './source-id.ts';
 import { PHASE_SCOPE, SOURCE_FRESHNESS_PHASES, type PhaseScope } from './cycle/phase-scope.ts';
 import { assertEmbedNotStalled } from './embed-stall.ts';
 import { anyAbortSignal } from './abort-signals.ts';
+import { maybeRefreshPlannerStats } from './planner-stats.ts';
 
 export { PHASE_SCOPE, SOURCE_FRESHNESS_PHASES, type PhaseScope } from './cycle/phase-scope.ts';
 export { anyAbortSignal } from './abort-signals.ts';
@@ -78,6 +80,8 @@ export type CyclePhase =
   // soft-band takes against recent timeline evidence; report-only in v1
   // (writes reports/drift-<date>; auto_update mutates nothing).
   | 'drift'
+  // #5876 — Life Chronicle events from meeting/conversation/calendar pages (default ON).
+  | 'chronicle'
   | 'embed' | 'orphans' | 'purge'
   // v0.39 T12: schema-suggest passive trigger (D3 + D4 plan-eng-review).
   // Wraps runSuggest() — same library the CLI verb + EIIRP call.
@@ -167,6 +171,8 @@ export const ALL_PHASES: CyclePhase[] = [
   // the calibration trio (fresh take resolutions) and BEFORE embed so the
   // drift report page gets embedded same-cycle. Report-only in v1.
   'drift',
+  // #5876 — Life Chronicle events (global). BEFORE embed so event pages embed same-cycle.
+  'chronicle',
   // v0.41.11.0 — opt-in conversation-facts backfill. Default OFF; reads
   // cycle.conversation_facts_backfill.enabled gate inside the wrapper.
   // Ordered AFTER calibration_profile (matches the runCycle dispatch
@@ -325,6 +331,8 @@ const NEEDS_LOCK_PHASES: ReadonlySet<CyclePhase> = new Set([
   'calibration_profile',
   // #2653 — writes the reports/drift-<date> page.
   'drift',
+  // #5876 — writes event pages, projections and the chronicle ledger.
+  'chronicle',
   // v0.41 T9 — extract_atoms writes atom-typed pages via put_page;
   // synthesize_concepts writes concept-typed pages + tier updates. Both
   // mutate DB state and need the lock.
@@ -1221,11 +1229,13 @@ async function runPhaseSync(
     // instead of the global config key. The global key can drift out of
     // git history (force push, GC) causing a full reimport of all files.
     const sourceId = await resolveSourceForDir(engine, brainDir);
+    // #5255: managed sync refuses `git pull`; a cycle syncs local HEAD and reports it (explicit sync keeps refusing).
+    const managedPullSkipped = pull && await isManagedBrain(engine);
     const result = await performSync(engine, {
       repoPath: brainDir,
       sourceId,
       dryRun,
-      noPull: !pull,
+      noPull: !pull || managedPullSkipped,
       noEmbed: true,                       // embed is a separate phase
       noExtract: willRunExtractPhase,      // dedupe ONLY when cycle's extract phase will also run.
                                            // If extract isn't scheduled (e.g. `gbrain dream --phase sync`),
@@ -1248,16 +1258,20 @@ async function runPhaseSync(
     const uncommittedNote = uncommittedTotal > 0
       ? `; ${uncommittedTotal} uncommitted file(s) invisible to commit-driven sync — commit them or set sync.include_working_tree=true`
       : '';
+    const upstreamRefresh: UpstreamRefresh = !pull ? 'not_requested' : managedPullSkipped ? 'skipped_managed' : pullFailedPartial ? 'failed' : 'pulled';
+    const warning = managedPullSkipped ? managedPullWarning(sourceId ?? 'default', brainDir) : undefined;
+    const upstreamNote = warning ? `; upstream not refreshed (${warning.code}): ${warning.fix} (${warning.docs})` : '';
     return {
       phase: 'sync',
-      status: result.status === 'blocked_by_failures' || pullFailedPartial || uncommittedTotal > 0 ? 'warn' : 'ok',
+      status: result.status === 'blocked_by_failures' || pullFailedPartial || uncommittedTotal > 0 || warning ? 'warn' : 'ok',
       duration_ms: 0,
       summary: dryRun
         ? `${syncedCount} page(s) would sync, ${result.deleted} would delete`
         : pullFailedPartial
           ? `git pull failed, nothing imported — source may be behind its remote (sync anchor unchanged)`
-          : `+${result.added} added, ~${result.modified} modified, -${result.deleted} deleted${uncommittedNote}`,
+          : `+${result.added} added, ~${result.modified} modified, -${result.deleted} deleted${uncommittedNote}${upstreamNote}`,
       details: {
+        source_id: sourceId ?? 'default', upstream_refresh: upstreamRefresh, ...(warning ? { warning } : {}),
         added: result.added,
         modified: result.modified,
         deleted: result.deleted,
@@ -1576,6 +1590,9 @@ async function runPhaseResolveSymbolEdges(
 
 async function runPhaseEmbed(engine: BrainEngine, dryRun: boolean, signal?: AbortSignal): Promise<PhaseResult> {
   try {
+    if (!dryRun && (loadConfig()?.embedding_disabled === true || await engine.getConfig('embedding_disabled') === 'true')) {
+      return { phase: 'embed', status: 'skipped', duration_ms: 0, summary: 'embeddings disabled; no provider call made', details: { reason: 'embedding_disabled' } };
+    }
     const { runEmbedCore } = await import('../commands/embed.ts');
     // #1737: thread the cycle's abort signal so the embed phase (the long,
     // 10-15 min one) bails within a batch instead of running to completion
@@ -1734,7 +1751,7 @@ async function runPhasePurge(engine: BrainEngine, dryRun: boolean): Promise<Phas
       duration_ms: 0,
       summary:
         `purged ${purgedSources.length} source(s)` +
-        (purgeResult.blocked.length > 0 ? ` (${purgeResult.blocked.length} FK-blocked, see details)` : '') +
+        (purgeResult.blocked.length > 0 ? ` (${purgeResult.blocked.length} blocked, see details)` : '') +
         `, ${purgedPages.count} page(s), ` +
         `${purgedClones.count} orphan clone temp dir(s), ${purgedCheckpoints} stale op_checkpoint(s), ` +
         `${purgedBrainstormCheckpoints} stale brainstorm checkpoint(s), ` +
@@ -2260,9 +2277,9 @@ export async function runCycle(
           details: { reason: 'no_database' },
         });
       } else if (brainDir === null) {
-        phaseResults.push(skipNoBrainDir('extract'));
+        const { result, duration_ms } = await timePhase(async () => (await import('./cycle/connector-extract.ts')).runPhaseExtractDatabaseOnly(engine, { dryRun, sourceId: cycleSourceId, timeBudgetMs: CYCLE_STALE_DRAIN_BUDGET_MS }), 'extract');
+        phaseResults.push({ ...result, duration_ms });
       } else {
-        // Pass changed slugs from sync for incremental extract.
         // If sync didn't run (phases exclude it) or failed, syncPagesAffected
         // is undefined → extract falls back to full walk (safe default).
         progress.start('cycle.extract');
@@ -2322,6 +2339,10 @@ export async function runCycle(
       }
       await safeYield(opts.yieldBetweenPhases);
     }
+
+    // F4b: the freshness phases above write links, timeline and facts in bulk; on PGLite (no autovacuum)
+    // refresh the stale planner statistics before the heavier graph phases read them. Best-effort.
+    if (engine && !dryRun) await maybeRefreshPlannerStats(engine, 'cycle').catch(() => undefined);
 
     // ── v0.41 T9: extract_atoms (per-source, pack-gated) ──────────
     // Orchestrator-level pack gate: consults the active pack's `phases:`
@@ -2719,6 +2740,20 @@ export async function runCycle(
       await safeYield(opts.yieldBetweenPhases);
     }
 
+    // #5876 Life Chronicle (default ON): executes write-time ledger decisions and backfill rows, bounded per run.
+    if (phases.includes('chronicle')) {
+      checkAborted(cycleSignal);
+      if (!engine) phaseResults.push({ phase: 'chronicle', status: 'skipped', duration_ms: 0, summary: 'no database connected', details: { reason: 'no_database' } });
+      else {
+        progress.start('cycle.chronicle');
+        const { runPhaseChronicle } = await import('./cycle/chronicle.ts');
+        const { result, duration_ms } = await timePhase(() => runPhaseChronicle(engine, { dryRun, signal: cycleSignal,
+          yieldDuringPhase: opts.yieldDuringPhase, deadlineAtMs: opts.deadlineAtMs ?? null }), 'chronicle');
+        result.duration_ms = duration_ms; phaseResults.push(result); progress.finish();
+      }
+      await safeYield(opts.yieldBetweenPhases);
+    }
+
     // ── v0.41.11.0: conversation_facts_backfill ─────────────────
     // Opt-in (default OFF). Walks long-form conversation/meeting/slack/
     // email pages, segments by 30-min gap, runs facts extractor with a
@@ -2979,6 +3014,7 @@ export async function runCycle(
   // work it never actually did. Treat an aborted signal as a non-success run:
   // skip the freshness stamp and report status 'partial' with reason 'aborted'.
   const aborted = cycleSignal?.aborted === true;
+  if (aborted && isLockStolenAbort(stolen?.signal, externalSignal)) lockStolenAbort = true;
 
   // #1972 (Decision 7A gating): attribute force-evicts. The minion worker
   // force-evicts a job 30s after abort and logs "handler ignored abort signal";

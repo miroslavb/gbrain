@@ -267,6 +267,55 @@ E2E schedule does not shorten a PR critical path dominated by persistence.
 Report matched executed timings separately from dry-run partition estimates,
 including setup, queueing and retries; never count skip-only output as coverage.
 
+### Scale tier
+
+The gate shape and cadence are defined once, by O-CEO-16 (with O-ENG-16 and
+O-CEO-9) in the Foundations 1 plan; `scripts/scale/gates.ts` and
+`.github/workflows/scale-tier.yml` implement it. This section says how to run it.
+
+`bun run test:scale -- --pages 10000 [--engine pglite|postgres] [--seed 1]
+[--corpus-dir <dir>] [--import-mode cli|content] [--enforce] [--out <file.json>]`
+(`scripts/scale/run.ts`) generates a deterministic two-source brain from the
+seed (`scripts/scale/fixture.ts`: links, timeline bullets, `## Facts` and
+`## Takes` fences, partly overlapping bodies, island pages, a seeded dense vector in 16 dimensions
+per page), and imports it into a fresh brain under a temporary `GBRAIN_HOME`:
+PGLite in a fresh data dir, or Postgres in a fresh database created from
+`DATABASE_URL` and dropped afterwards. The default `--import-mode cli` writes
+the Markdown corpus once into `--corpus-dir` (reused while its manifest
+matches) and runs the real `gbrain import` per source, timing each file from
+its progress events; `--import-mode content` keeps the per-page
+`importFromContent` loop. It then extracts links, timeline, facts and takes,
+writes the vectors onto every chunk so the vector arm runs keylessly through
+`queryEmbedFn`, and measures p50 over five runs after a warmup for each op,
+each with a known-answer check: `get_health`, `list_pages`, local and MCP-path
+`search`, a source-scoped grant search, hybrid `query` with an injected
+vector, `traverse_graph`, `get_backlinks` and `find_orphans`, plus a
+cold-process first query and two concurrent receipt-bearing `put_page`s. It
+captures every statement each op sends and replays the reads under
+`EXPLAIN ANALYZE` for the planner check. The report leads with the headline
+metric, MCP search p50 at the run's size as shipped (no manual ANALYZE).
+
+Exit codes: 0 when every enforced gate passes, or always without `--enforce`;
+1 when an enforced gate fails (each failure names the gate and op and prints
+its EXPLAIN; the JSON report and a `.explain.txt` land next to `--out`);
+2 on a usage error; 3 when the harness itself crashed (not a verdict).
+Enforced under `--enforce`: import rate, known answers, no-op re-import,
+no duplicates across sources, the import phase timer, and the stats-dependent
+gates (`PLANNER_HEALTH_ENFORCED` in `scripts/scale/gates.ts`): the Nested Loop
+inner-loop gate on the key plans, the budgets phase timer, and planner stats.
+Planner stats are probed after the first timed op, because F4b analyzes on the
+first planner-sensitive read, and only hot tables above 500 rows must have
+`pg_stats` rows (PGLite only: on Postgres autovacuum owns statistics, so a missing row is report-only).
+Interactive ceilings and calibrated budgets (`scripts/scale/budgets.json`,
+written by `--calibrate`) stay report-only until
+`bun scripts/scale/trend.ts` prints "ceilings stable" over the last five
+nightly runs; a reviewer then sets the repo variable
+`GBRAIN_SCALE_ENFORCE_CEILINGS=1`. The same script picks the nightly sizes.
+Reproduce any report with the command it prints. The fixture's determinism
+is pinned by `test/scripts/scale-fixture.test.ts`, the gate policy by
+`test/scripts/scale-gates.test.ts` and `scale-trend.test.ts`, and a 40-page
+enforced run by `test/scripts/scale-harness.slow.test.ts`.
+
 ### Authoring gate
 
 Before adding a test, answer four questions in the PR description or the test
@@ -1003,7 +1052,7 @@ per-file rules. They do not cache passing results. Candidate scanner failures
 fail the guard, and matching files retain the same allowlists and diagnostics.
 
 `scripts/guards-manifest.tsv` is THE single registry of `scripts/check-*`
-guards (currently 67), each classified `scanner` (greps/parses repo sources —
+guards (currently 68), each classified `scanner` (greps/parses repo sources —
 must eventually carry fixtures), `buildfresh`, or `repostate` (build/freshness
 guards are exempt-with-reason, not fixture-tested).
 `scripts/guard-self-test.sh` (`bun run check:guard-self-test`, wired into
@@ -1042,6 +1091,29 @@ load. Take the executor as a parameter and import types from
 and the `Migration` type in `schema-migrations/types.ts`. Fixtures:
 `test/fixtures/guards/check-layering.ts/`; forms are driven in
 `test/scripts/layering.test.ts`.
+
+#### Durable-flush guard
+
+`scripts/check-durable-flush.ts` (`bun run check:durable-flush`, in
+`bun run verify`) fails on an `fsyncSync(fd)` anywhere in `src/` outside
+`src/core/fs-durable.ts` whose `fd` is assigned from a read-only `openSync`
+(flags omitted, a flag string without `w`/`a`/`+`, or `O_RDONLY` without
+`O_WRONLY`/`O_RDWR`), file or directory, and on one whose flags it cannot
+read. Windows refuses fsync on a read-only handle and has no directory flush
+(EPERM), which wedged the managed write queue (#5595) and every skill-bundle
+publication (#5475). Flushes of descriptors opened for writing pass. Each
+failure prints `FAIL [durable_flush_read_handle]: <file>:<line>`, the open it
+traced, a `Fix:` line and this anchor. Fix: fsync the descriptor you wrote
+through before closing it (set its final mode with `fchmodSync(fd)` first), or
+call `flushFile(path)` / `flushDirectory(path, { bestEffort? })` from
+`src/core/fs-durable.ts`. A file that cannot migrate yet goes in the guard's
+`ALLOWLIST` with a reason (empty today); an entry whose file no longer needs it fails as
+`durable_flush_stale_allowlist`. Fixtures:
+`test/fixtures/guards/check-durable-flush.ts/`; forms are driven in
+`test/scripts/durable-flush-guard.test.ts`. The helper and the #5595/#5475
+regressions run natively on the `windows-latest` row of the test.yml
+`security-regressions` job; `test/helpers/win32-flush-semantics.ts` makes them
+discriminate on POSIX hosts too.
 
 #### Engine-sql ratchet
 
@@ -2011,6 +2083,8 @@ Unit tests and what they cover:
 - `test/llm-json-reasoning-ladder.test.ts` — `parseLlmJson`'s reasoning-block recovery ladder: strips a closed or truncated `<think>` block ONLY after a raw parse fails (valid JSON containing the tag text is untouched), case-insensitive, array payloads, and the facts/atoms extractors routing through it (the ORIGINAL failure reason is preserved when the retry also fails).
 - `test/models-per-task-extract-atoms.serial.test.ts` — `gbrain models` reports `models.dream.extract_atoms` through the phase's own resolver (pins the narrow-resolver divergence: `models.tier.utility` is deliberately ignored; unconfigured falls back to the same tier default the runtime uses).
 - `test/conversation-facts-pricing-wiring.test.ts` — `pricing.overrides` reaches every conversation-facts entry point: the strict config registry accepts the key, and direct extraction, the cycle backfill, and `transcripts --facts` all price through the operator override.
+- `test/budget/no-pricing-registration.test.ts` — explicit cost cap + unpriced model: the refusal carries the lookup-and-register guidance as text and structured fields on BudgetTracker, enrich, conversation facts (core and cycle phase) and skillopt; default caps warn (naming `gbrain pricing set`) and run; `gbrain pricing set` merges without clobbering other overrides, validates rates, warns on $0, and the retried run is priced and capped; list/unset; and the trust boundary (no operation registers prices, thin clients refuse `gbrain pricing`). PGLite + gateway test transports.
+- `test/extract-atoms-explicit-cap-no-pricing.test.ts` — extract_atoms with an explicit `cycle.extract_atoms.budget_usd`: an unpriced chat model or embed route is refused (status `warn`, no model call, `details.no_pricing` with `register_command`), the rollup records an expected limit not a halt, doctor's `extract_health` overlay names the command, and after `gbrain pricing set` the retried run extracts and the record clears; a default cap still warns and runs. PGLite + `_chat` seam + embed transport stub.
 - `test/cycle/extract-atoms-model-config-fail-soft.test.ts` — a throwing `getConfig` during extract_atoms model resolution falls back to the tier default instead of rejecting the phase.
 
 ### Lane-move pilot (2026-09)
@@ -2059,6 +2133,7 @@ so a change to them selects all E2E (fail-closed); their owners run in every PR.
 
 E2E tests live in `test/e2e/` and run against real Postgres+pgvector (require `DATABASE_URL`), except where noted as PGLite in-memory (no `DATABASE_URL` needed). One file outside the directory also rides the e2e lane: `test/phantom-redirect-engine-parity.test.ts` (Postgres arm; see the file taxonomy above).
 
+- `test/e2e/write-attribution-postgres.test.ts` — runs `test/write-attribution.test.ts` on Postgres, direct and through transaction-mode PgBouncer (`scripts/e2e-backend-matrix.txt`): the coordinator's transaction-local actor reaches page versions, live revisions, facts, takes and timeline rows.
 - `test/e2e/facts-separation-postgres.test.ts` — real-Postgres parity for cross-session facts, supersession, and the pre-limit `unconsolidatedOnly` predicate used by consolidation.
 
 - `bun run test:e2e` runs Tier 1 (mechanical, all operations, no API keys). Includes dedicated cases for the postgres-engine `addLinksBatch` / `addTimelineEntriesBatch` bind path — postgres-js's JSONB bind (`jsonb_to_recordset(($1::jsonb)->'rows')`) differs from PGLite's and gets its own coverage.

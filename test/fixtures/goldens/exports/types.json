@@ -43,6 +43,13 @@
         "name": "AnomalyResult"
       },
       {
+        "kind": "type",
+        "name": "AttributedPageVersion",
+        "signature": [
+          "PageVersion & { written_by: WriteAttributionView; archived_by: WriteAttributionView; }"
+        ]
+      },
+      {
         "kind": "interface",
         "members": [
           "addCodeEdges: (edges: CodeEdgeInput[]) => Promise<number>",
@@ -59,7 +66,7 @@
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
-          "countStaleTakes: () => Promise<number>",
+          "countStaleTakes: (opts?: StaleTakeOpts) => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
           "deleteChunks: (slug: string, opts?: { sourceId?: string; }) => Promise<void>",
@@ -78,7 +85,7 @@
           "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; }) => Promise<FactRow[]>",
           "findDuplicatePage?: ((sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>) | undefined",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
-          "findOrphanPages: (opts?: PageReadScope & { sourceId?: string; sourceIds?: string[]; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; }>>",
+          "findOrphanPages: (opts?: PageReadScope & { sourceId?: string; sourceIds?: string[]; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
           "findTrajectory: (opts: TrajectoryOpts) => Promise<TrajectoryPoint[]>",
           "getAdjacencyBoosts: (pageIds: number[], opts?: PageReadScope) => Promise<Map<number, AdjacencyRow>>",
           "getAllConfig: () => Promise<Record<string, string>>",
@@ -143,7 +150,7 @@
           "listPrefixSampledPages: (opts: DomainBankSampleOpts) => Promise<DomainBankRow[]>",
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
-          "listStaleTakes: () => Promise<StaleTakeRow[]>",
+          "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
           "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: FactVisibility[]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
@@ -210,7 +217,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "BrainEngine"
@@ -856,6 +863,7 @@
           "excludePrivate?: boolean | undefined",
           "includeDeleted?: boolean | undefined",
           "limit?: number | undefined",
+          "listColumnsOnly?: boolean | undefined",
           "offset?: number | undefined",
           "slugPrefix?: string | undefined",
           "sort?: \"updated_desc\" | \"updated_asc\" | \"created_desc\" | \"slug\" | undefined",
@@ -962,7 +970,7 @@
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
-          "countStaleTakes: () => Promise<number>",
+          "countStaleTakes: (opts?: StaleTakeOpts) => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
           "deleteChunks: (slug: string, opts?: { sourceId?: string; }) => Promise<void>",
@@ -982,7 +990,7 @@
           "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; }) => Promise<FactRow[]>",
           "findDuplicatePage: (sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
-          "findOrphanPages: (opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; }>>",
+          "findOrphanPages: (opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
           "findTrajectory: (opts: TrajectoryOpts) => Promise<TrajectoryPoint[]>",
           "getAdjacencyBoosts: (pageIds: number[], opts?: PageReadScope) => Promise<Map<number, AdjacencyRow>>",
           "getAllConfig: () => Promise<Record<string, string>>",
@@ -1012,7 +1020,7 @@
           "getOntology: (entitySlug: string, opts?: OntologyReadOpts) => Promise<OntologyValue[]>",
           "getPage: (slug: string, opts?: PageSnapshotOptions) => Promise<Page | null>",
           "getPageTimestamps: (slugs: string[]) => Promise<Map<string, Date>>",
-          "getPoolDiagnostics: () => { tracked: PoolGaugeSnapshot; poolMax: number | null; } | null",
+          "getPoolDiagnostics: () => { tracked: PoolGaugeSnapshot; poolMax: number | null; poisonedDiscards: number; } | null",
           "getRawData: (slug: string, source?: string, opts?: PageReadScope & { includeDeleted?: boolean; }) => Promise<RawData[]>",
           "getRecentSalience: (opts: SalienceOpts) => Promise<SalienceResult[]>",
           "getSalienceScores: (refs: Array<{ slug: string; source_id: string; }>, opts?: PageReadPolicy) => Promise<Map<string, number>>",
@@ -1048,7 +1056,7 @@
           "listPrefixSampledPages: (opts: DomainBankSampleOpts) => Promise<DomainBankRow[]>",
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
-          "listStaleTakes: () => Promise<StaleTakeRow[]>",
+          "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
           "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: (\"private\" | \"world\")[]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
@@ -1060,6 +1068,7 @@
           "markPagesExtractedBatch: (refs: Array<{ slug: string; source_id: string; extractedAt?: string; }>, defaultExtractedAt: string) => Promise<number>",
           "mergeOntologyFact: (obs: OntologyObservationInput) => Promise<OntologyMergeResult>",
           "migrateFactsToCanonical: (phantomSlug: string, canonicalSlug: string, sourceId: string) => Promise<{ migrated: number; }>",
+          "onCheckout: (listener: () => void) => () => void",
           "private _beforeDisconnect",
           "private _bulkRetryOptsCache",
           "private _chunkWritesInTransaction",
@@ -1082,6 +1091,8 @@
           "private engineSql",
           "private engineSqlOn",
           "private getBulkRetryOpts",
+          "private onPoisoned",
+          "private poisonedDiscards",
           "private resolveFactsEmbeddingCast",
           "private rlsScopeBindingEnabled",
           "private runUnsafe",
@@ -1146,7 +1157,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "PostgresEngine",
@@ -1431,6 +1442,17 @@
           "underfilled: boolean"
         ],
         "name": "VectorPoolMeta"
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "at: string | null",
+          "operation: string | null",
+          "origin: \"request\" | \"maintenance\" | \"unrecorded\"",
+          "principal: { kind: string; id: string; name: string | null; } | null",
+          "request_id: string | null"
+        ],
+        "name": "WriteAttributionView"
       },
       {
         "kind": "function",
@@ -2448,11 +2470,12 @@
           "hooks?: { stop_push_debounce_min?: number | string; } | undefined",
           "integrations?: { memorable?: { enabled?: boolean; }; } | undefined",
           "litellm_api_key?: string | undefined",
-          "mcp?: { instructions?: string; publish_skills?: boolean; publish_advisor?: boolean; skills_dir?: string; strict_params?: \"warn\" | \"reject\"; default_surface_dcr?: \"verbs\" | \"starter\" | \"full\"; } | undefined",
+          "mcp?: { instructions?: string; publish_skills?: boolean; publish_advisor?: boolean; skills_dir?: string; strict_params?: \"warn\" | \"reject\"; default_surface_dcr?: \"verbs\" | \"starter\" | \"full\"; result_rows?: \"lean\" | \"full\"; } | undefined",
           "mcp_surface?: \"verbs\" | \"starter\" | \"full\" | undefined",
           "memory?: { auto_writeback?: string; auto_writeback_transient_ttl?: string; visibility_posture?: string; } | undefined",
           "openai_api_key?: string | undefined",
           "openrouter_api_key?: string | undefined",
+          "persistence?: { write_wait_ms?: number | string; } | undefined",
           "protocol_installed_at?: string | undefined",
           "provider_base_urls?: Record<string, string> | undefined",
           "provider_chat_options?: Record<string, Record<string, unknown>> | undefined",
@@ -3028,7 +3051,7 @@
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
-          "countStaleTakes: () => Promise<number>",
+          "countStaleTakes: (opts?: StaleTakeOpts) => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
           "deleteChunks: (slug: string, opts?: { sourceId?: string; }) => Promise<void>",
@@ -3047,7 +3070,7 @@
           "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; }) => Promise<FactRow[]>",
           "findDuplicatePage?: ((sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>) | undefined",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
-          "findOrphanPages: (opts?: PageReadScope & { sourceId?: string; sourceIds?: string[]; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; }>>",
+          "findOrphanPages: (opts?: PageReadScope & { sourceId?: string; sourceIds?: string[]; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
           "findTrajectory: (opts: TrajectoryOpts) => Promise<TrajectoryPoint[]>",
           "getAdjacencyBoosts: (pageIds: number[], opts?: PageReadScope) => Promise<Map<number, AdjacencyRow>>",
           "getAllConfig: () => Promise<Record<string, string>>",
@@ -3112,7 +3135,7 @@
           "listPrefixSampledPages: (opts: DomainBankSampleOpts) => Promise<DomainBankRow[]>",
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
-          "listStaleTakes: () => Promise<StaleTakeRow[]>",
+          "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
           "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: FactVisibility[]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
@@ -3179,7 +3202,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "BrainEngine"
@@ -3263,6 +3286,7 @@
           "activeOnly?: boolean | undefined",
           "eventTime?: boolean | undefined",
           "excludeAuditRows?: boolean | undefined",
+          "fingerprint?: boolean | undefined",
           "grep?: string | undefined",
           "kinds?: FactKind[] | undefined",
           "limit?: number | undefined",
@@ -3287,6 +3311,7 @@
           "entity_slug: string | null",
           "expired_at: Date | null",
           "fact: string",
+          "fact_fingerprint?: string | undefined",
           "id: number",
           "kind: FactKind",
           "notability: \"low\" | \"medium\" | \"high\"",
@@ -3487,6 +3512,15 @@
       {
         "kind": "interface",
         "members": [
+          "dims?: number | undefined",
+          "model?: string | undefined",
+          "sourceId?: string | undefined"
+        ],
+        "name": "StaleTakeOpts"
+      },
+      {
+        "kind": "interface",
+        "members": [
           "claim: string",
           "page_slug: string",
           "row_num: number",
@@ -3552,7 +3586,9 @@
       {
         "kind": "interface",
         "members": [
+          "claim: string",
           "embedding: Float32Array<ArrayBufferLike>",
+          "model: string",
           "take_id: number"
         ],
         "name": "TakeEmbeddingInput"
@@ -4011,6 +4047,13 @@
       },
       {
         "kind": "function",
+        "name": "filterRefsSince",
+        "signature": [
+          "<T extends { updated_at: Date; }>(refs: T[], since: string | undefined) => T[]"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "logBatchRetry",
         "signature": [
           "(label: string, snapshotLen: number, err: unknown, jsonMode: boolean) => void"
@@ -4234,7 +4277,7 @@
         "kind": "function",
         "name": "importFromContent",
         "signature": [
-          "(engine: BrainEngine, slug: string, content: string, opts?: { prepare?: (prepared: PreparedContentImport) => Promise<ImportResult>; prepareFrontmatter?: (page: ParsedPage) => void; noEmbed?: boolean; sourceId?: string; filename?: string; sourcePath?: string; sourceRoot?: string; fileTimes?: { birthtime?: Date; mtime?: Date; firstCommit?: Date; }; forceRechunk?: boolean; activePack?: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; aliases?: ReadonlyArray<string>; }>; }; source_kind?: string | null; source_uri?: string | null; ingested_via?: string | null; remote?: boolean; allowEmptyOverwrite?: boolean; beforeCommit?: (tx: BrainEngine, slug: string) => Promise<void>; onPostCommitEmbedding?: (complete: () => Promise<ImportEmbeddingResult>) => void; }) => Promise<ImportResult>"
+          "(engine: BrainEngine, slug: string, content: string, opts?: { prepare?: (prepared: PreparedContentImport) => Promise<ImportResult>; prepareFrontmatter?: (page: ParsedPage) => void; noEmbed?: boolean; sourceId?: string; filename?: string; sourcePath?: string; sourceRoot?: string; fileTimes?: { birthtime?: Date; mtime?: Date; firstCommit?: Date; }; forceRechunk?: boolean; activePack?: ParseOpts[\"activePack\"]; source_kind?: string | null; source_uri?: string | null; ingested_via?: string | null; remote?: boolean; allowEmptyOverwrite?: boolean; beforeCommit?: (tx: BrainEngine, slug: string) => Promise<void>; onPostCommitEmbedding?: (complete: () => Promise<ImportEmbeddingResult>) => void; }) => Promise<ImportResult>"
         ]
       },
       {
@@ -4493,7 +4536,7 @@
         "kind": "variable",
         "name": "LINK_EXTRACTOR_VERSION_TS",
         "signature": [
-          "\"2026-10-01T00:00:00Z\""
+          "\"2026-10-02T00:00:00Z\""
         ]
       },
       {
@@ -4515,7 +4558,7 @@
         "kind": "type",
         "name": "LinkExtractionPack",
         "signature": [
-          "Pick<{ api_version: \"gbrain-schema-pack-v1\"; name: string; version: string; description: string; gbrain_min_version: string; extends: string | null; borrow_from: { pack: string; types?: string[] | undefined; link_types?: string[] | undefined; }[]; page_types: { name: string; primitive: \"entity\" | \"temporal\" | \"concept\" | \"media\" | \"annotation\"; path_prefixes: string[]; aliases: string[]; extractable: boolean | { eval_dimensions: string[]; prompt_template?: string | undefined; fixture_corpus?: string | undefined; benchmark_min_recall?: number | undefined; verifier_path?: string | undefined; }; expert_routing: boolean; subtypes?: { name: string; when: { path_pattern?: string | undefined; frontmatter_field?: string | undefined; frontmatter_value?: string | number | boolean | undefined; }; }[] | undefined; }[]; link_types: { name: string; inverse?: string | undefined; inference?: { regex?: string | undefined; page_type?: string | undefined; target_type?: string | undefined; } | undefined; }[]; frontmatter_links: { page_type: string; fields: string[]; link_type: string; }[]; takes_kinds: string[]; enrichable_types: { type: string; rubric?: string | undefined; }[]; filing_rules: { kind: string; directory: string; examples: string[]; description?: string | undefined; }[]; author?: string | undefined; license?: string | undefined; homepage?: string | undefined; phases?: string[] | undefined; calibration_domains?: { name: string; aggregator: \"scalar_brier\" | \"weighted_brier\" | \"count_based\" | \"cluster_summary\"; page_types: string[]; }[] | undefined; migration_from?: { pack: string; version: string; } | undefined; mapping_rules?: ({ kind: \"retype\"; from_type: string; to_type: string; subtype_field: \"kind\" | \"format\" | \"subtype\" | \"legacy_type\" | \"origin\" | \"period\" | \"domain\"; subtype?: string | undefined; path_filter?: string | undefined; slug_filter?: string | undefined; } | { kind: \"page_to_link\"; from_type: string; link_type: string; source_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; target_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; inverse?: string | undefined; preserve_notes?: boolean | undefined; } | { kind: \"page_to_alias\"; from_type: string; canonical_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; alias_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; notes_from?: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; } | undefined; })[] | undefined; }, \"link_types\" | \"frontmatter_links\"> & Partial<Pick<{ api_version: \"gbrain-schema-pack-v1\"; name: string; version: string; description: string; gbrain_min_version: string; extends: string | null; borrow_from: { pack: string; types?: string[] | undefined; link_types?: string[] | undefined; }[]; page_types: { name: string; primitive: \"entity\" | \"temporal\" | \"concept\" | \"media\" | \"annotation\"; path_prefixes: string[]; aliases: string[]; extractable: boolean | { eval_dimensions: string[]; prompt_template?: string | undefined; fixture_corpus?: string | undefined; benchmark_min_recall?: number | undefined; verifier_path?: string | undefined; }; expert_routing: boolean; subtypes?: { name: string; when: { path_pattern?: string | undefined; frontmatter_field?: string | undefined; frontmatter_value?: string | number | boolean | undefined; }; }[] | undefined; }[]; link_types: { name: string; inverse?: string | undefined; inference?: { regex?: string | undefined; page_type?: string | undefined; target_type?: string | undefined; } | undefined; }[]; frontmatter_links: { page_type: string; fields: string[]; link_type: string; }[]; takes_kinds: string[]; enrichable_types: { type: string; rubric?: string | undefined; }[]; filing_rules: { kind: string; directory: string; examples: string[]; description?: string | undefined; }[]; author?: string | undefined; license?: string | undefined; homepage?: string | undefined; phases?: string[] | undefined; calibration_domains?: { name: string; aggregator: \"scalar_brier\" | \"weighted_brier\" | \"count_based\" | \"cluster_summary\"; page_types: string[]; }[] | undefined; migration_from?: { pack: string; version: string; } | undefined; mapping_rules?: ({ kind: \"retype\"; from_type: string; to_type: string; subtype_field: \"kind\" | \"format\" | \"subtype\" | \"legacy_type\" | \"origin\" | \"period\" | \"domain\"; subtype?: string | undefined; path_filter?: string | undefined; slug_filter?: string | undefined; } | { kind: \"page_to_link\"; from_type: string; link_type: string; source_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; target_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; inverse?: string | undefined; preserve_notes?: boolean | undefined; } | { kind: \"page_to_alias\"; from_type: string; canonical_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; alias_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; notes_from?: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; } | undefined; })[] | undefined; }, \"page_types\">>"
+          "Pick<{ api_version: \"gbrain-schema-pack-v1\"; name: string; version: string; description: string; gbrain_min_version: string; extends: string | null; borrow_from: { pack: string; types?: string[] | undefined; link_types?: string[] | undefined; }[]; page_types: { name: string; primitive: \"entity\" | \"temporal\" | \"concept\" | \"media\" | \"annotation\"; path_prefixes: string[]; aliases: string[]; extractable: boolean | { eval_dimensions: string[]; prompt_template?: string | undefined; fixture_corpus?: string | undefined; benchmark_min_recall?: number | undefined; verifier_path?: string | undefined; }; expert_routing: boolean; subtypes?: { name: string; when: { path_pattern?: string | undefined; frontmatter_field?: string | undefined; frontmatter_value?: string | number | boolean | undefined; }; }[] | undefined; }[]; link_types: { name: string; inverse?: string | undefined; inference?: { regex?: string | undefined; page_type?: string | undefined; target_type?: string | undefined; ner_only?: boolean | undefined; } | undefined; }[]; frontmatter_links: { page_type: string; fields: string[]; link_type: string; }[]; takes_kinds: string[]; enrichable_types: { type: string; rubric?: string | undefined; }[]; filing_rules: { kind: string; directory: string; examples: string[]; description?: string | undefined; }[]; author?: string | undefined; license?: string | undefined; homepage?: string | undefined; phases?: string[] | undefined; calibration_domains?: { name: string; aggregator: \"scalar_brier\" | \"weighted_brier\" | \"count_based\" | \"cluster_summary\"; page_types: string[]; }[] | undefined; migration_from?: { pack: string; version: string; } | undefined; mapping_rules?: ({ kind: \"retype\"; from_type: string; to_type: string; subtype_field: \"kind\" | \"format\" | \"subtype\" | \"legacy_type\" | \"origin\" | \"period\" | \"domain\"; subtype?: string | undefined; path_filter?: string | undefined; slug_filter?: string | undefined; } | { kind: \"page_to_link\"; from_type: string; link_type: string; source_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; target_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; inverse?: string | undefined; preserve_notes?: boolean | undefined; } | { kind: \"page_to_alias\"; from_type: string; canonical_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; alias_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; notes_from?: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; } | undefined; })[] | undefined; }, \"link_types\" | \"frontmatter_links\"> & Partial<Pick<{ api_version: \"gbrain-schema-pack-v1\"; name: string; version: string; description: string; gbrain_min_version: string; extends: string | null; borrow_from: { pack: string; types?: string[] | undefined; link_types?: string[] | undefined; }[]; page_types: { name: string; primitive: \"entity\" | \"temporal\" | \"concept\" | \"media\" | \"annotation\"; path_prefixes: string[]; aliases: string[]; extractable: boolean | { eval_dimensions: string[]; prompt_template?: string | undefined; fixture_corpus?: string | undefined; benchmark_min_recall?: number | undefined; verifier_path?: string | undefined; }; expert_routing: boolean; subtypes?: { name: string; when: { path_pattern?: string | undefined; frontmatter_field?: string | undefined; frontmatter_value?: string | number | boolean | undefined; }; }[] | undefined; }[]; link_types: { name: string; inverse?: string | undefined; inference?: { regex?: string | undefined; page_type?: string | undefined; target_type?: string | undefined; ner_only?: boolean | undefined; } | undefined; }[]; frontmatter_links: { page_type: string; fields: string[]; link_type: string; }[]; takes_kinds: string[]; enrichable_types: { type: string; rubric?: string | undefined; }[]; filing_rules: { kind: string; directory: string; examples: string[]; description?: string | undefined; }[]; author?: string | undefined; license?: string | undefined; homepage?: string | undefined; phases?: string[] | undefined; calibration_domains?: { name: string; aggregator: \"scalar_brier\" | \"weighted_brier\" | \"count_based\" | \"cluster_summary\"; page_types: string[]; }[] | undefined; migration_from?: { pack: string; version: string; } | undefined; mapping_rules?: ({ kind: \"retype\"; from_type: string; to_type: string; subtype_field: \"kind\" | \"format\" | \"subtype\" | \"legacy_type\" | \"origin\" | \"period\" | \"domain\"; subtype?: string | undefined; path_filter?: string | undefined; slug_filter?: string | undefined; } | { kind: \"page_to_link\"; from_type: string; link_type: string; source_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; target_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; inverse?: string | undefined; preserve_notes?: boolean | undefined; } | { kind: \"page_to_alias\"; from_type: string; canonical_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; alias_slug_from: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; }; notes_from?: \"slug\" | \"frontmatter\" | \"body_first_link\" | \"body_excerpt\" | { frontmatter_field: string; } | undefined; })[] | undefined; }, \"page_types\">>"
         ]
       },
       {
@@ -4767,7 +4810,7 @@
       {
         "kind": "interface",
         "members": [
-          "activePack?: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; }>; } | undefined",
+          "activePack?: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; subtypes?: ReadonlyArray<{ name: string; when: { path_pattern?: string; frontmatter_field?: string; frontmatter_value?: unknown; }; }>; }>; } | undefined",
           "expectedSlug?: string | undefined",
           "validate?: boolean | undefined"
         ],
@@ -4795,6 +4838,7 @@
           "compiled_truth: string",
           "errors?: ParseValidationError[] | undefined",
           "frontmatter: Record<string, unknown>",
+          "inferredSubtype?: { type: string; name: string; } | undefined",
           "slug: string",
           "tags: string[]",
           "timeline: string",
@@ -4865,6 +4909,13 @@
         "name": "resolvePageFilePath",
         "signature": [
           "(brainDir: string, slug: string, sourceId: string) => string"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "resolveParsedSubtype",
+        "signature": [
+          "(parsed: ParsedMarkdown, existing?: { type: string; frontmatter?: Record<string, unknown> | null; } | null) => void"
         ]
       },
       {
@@ -5388,13 +5439,15 @@
           "localSourceImplicit?: boolean | undefined",
           "logger: Logger",
           "remote: boolean",
+          "resultRows?: \"full\" | \"lean\" | undefined",
           "sessionId?: string | undefined",
           "sourceId: string",
           "subagentId?: number | undefined",
           "surfaceCeiling?: \"verbs\" | \"starter\" | \"full\" | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "transport?: \"stdio\" | \"http\" | undefined",
-          "viaSubagent?: boolean | undefined"
+          "viaSubagent?: boolean | undefined",
+          "writeWaitMs?: number | undefined"
         ],
         "name": "OperationContext"
       },
@@ -5432,6 +5485,7 @@
           "description?: string | undefined",
           "enum?: string[] | undefined",
           "items?: ParamDef | undefined",
+          "properties?: Record<string, ParamDef> | undefined",
           "required?: boolean | undefined",
           "type: \"string\" | \"number\" | \"boolean\" | \"object\" | \"array\""
         ],
@@ -5597,7 +5651,7 @@
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
-          "countStaleTakes: () => Promise<number>",
+          "countStaleTakes: (opts?: StaleTakeOpts) => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
           "db: PGlite",
@@ -5617,7 +5671,7 @@
           "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; }) => Promise<FactRow[]>",
           "findDuplicatePage: (sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
-          "findOrphanPages: (opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; }>>",
+          "findOrphanPages: (opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
           "findTrajectory: (opts: TrajectoryOpts) => Promise<TrajectoryPoint[]>",
           "getAdjacencyBoosts: (pageIds: number[], opts?: PageReadScope) => Promise<Map<number, AdjacencyRow>>",
           "getAllConfig: () => Promise<Record<string, string>>",
@@ -5682,7 +5736,7 @@
           "listPrefixSampledPages: (opts: DomainBankSampleOpts) => Promise<DomainBankRow[]>",
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
-          "listStaleTakes: () => Promise<StaleTakeRow[]>",
+          "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
           "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: (\"private\" | \"world\")[]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
@@ -6010,6 +6064,20 @@
         "name": "peekLock",
         "signature": [
           "(dataDir: string | undefined) => LockPeekResult"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "readBootId",
+        "signature": [
+          "() => string | null"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "readPidNs",
+        "signature": [
+          "() => string | null"
         ]
       },
       {
@@ -7047,6 +7115,13 @@
         "name": "AnomalyResult"
       },
       {
+        "kind": "type",
+        "name": "AttributedPageVersion",
+        "signature": [
+          "PageVersion & { written_by: WriteAttributionView; archived_by: WriteAttributionView; }"
+        ]
+      },
+      {
         "kind": "interface",
         "members": [
           "brain_score: number",
@@ -7687,6 +7762,7 @@
           "excludePrivate?: boolean | undefined",
           "includeDeleted?: boolean | undefined",
           "limit?: number | undefined",
+          "listColumnsOnly?: boolean | undefined",
           "offset?: number | undefined",
           "slugPrefix?: string | undefined",
           "sort?: \"updated_desc\" | \"updated_asc\" | \"created_desc\" | \"slug\" | undefined",
@@ -8051,6 +8127,17 @@
           "underfilled: boolean"
         ],
         "name": "VectorPoolMeta"
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "at: string | null",
+          "operation: string | null",
+          "origin: \"request\" | \"maintenance\" | \"unrecorded\"",
+          "principal: { kind: string; id: string; name: string | null; } | null",
+          "request_id: string | null"
+        ],
+        "name": "WriteAttributionView"
       },
       {
         "kind": "function",

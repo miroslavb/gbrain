@@ -196,20 +196,20 @@ const recall: Operation = {
   description:
     'MEMORY VERB (v1): retrieve saved facts/snippets — the protocol read verb. Filters hot-memory facts by entity / since / session_id; pass `query` to ALSO run hybrid search over pages (results[] arm); pass `budget_tokens` for server-side packing (response reports budget_used + dropped_count — never trims client-side). Every fact is agent-readable under the host world-only policy. Routing: for ONE known person/company/project card use `entity` (zero LLM); for broad questions needing reasoning use `synthesize` (expensive). Branch on structured fields (status/kind/evidence), never on prose. Every response carries protocol_version.',
   params: {
-    entity: { type: 'string', description: 'Entity slug (canonical). Returns facts about this entity newest first, each labelled with its source_id. Across several granted sources, same-slug entities that no entity-identity group links are different entities: facts comes back empty and ambiguous_entity names each (source_id, entity_slug); pass source_id to read one.' },
-    query: { type: 'string', description: 'MEMORY_VERBS v1: free-text retrieval over pages (hybrid search arm). Response adds results[] (slug, title, chunk, evidence, create_safety, provenance). Combinable with entity (both arms run). Degrades to keyword-only search when no embedding provider is configured (search_degraded notes it; never an error).' },
-    budget_tokens: { type: 'number', description: 'MEMORY_VERBS v1: server-side token budget (char/4 estimate). Facts pack first, then results. Response adds budget_tokens, budget_used, dropped_count.' },
-    budget_policy: { type: 'string', enum: ['facts_first', 'query_first'], description: 'Optional packing order. facts_first preserves legacy behavior (default). query_first packs the ranked page prefix before facts only with a nonblank query and positive finite budget; a positive budget below one token keeps neither arm. No query or inactive budget preserves legacy behavior. Neither policy skips oversized items or truncates. Supplying this option adds budget_packing accounting. Keep fact-focused/entity-filtered questions on facts_first.' },
-    source_id: { type: 'string', description: 'Optional concrete source id for both facts and page results. Narrows the caller’s authorized scope, including an explicit default; a denied, missing, or archived source fails rather than widening. Omit to preserve the existing context/grant scope.' },
-    since: { type: 'string', description: 'ISO 8601 datetime or duration shorthand (e.g. "8 hours ago"). Filters the FACTS arm only, on event time (valid_from, falling back to created_at); composes with `entity` and `session_id`. An unparseable value is rejected (invalid_params).' },
-    session_id: { type: 'string', description: 'Source session id (e.g. topic-A). Returns facts captured in that session.' },
-    include_expired: { type: 'boolean', description: 'When true, include expired_at IS NOT NULL rows. Default false.' },
-    supersessions: { type: 'boolean', description: 'When true, return only the supersession audit log (facts with superseded_by set), newest first by COALESCE(expired_at, valid_until).' },
-    limit: { type: 'number', description: 'Per-arm cap: max fact rows AND max search results. Default 50, cap 100.' },
-    grep: { type: 'string', description: 'Substring filter on fact text (case-insensitive). Applied in SQL before the limit, so matches on high-cardinality entities are found even outside the newest-N window.' },
-    include_pending: { type: 'boolean', description: 'v0.32: when true, response includes pending_consolidation_count (facts not yet promoted to takes by the dream-cycle consolidate phase). One round trip; backward-compatible (field omitted when false).' },
-    return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: "Evidence unit for the results[] arm (needs `query`; default config search.return_unit = 'auto'). 'window' adds neighbor chunks, 'section' the enclosing section or conversation rounds, 'page' the whole page/session (best for multi-session questions), 'auto' the whole page for conversation pages and the ranked chunk unchanged for everything else (budget_tokens or budget_policy without return_unit keeps chunk packing). Non-chunk units return one result per page with `delivered` metadata and a top-level `delivery` block; the evidence is budgeted by budget_tokens (default 6000, auto 24000) and then packed by recall's usual rules." },
-    return_window: { type: 'number', description: "Neighbor chunks on each side for return_unit 'window' (integer 1-3, default 1)." },
+    entity: { type: 'string', description: 'Entity slug; facts about it, newest first.' },
+    query: { type: 'string', description: 'Also search pages (results[] arm).' },
+    budget_tokens: { type: 'number', description: 'Token budget; facts pack first.' },
+    budget_policy: { type: 'string', enum: ['facts_first', 'query_first'], description: 'facts_first (default) or query_first.' },
+    source_id: { type: 'string', description: 'Narrow to one source you may read.' },
+    since: { type: 'string', description: 'Facts since (ISO 8601 or "8 hours ago").' },
+    session_id: { type: 'string', description: 'Facts captured in this session.' },
+    include_expired: { type: 'boolean', description: 'Include expired facts.' },
+    supersessions: { type: 'boolean', description: 'Only the supersession audit log.' },
+    limit: { type: 'number', description: 'Per-arm max (default 50, cap 100).' },
+    grep: { type: 'string', description: 'Substring of the fact text.' },
+    include_pending: { type: 'boolean', description: 'Add pending count.' },
+    return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: 'Evidence unit for results[] (see search).' },
+    return_window: { type: 'number', description: 'Window size 1-3.' },
   },
   scope: 'read',
   verb: true,
@@ -222,7 +222,7 @@ const recall: Operation = {
 
     // Federated grants (cathedral-6): the fact arms honor the SAME scope
     // ladder as every other read-side op — federated array > scalar >
-    // default — via sourceScopeOpts, never a hand-rolled filter. The engine
+    // default — via federatedSearchScope, never a hand-rolled filter. The engine
     // fact APIs are scalar-source, so a federated grant fans out per granted
     // source and merges newest-first; a single-source caller takes exactly
     // the pre-v1 single-query path. A trusted-local `__all__` ({}) has no
@@ -231,7 +231,9 @@ const recall: Operation = {
     let scope: ReturnType<typeof sourceScopeOpts>;
     try {
       sourceIdParam = parseSourceIdParam(p.source_id, 'recall');
-      scope = sourceIdParam === undefined ? sourceScopeOpts(ctx) : federatedSearchScope(ctx, sourceIdParam);
+      // The facts arms widen an unqualified no-grant caller across the transport-computed
+      // federated set, exactly like the page-search arm below and every sibling read op.
+      scope = federatedSearchScope(ctx, sourceIdParam);
       await assertExplicitSourceLive(ctx, sourceIdParam);
     } catch (error) {
       if (!(error instanceof OperationError) || p.source_id === undefined || p.source_id === null) throw error;

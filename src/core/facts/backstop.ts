@@ -47,6 +47,7 @@ import type { GBrainConfig } from '../config.ts';
 import { isAvailable } from '../ai/gateway.ts';
 import { withAIInvocationPreflight } from '../ai/invocation-guard.ts';
 import { decideSingleFact } from './single-prepare.ts';
+import { cosineVerdict, dedupCapturedFacts, withCaptureDrops } from './capture-dedup.ts';
 import { appendContextNote, type InferredVia } from './subject-infer.ts';
 import { inferenceNote, inferMissingSubjects } from './subject-infer-write.ts';
 
@@ -101,8 +102,10 @@ export interface FactsBackstopCtx {
    *   - 'code_import'        — code import path
    *   - 'hook:compact'       — compaction-boundary checkpoint harvest (cathedral 5)
    *   - 'hook:writeback'     — ambient-writeback Stop-hook backstop (WP4)
+   *   - 'sweep:corpus'       — the sweep's session-corpus pass
+   * The last three are capture lanes (capture-dedup.ts, #5888).
    */
-  source: 'sync:import' | 'mcp:put_page' | 'mcp:extract_facts' | 'file_upload' | 'code_import' | 'hook:compact' | 'hook:writeback';
+  source: 'sync:import' | 'mcp:put_page' | 'mcp:extract_facts' | 'file_upload' | 'code_import' | 'hook:compact' | 'hook:writeback' | 'sweep:corpus';
   /** Execution mode — D8. Default 'queue' (fire-and-forget). */
   mode?: 'queue' | 'inline';
   /** Notability filter — D4. Default 'all'; sync uses 'high-only'; the
@@ -130,6 +133,8 @@ export interface FactsBackstopCtx {
    * context_pack / delta projections surface the provenance.
    */
   sourceSlug?: string;
+  /** #5888: when the source turn happened, for the capture-lane dedup window (default: now). */
+  turnAt?: Date;
 }
 
 /** Discriminated return shape based on FactsBackstopCtx.mode. */
@@ -171,14 +176,6 @@ interface ParsedPageInput {
    */
   extract_text?: string;
 }
-
-/**
- * Cosine similarity threshold for the dedup fast-path. Matches the existing
- * extract_facts op behavior at operations.ts:2460. Higher = stricter
- * dedup (more rows kept distinct); lower = looser (more rows treated as
- * duplicates of older ones).
- */
-const DEDUP_THRESHOLD = 0.95;
 
 /** k for findCandidateDuplicates — ceiling on candidates considered. */
 const DEDUP_CANDIDATE_LIMIT = 5;
@@ -697,13 +694,14 @@ async function runPipelineBodyInner(
   }
 
   const visibility = 'world' as const;
-  const facts = await inferMissingSubjects(ctx, outcome.facts, visibility, input.pageSlug, managed);
-  if (managed) return publishManagedFacts(ctx.engine, managed, ctx, facts, visibility, input.pageSlug);
+  // #5888: one exact-duplicate check for the capture lanes, before either writer.
+  const { facts, dropped } = await dedupCapturedFacts(ctx, await inferMissingSubjects(ctx, outcome.facts, visibility, input.pageSlug, managed), visibility, resolveEntitySlugWithSource);
+  if (managed) return withCaptureDrops(dropped, facts.length || !dropped.length ? await publishManagedFacts(ctx.engine, managed, ctx, facts, visibility, input.pageSlug) : null);
 
   let inserted = 0;
-  let duplicate = 0;
+  let duplicate = dropped.length;
   let superseded = 0;
-  const fact_ids: number[] = [];
+  const fact_ids: number[] = [...dropped];
   // Cathedral 5: slugs whose fence-write actually inserted a fact this run.
   const fencedSlugs = new Set<string>();
 
@@ -746,7 +744,7 @@ async function runPipelineBodyInner(
 
     // Dedup against DB candidates (correct per Codex Q7: fence rows
     // have no embeddings; FS lock + sync invariant means DB == fence
-    // at write time). Threshold 0.95 unchanged.
+    // at write time). cosineVerdict: 0.95 for explicit lanes; capture lanes never drop by cosine (#5888).
     const exact = resolvedSlug ? await decideSingleFact(ctx.engine, ctx.sourceId, { entity_slug: resolvedSlug, fact: f.fact, kind: f.kind ?? 'fact', visibility }, null) : null;
     let matchedExistingId: number | null = exact?.candidate?.id ?? null;
     if (matchedExistingId === null && resolvedSlug && f.embedding && !f.entity_inferred) {
@@ -756,15 +754,14 @@ async function runPipelineBodyInner(
         f.fact,
         { embedding: f.embedding, embeddingModel: f.embedding_model, k: DEDUP_CANDIDATE_LIMIT },
       );
-      let topId: number | null = null;
-      let topScore = -1;
+      let top: { id: number; score: number; fact: string } | null = null;
       for (const c of candidates) {
         if (!c.embedding) continue;
         const s = cosineSimilarity(f.embedding, c.embedding);
-        if (s > topScore) { topScore = s; topId = c.id; }
+        if (!top || s > top.score) top = { id: c.id, score: s, fact: c.fact };
       }
-      if (topId !== null && topScore >= DEDUP_THRESHOLD) {
-        matchedExistingId = topId;
+      if (top && cosineVerdict(ctx.source, top.score, f.fact, top.fact) === 'duplicate') {
+        matchedExistingId = top.id;
       }
     }
 

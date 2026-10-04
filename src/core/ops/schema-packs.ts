@@ -214,95 +214,23 @@ const schema_explain_type: Operation = {
 const schema_review_orphans: Operation = {
   name: 'schema_review_orphans',
   outputRedaction: 'no_stored_text',
-  description: 'v0.40.6.0: list pages with no active-pack type match. Typeless pages return as {orphan_count, orphans: [{slug, source_id}]}. Pack-aware arm: pages whose STORED type is neither a declared page_type nor an alias in the active pack return as {undeclared_page_count, undeclared_types: [{type, count, sample_slugs}]} — the stored_type_undeclared lint semantics, previously invisible over MCP. Best-effort: when the active pack cannot load, the pack-aware arm degrades to empty with pack: null.',
+  description: 'v0.40.6.0: list pages with no active-pack type match. Returns {orphan_count, orphans: [{slug, source_id}]}.',
   params: {
     limit: { type: 'number', description: 'Max orphans to return (default 100)' },
   },
   scope: 'read',
   handler: async (ctx, p) => {
     const limit = Math.max(1, Math.min(10000, (p.limit as number) ?? 100));
-    const scope = sourceScopeOpts(ctx);
-    // The two arms share the caller's source scope; each keeps its own
-    // params array (different WHERE shapes).
-    const scopeSql = (startIdx: number): { sql: string; params: unknown[] } => {
-      if (scope.sourceIds && scope.sourceIds.length > 0) {
-        return { sql: ` AND source_id = ANY($${startIdx}::text[])`, params: [scope.sourceIds] };
-      }
-      if (scope.sourceId) {
-        return { sql: ` AND source_id = $${startIdx}`, params: [scope.sourceId] };
-      }
-      return { sql: '', params: [] };
-    };
-
-    let orphanRows: Array<{ slug: string; source_id: string }> = [];
+    const { loadActivePackBestEffort } = await import('../schema-pack/best-effort.ts');
+    const { findTypeOrphans } = await import('../schema-pack/review.ts');
+    const { isUndefinedTableError } = await import('../utils.ts');
+    const pack = await loadActivePackBestEffort(ctx);
     try {
-      const s = scopeSql(1);
-      orphanRows = await ctx.engine.executeRaw<{ slug: string; source_id: string }>(
-        `SELECT slug, COALESCE(source_id, 'default') AS source_id FROM pages
-          WHERE deleted_at IS NULL AND (type IS NULL OR type = '')${s.sql}
-          ORDER BY source_id, slug LIMIT ${limit}`,
-        s.params,
-      );
-    } catch {
-      return { schema_version: 1, orphan_count: 0, orphans: [], pack: null, undeclared_page_count: 0, undeclared_types: [] };
+      return { schema_version: 1, ...await findTypeOrphans(ctx.engine, pack?.manifest ?? null, sourceScopeOpts(ctx), limit) };
+    } catch (err) {
+      if (isUndefinedTableError(err)) return { schema_version: 1, orphan_count: 0, orphans: [], undeclared_types: [], pack: pack?.manifest.name ?? null, truncated: false };
+      throw err;
     }
-
-    // Pack-aware arm — the op's name promises "no active-pack type match",
-    // but until this arm existed it only saw typeless pages: a page stored
-    // as `type: sessionx` under a pack that never declared it was invisible.
-    // Same resolution ladder as get_active_schema_pack (#3792 dbConfig tier)
-    // and the same classification as the stored_type_undeclared lint rule.
-    let packName: string | null = null;
-    const undeclaredTypes: Array<{ type: string; count: number; sample_slugs: string[] }> = [];
-    let undeclaredPages = 0;
-    try {
-      const { loadActivePack } = await import('../schema-pack/load-active.ts');
-      const { classifyStoredType, sanitizeTypeForDisplay } = await import('../schema-pack/type-usage.ts');
-      const { loadConfig } = await import('../config.ts');
-      const cfg = loadConfig();
-      const sourceOpts: Record<string, unknown> = {};
-      if (ctx.sourceId) sourceOpts.sourceId = ctx.sourceId;
-      let dbConfig: string | undefined;
-      try {
-        dbConfig = (await ctx.engine.getConfig('schema_pack')) ?? undefined;
-      } catch { /* engine.config may not exist on very old brains */ }
-      const pack = await loadActivePack({ cfg, remote: ctx.remote ?? true, dbConfig, ...sourceOpts });
-      packName = pack.manifest.name;
-
-      const s = scopeSql(1);
-      const typeRows = await ctx.engine.executeRaw<{ type: string; n: number }>(
-        `SELECT type, count(*)::int AS n FROM pages
-          WHERE deleted_at IS NULL AND type IS NOT NULL AND type <> ''${s.sql}
-          GROUP BY type ORDER BY count(*) DESC`,
-        s.params,
-      );
-      for (const r of typeRows) {
-        if (undeclaredTypes.length >= 20) break; // bounded response + bounded sample queries
-        if (classifyStoredType(r.type, pack.manifest).kind !== 'undeclared') continue;
-        const ss = scopeSql(2);
-        const sample = await ctx.engine.executeRaw<{ slug: string }>(
-          `SELECT slug FROM pages
-            WHERE deleted_at IS NULL AND type = $1${ss.sql}
-            ORDER BY slug LIMIT 5`,
-          [r.type, ...ss.params],
-        );
-        undeclaredTypes.push({
-          type: sanitizeTypeForDisplay(r.type),
-          count: r.n,
-          sample_slugs: sample.map((x) => x.slug),
-        });
-        undeclaredPages += r.n;
-      }
-    } catch { /* pack unavailable → typeless-only result, pack stays null */ }
-
-    return {
-      schema_version: 1,
-      orphan_count: orphanRows.length,
-      orphans: orphanRows.map((r) => ({ slug: r.slug, source_id: r.source_id })),
-      pack: packName,
-      undeclared_page_count: undeclaredPages,
-      undeclared_types: undeclaredTypes,
-    };
   },
 };
 

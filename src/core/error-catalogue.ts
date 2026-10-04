@@ -37,6 +37,24 @@ export const ERROR_CATALOGUE = {
   repair_kind_unavailable: { code: 'unavailable', docs: 'docs/guides/repair.md#explicit-only-repair-kinds' },
   colon_slug_windows_write_through: { code: 'colon_slug_windows_write_through', docs: 'docs/guides/write-refusals.md#colon_slug_windows_write_through' },
   embedding_auth_failed: { code: 'embedding_auth_failed', docs: 'docs/guides/write-refusals.md#embedding_auth_failed' },
+  activation_source_path_missing: { code: 'source_changed', docs: 'docs/guides/write-refusals.md#activation_source_path_missing' },
+  facts_absorb_write_refused: { code: 'facts_absorb_write_refused', docs: 'docs/guides/write-refusals.md#facts_absorb_write_refused' },
+  source_checkout_missing: { code: 'recovery_required', docs: 'docs/guides/write-refusals.md#source_checkout_missing' },
+  managed_pull_skipped: { code: 'managed_pull_skipped', docs: 'docs/guides/write-refusals.md#managed_pull_skipped' },
+  no_pricing: { code: 'no_pricing', docs: 'docs/guides/write-refusals.md#no_pricing' },
+  // F0 `gbrain sources refresh` (worktree-wide coordinated ff-only refresh).
+  refresh_not_managed: { code: 'refresh_not_managed', docs: 'docs/guides/write-refusals.md#refresh_not_managed' },
+  refresh_not_owner: { code: 'refresh_not_owner', docs: 'docs/guides/write-refusals.md#refresh_not_owner' },
+  refresh_no_upstream: { code: 'refresh_no_upstream', docs: 'docs/guides/write-refusals.md#refresh_no_upstream' },
+  fetch_failed: { code: 'fetch_failed', docs: 'docs/guides/write-refusals.md#fetch_failed' },
+  refresh_diverged: { code: 'refresh_diverged', docs: 'docs/guides/write-refusals.md#refresh_diverged' },
+  refresh_dirty: { code: 'refresh_dirty', docs: 'docs/guides/write-refusals.md#refresh_dirty' },
+  sync_in_progress: { code: 'sync_in_progress', docs: 'docs/guides/write-refusals.md#sync_in_progress' },
+  refresh_in_progress: { code: 'refresh_in_progress', docs: 'docs/guides/write-refusals.md#refresh_in_progress' },
+  refresh_drain_timeout: { code: 'refresh_drain_timeout', docs: 'docs/guides/write-refusals.md#refresh_drain_timeout' },
+  refresh_source_changed: { code: 'refresh_source_changed', docs: 'docs/guides/write-refusals.md#refresh_source_changed' },
+  refresh_recovery_required: { code: 'refresh_recovery_required', docs: 'docs/guides/write-refusals.md#refresh_recovery_required' },
+  worktree_refreshing: { code: 'worktree_refreshing', docs: 'docs/guides/write-refusals.md#worktree_refreshing' },
 } as const satisfies Record<string, CatalogueEntry>;
 
 export type CatalogueName = keyof typeof ERROR_CATALOGUE;

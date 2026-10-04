@@ -62,7 +62,10 @@ The USD-limit knobs accept `off`, `unlimited`, or `none` (case-insensitive) to m
 | `migrate embeddings` consent gate | — (plan + estimate before provider migration) | — | TTY y/N prompt / non-TTY refuse + exit 2 | `--yes` | estimate marked informational, but **still prompts** (guards a destructive schema rebuild, not just spend) |
 | `enrich` / `onboard --auto` | `--max-usd` (per-call) | — | refuse without a cap (non-TTY) | `--max-usd off` | runs uncapped (still ledgered) |
 | Image-OCR per-run ceiling | `embedding_image_ocr_max_images` / `embedding_image_ocr_max_usd` | `200` images / `$1.00` (estimated) | skips OCR over-cap (import continues; skips counted in `ocr_skipped_budget`, surfaced by doctor `ocr_health`) | `0` disables that cap | **not** bypassed (per-run cap, not a tracker gate) |
-| Dream `extract_atoms` phase budget | `cycle.extract_atoms.budget_usd` | `0.30` | caps the phase's budget tracker | — | **not** consulted (phase budget enforces regardless) |
+| Dream `extract_atoms` phase budget | `cycle.extract_atoms.budget_usd` | `0.30` | caps the phase's budget tracker (one tracker per drain attempt, across all its batches) | — | **not** consulted (phase budget enforces regardless) |
+| Atom auto-drain daily cap | `autopilot.auto_drain.max_usd_per_day` | `2.00` | daily cap on drain **attempts** (`floor(max / 0.30)` = 6), not a dollar ledger | `gbrain config set autopilot.auto_drain.enabled false` | **not** consulted |
+| Connector email/meeting atoms | `cycle.extract_atoms.connector_pages` | on (unset) | Gmail/Calendar `email`/`meeting` pages are extracted like other pages, under the auto-drain cap | `false` | **not** consulted |
+| Life Chronicle event extraction | `chronicle.job_budget_usd` (per page) / `chronicle.auto_daily_limit` (calls per rolling 24 h) | `0.25` / `200` | caps one extraction call; past the daily limit pending pages wait for a free slot | `gbrain config set auto_chronicle false` | **not** consulted |
 | Dream `synthesize` per-run budget | `dream.synthesize.budget_usd` | `5` | defers the transcript and the rest of the run before submission (estimate: prompt size + child output cap, x `max_turns` in agentic mode) | `unlimited` (`0` = submit nothing) | **not** consulted |
 | Dream `synthesize` daily submission cap | `dream.synthesize.max_submissions_per_source_per_day` | `0` (off) | skips whole files; a failed count query submits nothing that run | `0` | **not** consulted |
 | Dream `BudgetMeter` phases (auto_think, drift, propose/grade takes, calibration) | `dream.auto_think.budget`, `dream.drift.budget`, `cycle.<phase>.budget_usd` | per phase | refuses the next submit past the cap | `unlimited` (`0` = spend nothing) | **not** consulted |
@@ -115,6 +118,76 @@ estimate is `delta + stale backlog`, labeled as such.
   version drift (forces a full re-chunk), or git being unavailable. Unchanged files
   still skip via `content_hash` at execution, so the ceiling over-states real spend.
 
+### Atom extraction: auto-drain cap and connector pages
+
+**Say to your agent:** *"Extract atoms from my Gmail and Calendar pages too"* or
+*"Stop spending on automatic atom extraction."*
+
+When the active schema pack does not run `extract_atoms` in the routine cycle,
+autopilot (Postgres brains) submits a bounded `extract-atoms-drain` job per
+source with a backlog. Each drain **attempt** runs under one BudgetTracker
+capped at `cycle.extract_atoms.budget_usd` ($0.30 by default), shared by all of
+its batches. The daily cap `autopilot.auto_drain.max_usd_per_day` ($2.00) is a
+count of attempts at that per-attempt estimate (6 a day), so a retried job
+uses one slot per attempt. A job refused before any model call (no active
+canonical owner on this host, untrusted caller) dead-letters once with
+`structural_refusal:` and uses no slot; autopilot also skips a source whose
+writer would refuse, and logs why. Checkout-backed and connector sources take
+turns for the daily slots. With a model the tracker cannot price (the
+extraction chat model or the embedding route), the default dollar limit is not
+enforced and the phase warns and runs; only the attempt count bounds the drain.
+When you set `cycle.extract_atoms.budget_usd` yourself, an unpriced model
+instead stops the run before any model call: the phase reports `warn` with
+`details.no_pricing` (model, provider, kind, units, `register_command`), the
+stop counts as an expected limit rather than a halt in `extract_health`, and
+`gbrain doctor` names the command until you register the price with
+`gbrain pricing set` (see [registering a model price](#registering-a-model-price)).
+
+Connector pages are extracted by default. Gmail threads (`email`) and
+Calendar events (`meeting`) from a Google or GitHub connector source go
+through atom discovery, the backlog count, the routine cycle,
+`gbrain dream --drain` and the auto-drain like any other page, under the caps
+above. To keep them out:
+
+```bash
+gbrain config set cycle.extract_atoms.connector_pages false   # opt out
+gbrain config unset cycle.extract_atoms.connector_pages       # back to the default (on)
+gbrain config set autopilot.auto_drain.enabled false          # stop all automatic atom drains
+```
+
+What leaves the machine while it is on: the page text of each extracted email
+thread or calendar event (message bodies, subjects, participants as rendered on
+the page, up to `cycle.extract_atoms.max_input_chars`) is sent to the
+configured `extract_atoms` chat model (`models.dream.extract_atoms`, a
+utility-tier model by default), under the caps above. Atoms already extracted
+stay; opting out only stops new extraction.
+
+### Life Chronicle: automatic event extraction
+
+**Say to your agent:** *"How much does automatic event extraction cost?"* or
+*"Turn off automatic event extraction."*
+
+`auto_chronicle` is on by default. Each eligible new or changed meeting,
+conversation or calendar page gets one chat call that turns it into timeline
+events, capped at `chronicle.job_budget_usd` ($0.25) per page. At most
+`chronicle.auto_daily_limit` (200) automatic calls run per rolling 24 hours;
+retries count, and pages past the limit wait for a free slot. The worst case
+is the product, $50 a day at the defaults, for a priced model. With a model the
+tracker cannot price, the default cap is not enforced: extraction warns and
+runs, bounded only by the call count. When you set `chronicle.job_budget_usd`
+yourself, an unpriced model refuses with `no_pricing` until you register its
+price with `gbrain pricing set`. `gbrain chronicle-backfill` (history, on
+request) is exempt from the daily limit and bounded by its `--limit`.
+
+```bash
+gbrain config set auto_chronicle false              # opt out
+gbrain config set chronicle.auto_daily_limit 50     # fewer automatic calls per day
+gbrain config set chronicle.job_budget_usd 0.10     # lower per-page cap
+```
+
+`gbrain doctor` (`auto_chronicle`) reports 24 h use of the limit, the largest
+writer's share and 7-day spend. Details: [Life Chronicle](../guides/life-chronicle.md).
+
 ## Notes & limits
 
 - **Pre-pull window:** the gate fetches before estimating, so it prices what the run
@@ -163,19 +236,59 @@ gbrain config set dream.breaker.max_dead_submissions 5   # raise the limit; 0 di
 
 ## Operator price overrides (`pricing.overrides`)
 
-Cost caps are fail-closed: when `--max-cost` (or a phase's default cap) is set
-and a model has no shipped pricing row, the budget tracker aborts with
-`no_pricing` rather than pretend the call is free. Proxy routes hit this by
-design — a LiteLLM endpoint can front a paid provider, so `litellm:*` models
-are deliberately absent from both the pricing tables and the free-local sets.
+Under a cost cap you set (`--max-cost`, `--max-usd`, `--max-cost-usd`, or an
+explicit cap in config), a model with no shipped pricing row stops the run
+with `no_pricing` rather than pretend the call is free. A cap gbrain applied by
+default does not: an unpriced model warns and runs, so a newly released model
+always works. Proxy routes hit the explicit-cap refusal by design: a LiteLLM
+endpoint can front a paid provider, so `litellm:*` models are deliberately
+absent from both the pricing tables and the free-local sets.
 
-Declare your real rate in the config plane instead:
+### Registering a model price
+
+The `no_pricing` refusal tells the agent what to do: look up the provider's
+current price for the model (for example, search the web for its pricing
+page), register it, and retry. The refusal text and its JSON fields
+(`model`, `provider`, `kind`, `units`, `lookup`, `register_command`,
+`register_scope`, `docs`) carry the exact command:
+
+```bash
+# Chat models: USD per 1M input tokens and per 1M output tokens.
+gbrain pricing set litellm:gpt-4o --input 2.5 --output 10 \
+  --source https://example.com/pricing
+
+# Embedding and reranker models: one USD-per-1M-token rate.
+gbrain pricing set litellm:text-embedding-3-large --rate 0.13
+
+gbrain pricing list            # what is registered, with source and date
+gbrain pricing unset litellm:gpt-4o
+```
+
+- `pricing set` and `pricing unset` change one entry and keep every other
+  entry in `pricing.overrides`. (`gbrain config set pricing.overrides '<json>'`
+  still works, but it replaces the whole value.)
+- Rates must be non-negative finite numbers; anything else is refused and
+  nothing is written. An unreadable stored value is left unchanged and the
+  command refuses rather than overwrite it.
+- `--source` and the registration time are stored beside the rates
+  (`source`, `set_at`) for provenance. Cost caps ignore them.
+- **$0 is allowed, with a warning.** The operator decides; $0 is right for a
+  local or flat-rate route. Every call to that model then counts as free
+  against every cost cap.
+- **Registration is trusted-local only.** `gbrain pricing` is a CLI-only
+  command on the brain host, never an MCP operation, and a thin client
+  refuses it. Otherwise a remote agent could register $0 and void the cap.
+  An agent connected over MCP that meets `no_pricing` looks the price up and
+  asks the brain's operator to run the command the refusal names.
+
+The raw config shape, for reference:
 
 ```bash
 # Scalar = one USD-per-1M-token rate for input AND output (natural for embeddings):
 gbrain config set pricing.overrides '{"litellm:text-embedding-3-large": 0.13}'
 
-# Object form for chat models with distinct input/output rates:
+# Object form for chat models with distinct input/output rates
+# (pricing set also writes source and set_at beside them):
 gbrain config set pricing.overrides \
   '{"litellm:gpt-4o": {"input": 2.5, "output": 10}, "litellm:text-embedding-3-large": 0.13}'
 ```
@@ -204,10 +317,10 @@ nobody chose. When the configured embedding model has no shipped pricing row
 and no `pricing.overrides` entry (the `isModelPriceable` contract), enforcing
 that implicit cap would fail-close every job for a model that may well be
 free or self-hosted. So the handler drops the DEFAULT cap and runs uncapped,
-with a stderr warning naming both fixes (add a `pricing.overrides` entry, or
+with a stderr warning naming both fixes (register its price with `gbrain pricing set`, or
 set `embed.backfill_max_usd` to an explicit number). An EXPLICIT cap is a
 different contract: you chose a ceiling, so an unpriced model stays
-fail-closed (`no_pricing`) — declare the model's rate in `pricing.overrides`
+fail-closed (`no_pricing`) — register the model's rate with `gbrain pricing set`
 to proceed. Spend is ledgered by the tracker either way; only the ceiling
 changes.
 

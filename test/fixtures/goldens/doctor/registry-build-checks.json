@@ -250,6 +250,18 @@
         "name": "parked_effects"
       },
       {
+        "category": "ops",
+        "name": "worktree_refresh_stuck"
+      },
+      {
+        "category": "ops",
+        "name": "managed_guard_schema_drift"
+      },
+      {
+        "category": "ops",
+        "name": "publication_refusals"
+      },
+      {
         "category": "meta",
         "name": "links_link_source_check"
       },
@@ -403,6 +415,14 @@
       },
       {
         "category": "brain",
+        "name": "captured_facts_active"
+      },
+      {
+        "category": "brain",
+        "name": "loop_facts_drift"
+      },
+      {
+        "category": "brain",
         "name": "integrity"
       },
       {
@@ -503,7 +523,19 @@
       },
       {
         "category": "ops",
+        "name": "global_maintenance_timeouts"
+      },
+      {
+        "category": "ops",
         "name": "legacy_job_authority"
+      },
+      {
+        "category": "ops",
+        "name": "legacy_token_grant_shape"
+      },
+      {
+        "category": "ops",
+        "name": "legacy_token_grant_drift"
       },
       {
         "category": "ops",
@@ -564,6 +596,26 @@
       {
         "category": "brain",
         "name": "unlinked_facts"
+      },
+      {
+        "category": "brain",
+        "name": "auto_chronicle"
+      },
+      {
+        "category": "brain",
+        "name": "chronicle_config_invalid"
+      },
+      {
+        "category": "brain",
+        "name": "auto_chronicle_default_on"
+      },
+      {
+        "category": "brain",
+        "name": "fact_take_vectors"
+      },
+      {
+        "category": "ops",
+        "name": "planner_stats_stale"
       },
       {
         "category": "ops",

@@ -171,6 +171,48 @@ reasons without page content. Whole-source audit requires a CLI grant without a
 slug-prefix restriction. `sources writer activate --dry-run` includes a bounded
 drift sample and identifies incomplete samples without authorizing repairs.
 
+### Many drifted pages: classify, then resolve additive drift
+
+When an audit finds many drifted pages, something outside GBrain is usually
+editing the canonical files. Classify before repairing anything:
+
+```bash
+gbrain sources reconcile workspace --brain host --audit --classify --limit 25 --json
+```
+
+Each drifted finding gets a `classification` and its `drift_paths` (paths, rule
+outcomes and reasons, never values), and `classified` counts the batch:
+
+| Classification | Meaning | Next step |
+| --- | --- | --- |
+| `structurally_additive` | Only additive metadata changed: a `contacts` list with entries appended after every stored entry (order and repeats kept), an activity date that moved forward (`updated`, `last_*`, `*_last_used`), or a field present on one side only. | Preview with `--auto-additive`, then apply. |
+| `additive_with_suggestions` | The above, plus body or timeline lines inserted without changing or removing any stored line. | Read the inserted lines, then preview with `--auto-additive --accept-suggested`. |
+| `review_required` | Stored text changed or was removed; or a policy, privacy, title, type, tag, alias or fence change; or a date that moved backward, changed format or is in the future. | Resolve manually as above, after asking the user. |
+| `formatting_only` | The parsed content already agrees. | Preview; the result is the database content. |
+
+`file_modified_after_database` says whether the file changed after the page's
+last database write, a hint for finding the process that edits files directly.
+
+```bash
+gbrain sources reconcile workspace people/example --brain host \
+  --preview --auto-additive --out ~/.gbrain/repair/example.auto.json --json
+```
+
+`--auto-additive` writes `take_file` decisions only for the paths its rules
+cover and lists them in `auto_decided_paths`. Inserted body and timeline lines
+are never decided automatically, because an added line can still contradict an
+older one ("Correction: the earlier note is wrong"). The structure rules cannot
+see that. Read the inserted lines in the private artifact (show them to the
+user when the page is private or the claims matter), then add
+`--accept-suggested`. If any path needs review, the preview stays
+`needs_resolution` and `next_action` says what to ask.
+
+The artifact (format version 2) records each automatic decision with its rule
+and an evidence digest of the exact values it judged. Apply and the owner both
+re-run the rules against the pinned file and database copies; any change means
+a fresh preview. Apply, backups and the retry of the blocked write work exactly
+as above.
+
 Atom scan/failure bookkeeping now lives outside canonical note metadata so
 processing progress does not create new disagreements. Managed atom extraction
 checks trusted local source-wide authority and, for filesystem writes, owner
@@ -200,6 +242,14 @@ and do not disable guards or change ownership as part of rollback.
 | `conflict` | A precondition or identity conflict prevented commitment. |
 | `failed` | The request ended without commitment. |
 | `cancelled` | Cancelled before publication began. |
+
+On Windows, publication flushes each staged file through the handle it was
+written with and skips the directory flush Windows does not provide. Older
+releases flushed through a read-only handle, which Windows refuses (`EPERM`), so
+a restoration could stay `recovering` and hold every later write on that source
+behind it. After upgrading, the owner retries it on its own; confirm with
+`gbrain doctor --json` (`canonical_content_writes` reports `ok` once recovery
+has drained).
 
 Receipts include `request_id`, `state`, and `retry_after_ms`, with optional
 revision, outcome, persistence status, and timestamps. Terminal receipts have
@@ -236,7 +286,13 @@ was saved. If receipt helpers aren't available, repeat the same verb and origina
 arguments with that UUID. When `next_action` is `inspect_owner`, ask the operator
 to inspect first instead of repeatedly submitting mutations.
 
-`write_pending` means accepted work remains outstanding. `owner_unavailable`
+`write_pending` means accepted work remains outstanding; the CLI exits 10 for it
+(0 with `--accept-pending`) and waits 30 s by default (`--wait <seconds>`,
+`GBRAIN_WRITE_WAIT_MS`, `persistence.write_wait_ms`); see
+[CLI exit status for writes](../protocol/MEMORY_VERBS_v1.md#cli-exit-status-for-writes).
+The admin health indicators count it as `accepted_pending`, outside the error
+rate, with `pending_writes`, `oldest_pending_write_age_seconds` and
+`pending_writes_later_failed`. `owner_unavailable`
 and `writer_lock_unavailable` do not authorize a competing owner or a fresh
 request ID. `queue_capacity` refuses additional admission without evicting
 existing requests. `revision_required`, `revision_conflict`,

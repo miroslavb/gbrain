@@ -50,6 +50,8 @@ const CONSTANT_ALLOWLIST: Record<string, string> = {
 };
 
 const VETTED_BUILDERS: Record<string, string> = {
+  canonicalEntitySqlPredicate: 'src/core/graph-health-scope.ts: fixed host predicate with identifier-regex-checked alias',
+  canonicalGraphSqlPredicate: 'src/core/graph-health-scope.ts: fixed host predicate with identifier-regex-checked alias',
   pageReadFilter: 'src/core/search/read-policy-sql.ts: binds scope values as params, splices only the caller alias',
   buildRecencyComponentSql: 'src/core/search/sql-ranking.ts: inlines LIKE literals + numeric coefficients from the decay map, as master (planner behavior)',
   privatePagesFilterFragment: 'src/core/search/private-visibility.ts: constant visibility predicate over a caller alias',

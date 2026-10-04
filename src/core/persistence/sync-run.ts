@@ -19,6 +19,7 @@ import { join, resolve } from 'node:path';
 import { currentCompanyBrainSync, getCompanyBrainProfile, readCompanyBrainPlan } from '../company-brain/profile.ts';
 import { readCommittedBlob } from '../company-brain/revision.ts';
 import { refreshProjectionStatistics } from '../search/projection-statistics.ts';
+import { importAnalyzeEveryPages, maybeRefreshPlannerStats } from '../planner-stats.ts';
 import { recordManagedSyncFailure, clearManagedSyncFailureAfterSuccess, formatManagedSyncFailure, type ManagedSyncFailure } from './sync-failures.ts';
 import { writeFailureDiagnostic } from './verb-errors.ts';
 import { extractManagedStaleLinks } from './links-maintenance.ts';
@@ -26,6 +27,7 @@ import { CHECKPOINT_VALIDATION_TIMEOUT, checkpointTimeoutHint } from './checkpoi
 import { isTerminalWriteState, publicWriteReceipt, type WriteReceipt } from './types.ts';
 import type { WriteRequest } from './model.ts';
 import { resolveSyncStrategy } from '../sync-strategy.ts';
+import { assertManagedSyncAllowed } from './worktree-refresh.ts';
 
 export interface ManagedSyncWriteDiagnostic {
   source_id: string;
@@ -181,8 +183,8 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
     occupantRebound = occupant !== null;
     const moved = entry.renameFrom;
     const recorded = moved?.slug === slug ? moved.sourcePath : entry.sourcePath;
-    if ((snapshot?.page.id ?? null) !== pageId || (snapshot?.revision ?? null) !== revision ||
-        (snapshot?.page.source_path != null && !sameSyncOrigin(snapshot.page.source_path, recorded, originScope, snapshot.page.slug))) {
+    const foreignOrigin = snapshot?.page.source_path != null && !sameSyncOrigin(snapshot.page.source_path, recorded, originScope, snapshot.page.slug);
+    if ((snapshot?.page.id ?? null) !== pageId || (snapshot?.revision ?? null) !== revision || (entry.unownedDeletion ? !foreignOrigin : foreignOrigin)) {
       throw new OperationError('revision_conflict', 'A page changed after this sync cursor was enumerated.');
     }
     if (moved && moved.slug !== slug) {
@@ -198,6 +200,7 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
   assertActive();
   return { requestId: randomUUID(), slug, pageId, ...(occupantRebound ? { rebound: true as const } : {}), intent: { kind: !entry ? 'managed_sync_checkpoint' : entry.action === 'import' ? 'managed_sync_import' : 'managed_sync_delete',
     expected_revision: revision, sourcePath: entry?.sourcePath ?? null, path: entry?.path ?? null, rawHash, content, lineEndingOnly,
+    ...(entry?.unownedDeletion ? { unownedDeletion: true } : {}),
     ...(entry?.renameFrom ? { renameFrom: entry.renameFrom } : {}),
     processingOptions: cursor.processingOptions,
     // A cursor created before its options were recorded has the same key, so this run's options are its options.
@@ -218,7 +221,7 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
  */
 async function alreadyImportedAtOrigin(engine: BrainEngine, cursor: Cursor, entry: Cursor['entries'][number], originScope: ReturnType<typeof syncOriginScope>) {
   try {
-    await assertSyncPageOrigin(engine, cursor.sourceId, entry.sourcePath, entry.pageId ?? null, entry.action === 'delete', originScope);
+    await assertSyncPageOrigin(engine, cursor.sourceId, entry.sourcePath, entry.unownedDeletion ? null : entry.pageId ?? null, entry.action === 'delete', originScope);
     return null;
   } catch (error) {
     if (!(error instanceof OperationError) || error.code !== 'page_identity_changed' || entry.action !== 'import' || (entry.pageId ?? null) !== null
@@ -265,6 +268,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
   assertPersistenceAccepting(engine);
   validateManagedSyncOptions(callerOpts);
   const context = await resolveManagedSyncContext(engine, opts);
+  if (!opts.dryRun) await assertManagedSyncAllowed(engine, context.binding.worktree_id, context.sourceId);
   const authority = await managedSyncAuthority(engine, context.sourceId, context.incarnation, opts.repoPath ?? context.root);
   const company = currentCompanyBrainSync(context.sourceId);
   const processingOptions = syncProcessingOptions(opts);
@@ -330,7 +334,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         const failed = cursor.pending ? await getWriteRequest(engine, cursor.authority.writer.principal, cursor.pending.requestId) : null;
         const recorded = await engine.executeRaw("SELECT 1 FROM op_checkpoints WHERE op='managed-sync-failure' AND fingerprint=$1 AND completed_keys->0->>'run_id'=$2", [key, cursor.runId]);
         assertActive();
-        if ((failed && ['failed', 'conflict', 'cancelled'].includes(failed.state)) || (!failed && recorded.length)) {
+        if ((failed && ['failed', 'conflict', 'cancelled'].includes(failed.state)) || (recorded.length && (failed?.state === 'committed' || !failed))) {
           phase = 'discovery';
           discoveryTarget = syncGit(context.gitRoot, ['rev-parse', 'HEAD']).trim();
           const discovery = await discoverManagedSync(engine, opts, context);
@@ -397,6 +401,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
     }
     if (opts.dryRun) return result(cursor, 'dry_run');
     const config = loadConfig() ?? { engine: engine.kind };
+    const analyzeEvery = await importAnalyzeEveryPages(engine);
     let batchStart = performance.now(), batchPages = 0, foregroundWaitStart = 0, foregroundBaseline = 0;
     let creditedPages = 0, creditStarted = 0;
     const sliceStarted = performance.now(), sliceFirstIndex = cursor.index;
@@ -498,6 +503,8 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       next.counts.chunks += Number(done.outcome?.chunks ?? 0);
       cursor = await saveCursor(engine, key, cursor, next);
       opts.onProgress?.({ phase: 'managed_sync.page_committed', bankedFiles: cursor.index });
+      // F4b: PGLite plans the rest of a large sync against fresh statistics (spec Addendum A item 2).
+      if (analyzeEvery > 0 && cursor.index % analyzeEvery === 0) await maybeRefreshPlannerStats(engine, 'managed_sync', { throttle: false }).catch(() => undefined);
       assertActive();
       if (slice && (cursor.index - sliceFirstIndex >= slice.maxPages || performance.now() - sliceStarted >= slice.maxMs)) return result(cursor, 'partial', 'writer_yield');
       batchPages++;
@@ -520,7 +527,8 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
     }
     if (!opts.dryRun) {
       const code = error instanceof OperationError ? error.code : 'storage_error';
-      if (code !== 'permission_denied') {
+      // A refresh fence is transient admission back-pressure, not a sync failure to record.
+      if (!['permission_denied', 'worktree_refreshing', 'refresh_recovery_required'].includes(code)) {
         const [stored] = cursor ? [] : await engine.executeRaw<{ completed_keys: [CursorHeader] }>('SELECT completed_keys FROM op_checkpoints WHERE op=$1 AND fingerprint=$2', [OP, key]);
         const failedCursor = cursor ?? stored?.completed_keys?.[0];
         const { failure } = await recordManagedSyncFailure(engine, { source_id: context.sourceId, source_incarnation: context.incarnation, path: cursor?.entries[cursor.index]?.path ?? failedCursor?.pending?.intent.path ?? `<${phase}>`, code,

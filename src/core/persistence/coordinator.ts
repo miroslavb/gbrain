@@ -1,8 +1,9 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { atomicWriteFileSync, mkdirPrivate } from '../atomic-write.ts';
+import { flushDirectory } from '../fs-durable.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { sha256 } from './digest.ts';
 import { authorizeStoredRequest } from './authority.ts';
@@ -12,6 +13,7 @@ import { clearResolvedRecovery, completeWrite, getWriteRequestById, lockCounters
 import { isTerminal, principalKey, requestPrincipal, recoveryFiles, type RecoveryRecord, type WriteRequest } from './model.ts';
 import type { NativeLockHandle } from './native-lock.ts';
 import { withCoordinatedWrite } from './context.ts';
+import { requestAttribution } from './attribution.ts';
 import { withFilesystemPublication } from './filesystem-guard.ts';
 import { mayReprepare } from './semantic.ts';
 import { tryAcquirePublicationCapacity } from './pool-capacity.ts';
@@ -24,6 +26,7 @@ import { assertMutationProtocol, assertSharedSkillPersistence, declarePersistenc
 import { assertBundleRecoveryBinding, bundleFileHash, prepareBundleRecovery, publishStagedBundleFile, stageBundleFile, type MutationFile } from './bundle-files.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
 import { classifyMirrorPage, sourceMirrorReadOnly } from './mirror-read-only.ts';
+import { databaseRefusal, withAttempt, type PublicationFailure, type PublicationFailureDetail, type PublicationStage } from './publication-failure.ts';
 
 interface PreparedMutationBase {
   sourceExclusive?: boolean;
@@ -53,16 +56,6 @@ export interface PublicationHooks {
     | 'before_restore' | 'restoration_staging_flushed' | 'restoration_file_replaced' | 'restoration_directory_flushed' | 'after_restore', request: WriteRequest, index: number): void;
 }
 function fileHash(path: string): string | null { return existsSync(path) ? sha256(readFileSync(path)) : null; }
-function flushDirectory(path: string): void {
-  let fd: number | undefined;
-  try { fd = openSync(dirname(path), 'r'); fsyncSync(fd); }
-  catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    // Windows cannot open a directory through Node's file descriptor API.
-    // Its atomic replacement is handled by the platform filesystem primitive.
-    if (!(process.platform === 'win32' && ['EISDIR','EPERM','EINVAL','ENOTSUP'].includes(code ?? ''))) throw error;
-  } finally { if (fd !== undefined) closeSync(fd); }
-}
 function publishFile(file: PageMutationFile, stagingPath?: string, afterStagingFlush?: () => void, mode?: number | null): void {
   if (!isWriteTargetContained(file.path, file.root)) throw new OperationError('storage_error', 'Canonical file target escapes its source root.');
   if (file.publishMode === undefined) mkdirSync(dirname(file.path), { recursive: true });
@@ -71,32 +64,32 @@ function publishFile(file: PageMutationFile, stagingPath?: string, afterStagingF
   const openMode = mode ?? file.publishMode;
   if (file.content === null) {
     try { unlinkSync(file.path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  } else atomicWriteFileSync(file.path, file.content, { durable: true, stagingPath, ...(openMode === undefined ? {} : { mode: openMode }), afterStagingFlush: () => {
-    afterStagingFlush?.();
-    if (mode !== undefined && mode !== null && stagingPath) {
-      chmodSync(stagingPath, mode);
-      const fd = openSync(stagingPath, 'r');
-      try { fsyncSync(fd); } finally { closeSync(fd); }
-    }
-  } });
-  flushDirectory(file.path);
+  } else atomicWriteFileSync(file.path, file.content, { durable: true, stagingPath, ...(openMode === undefined ? {} : { mode: openMode }), afterStagingFlush });
+  flushDirectory(dirname(file.path));
 }
 // Effect recovery uses the same confined durable publication primitive, under
 // its own recovery record and native root capability.
 export { fileHash as persistenceFileHash, publishFile as publishPersistenceFile };
-function requestError(error: unknown): { code: string; message: string } {
+function requestError(error: unknown): PublicationFailure {
   if (error instanceof OperationError) return { code: error.code, message: error.message };
+  const refusal = databaseRefusal(error);
+  if (refusal) return refusal;
   const code = (error as { code?: string })?.code;
-  if (code === 'revision_conflict') return { code, message: 'The page changed after the supplied revision was read.' };
+  if (code === 'revision_conflict') {
+    return { code, message: error instanceof Error && error.message ? error.message : 'The page changed after the supplied revision was read.' };
+  }
+  // #5216: the row still awaits its revision backfill; the error names the resume command.
+  if (code === 'revision_backfill_pending' && error instanceof Error) return { code, message: error.message };
   return { code: 'storage_error', message: `Publication failed${code ? ` (${code})` : ''}. Inspect owner diagnostics.` };
 }
-function conflictCode(code: string): boolean { return ['revision_required','revision_conflict','source_changed','page_identity_changed'].includes(code); }
+function conflictCode(code: string): boolean { return ['revision_required','revision_conflict','revision_backfill_pending','source_changed','page_identity_changed'].includes(code); }
 export function transientDatabaseFailure(error: unknown): boolean {
   return ['40001','40P01','55P03','57014','53300','57P01','57P02','57P03','08000','08003','08006','08001','08004',
     'ECONNRESET','ECONNREFUSED','ETIMEDOUT','CONNECTION_CLOSED','CONNECTION_ENDED'].includes(String((error as {code?:string})?.code));
 }
-export async function finishUnpublishedFailure(engine: BrainEngine, row: WriteRequest, error: unknown): Promise<WriteRequest> {
-  const failure = requestError(error);
+export async function finishUnpublishedFailure(engine: BrainEngine, row: WriteRequest, error: unknown,
+  stage: PublicationStage = 'publication'): Promise<WriteRequest> {
+  const failure = withAttempt(requestError(error), stage);
   if (mayReprepare(row, failure) || transientDatabaseFailure(error)) {
     await releaseUnpublishedClaim(engine, row, transientDatabaseFailure(error) ? 'database_contention' : 'revision_changed_repreparing');
     return (await getWriteRequestById(engine, row.id))!;
@@ -250,7 +243,7 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
         });
         await hooks.boundary?.('after_publication', row);
       }
-      const outcome = await withCoordinatedWrite(tx, [row.source_id], () => prepared.apply(tx));
+      const outcome = await withCoordinatedWrite(tx, [row.source_id], () => prepared.apply(tx), requestAttribution(row));
       if (!skill) await classifyUnboundPage(tx, row);
       if (prepared.databaseOnlyReason === 'mirror_read_only') await classifyMirrorPage(tx, row);
       const final = skill ? null : await tx.readPageSnapshot(row.slug, { sourceId: row.source_id, includeDeleted: true });
@@ -258,7 +251,7 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
       outcome.persistence = { mode: files.length ? 'filesystem' : 'database', ...(files.length ? { file_written: !prepared.noop } : {}), ...(skill ? { git_state: 'not_requested' } : {}) };
       outcome.write_through = files.length ? { written: !prepared.noop } : { written: false, skipped: prepared.databaseOnlyReason ?? row.authority.databaseOnlyReason ?? 'no_repo_configured' };
       if (prepared.databaseOnlyReason === 'mirror_read_only') outcome.storage = 'database_only';
-      if (row.operation === 'put_page' && row.authority.remote && row.authority.databaseOnlyReason === 'no_repo_configured') outcome.write_through = withNoRepoWriteThroughWarning(outcome.write_through as { written: boolean; skipped?: string }, row.source_id);
+      if ((row.operation === 'put_page' || row.operation === 'edit_page') && row.authority.remote && row.authority.databaseOnlyReason === 'no_repo_configured') outcome.write_through = withNoRepoWriteThroughWarning(outcome.write_through as { written: boolean; skipped?: string }, row.source_id, row.operation);
       if ((outcome.write_through as { skipped?: string }).skipped === 'unbound_source') {
         outcome.write_through = { ...outcome.write_through as object, warning: unboundWriteWarning(row.operation, row.source_id, row.authority.databaseOnlyReason === 'unbound_source') };
       }
@@ -276,7 +269,7 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
       // Even a rejected prepare can retain a journal record; do not leave that
       // record unaccounted or let a sibling publication bypass its recovery.
       const failure = !transactionBodyCompleted && !mayReprepare(row, requestError(error)) && !transientDatabaseFailure(error)
-        ? requestError(error) : undefined;
+        ? withAttempt(requestError(error), published ? 'after_file_publication' : 'publication') : undefined;
       try { await markRecovering(engine, row, failure ? 'publication_failed' : published ? 'commit_outcome_uncertain' : 'publication_not_started', failure); }
       catch { /* database outage: durable recovery record remains discoverable */ }
       if (lock) {
@@ -296,7 +289,7 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
 }
 
 export async function recoverPublication(engine: BrainEngine, id: string, hostId = localHostId(), alreadyLocked = false,
-  terminalError?: { code: string; message: string }, capacityAlreadyHeld = false, hooks: PublicationHooks = {}): Promise<WriteRequest> {
+  terminalError?: PublicationFailure, capacityAlreadyHeld = false, hooks: PublicationHooks = {}): Promise<WriteRequest> {
   let row = await getWriteRequestById(engine, id);
   if (!row) throw new OperationError('not_found', 'Write request not found.');
   if (!row.recovery) return row;
@@ -370,7 +363,8 @@ export async function recoverPublication(engine: BrainEngine, id: string, hostId
         assertRecoveryStagingAbsent(record);
       }
       // Withdrawal is authoritative DB state and is never rolled back here.
-      const failure = terminalError ?? (current.error_code ? {code:current.error_code,message:current.error_message ?? 'Publication failed before database completion.'} : undefined);
+      const failure: PublicationFailure | undefined = terminalError ?? (current.error_code ? {code:current.error_code,message:current.error_message ?? 'Publication failed before database completion.',
+        ...(current.error_detail ? { detail: current.error_detail as unknown as PublicationFailureDetail } : {})} : undefined);
       if (failure) return completeWrite(tx, current, conflictCode(failure.code) ? 'conflict' : 'failed', {}, failure);
       for (const key of ['brain', `worktree:${current.worktree_id}`]) await tx.executeRaw('UPDATE persistence_counters SET recovery_bytes=recovery_bytes-$2 WHERE key=$1', [key, Number(current.recovery_bytes)]);
       const [queued] = await tx.executeRaw<WriteRequest>(`UPDATE persistence_requests SET state='queued',execution_token=NULL,

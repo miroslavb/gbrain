@@ -1,6 +1,7 @@
 import { sanitizeRemoteBody } from '../core/remote-body.ts';
 import { prepareEmbeddingProjections, countArchivedEmbeddingWork } from '../core/embedding-readiness.ts';
 import { embedStaleFacts, type EmbedFactsResult } from '../core/embed-facts.ts';
+import { embedTakesForStaleDrain, type EmbedTakesResult } from '../core/embed-takes.ts';
 import { parseFactEmbedArgs } from './embed-facts-delegate.ts';
 import { readProjectionSnapshot, installPageProjection, installPageEmbeddings } from '../core/page-state/projections.ts';
 import { PageRevisionConflictError } from '../core/page-state/types.ts';
@@ -23,6 +24,7 @@ import { assertEmbeddingEnabled } from '../core/embedding-dim-check.ts';
 import { countRestampOnlyChunks, invalidateStaleSignatureEmbeddingsGuarded } from '../core/embedding-invalidation.ts';
 import { loadConfig, type GBrainConfig } from '../core/config.ts';
 import { slog, serr } from '../core/console-prefix.ts';
+import { embedBudgetStopVerdict, noteEmbedBudgetStop } from '../core/embed-budget-stop.ts';
 import { filterOutEmbedSkipped } from '../core/embed-skip.ts';
 import { runSlidingPool } from '../core/worker-pool.ts';
 import { isAborted, anySignal, AbortError } from '../core/abort-check.ts';
@@ -243,6 +245,12 @@ export interface EmbedOpts {
    */
   heldLocks?: DbLockHandle[];
   assertOwned?: (tx?: BrainEngine) => Promise<void>;
+  /**
+   * #5885: a `stale` drain also embeds stale takes (missing, claim-drifted or
+   * other-model vectors). Unset follows `takes.auto_embed` / GBRAIN_EMBED_TAKES
+   * (default on); the embedding-model migration drain passes true.
+   */
+  takes?: boolean;
 }
 /**
  * Structured result from a library-level embed run.
@@ -340,7 +348,12 @@ export interface EmbedResult {
    * `failures`/`failure_samples` also carry a stall entry so existing
    * failures>0 consumers surface it unchanged.
    */
-  reason?: 'stall_timeout';
+  reason?: 'stall_timeout' | 'time_budget';
+  /** With `reason: 'time_budget'` (src/core/embed-budget-stop.ts): stale chunks left and the command that finishes them. */
+  remaining_stale?: number;
+  resume_command?: string;
+  /** #5885: the takes pass of a `stale` drain, when it ran. Its failures are also counted in `failures`. */
+  takes?: EmbedTakesResult;
 }
 
 /**
@@ -677,6 +690,7 @@ export async function runEmbedCore(engine: BrainEngine, opts: EmbedOpts): Promis
     // src/core/embed-stall.ts for the two-clock design and the operator
     // notes). Armed for real drains only; dryRun never embeds so "no
     // successful progress" is its normal state, and 0/negative disables.
+    let takesEmbedded = 0;
     const stallSeconds = opts.dryRun ? 0 : resolveEmbedStallAbortSeconds();
     const watchdog = stallSeconds > 0
       ? createEmbedStallWatchdog({
@@ -685,7 +699,7 @@ export async function runEmbedCore(engine: BrainEngine, opts: EmbedOpts): Promis
           // prelude (thousands of getChunks+upsertChunks before the first
           // embed) is healthy work, not a stall — without this it would
           // abort deterministically at the same point on every resume.
-          readProgress: () => result.embedded + (result.healed_splits ?? 0),
+          readProgress: () => result.embedded + (result.healed_splits ?? 0) + takesEmbedded,
         })
       : undefined;
 
@@ -723,6 +737,10 @@ export async function runEmbedCore(engine: BrainEngine, opts: EmbedOpts): Promis
             ),
           );
         }
+        if (opts.stale && !isAborted(drainSignal)) await embedTakesForStaleDrain(engine, {
+          dryRun: !!opts.dryRun, signal: drainSignal, sourceId: opts.sourceId, assertOwned: opts.assertOwned, quiet: opts.quiet,
+          takes: opts.takes, onProgress: (_done, _total, embedded) => { takesEmbedded = embedded; },
+        }, result);
       } catch (e) {
         // A heartbeat-triggered abort is a clean, resumable stop (lock_lost is
         // already set + explained on stderr) — not an error to propagate.
@@ -986,6 +1004,9 @@ export async function runEmbed(engine: BrainEngine, args: string[], selectedConf
       serr('[embed] exiting non-zero: stall watchdog aborted the drain (reason: stall_timeout); partial progress banked — re-run to resume.');
       process.exit(1);
     }
+    // A budget stop with work left is partial: verdict on stdout, and
+    // src/cli/commands/embed.ts exits with BUDGET_STOP_EXIT_CODE.
+    if (result.reason === 'time_budget') slog(embedBudgetStopVerdict(result));
     return result;
   } catch (e) {
     if (progressStarted) progress.finish();
@@ -1605,6 +1626,7 @@ async function embedAllStale(
   const sourceOpt = sourceId ? { sourceId } : undefined;
   if (isAborted(externalSignal)) return;
   const includeNullSig = !!staleOpts?.includeNullSignature;
+  const noteBudgetStop = () => noteEmbedBudgetStop(engine, result, { sourceId, signature, includeNullSignature: includeNullSig, skip: dryRun || BUDGET_MS === null || isAborted(externalSignal) });
   let reportedArchived = 0;
   const reportArchived = async () => {
     if (dryRun) return;
@@ -1618,17 +1640,17 @@ async function embedAllStale(
   const readinessOptions = { sourceId, existingChunksOnly: true, activeSourcesOnly: true, stale: { signature, includeNullSignature: includeNullSig }, signal: externalSignal,
     deadline: BUDGET_MS === null ? undefined : overallStartedAt + BUDGET_MS };
   let readiness = await prepareEmbeddingProjections(engine, readinessOptions);
-  if (isAborted(externalSignal) || Date.now() >= (readinessOptions.deadline ?? Infinity)) return;
+  if (isAborted(externalSignal) || Date.now() >= (readinessOptions.deadline ?? Infinity)) return await noteBudgetStop();
   if (readiness.blocked && !dryRun) {
     const probeOk = await probeEmbedder((texts, fnOpts) => embedBatchWithBackoff(texts, { abortSignal: fnOpts.abortSignal }), signature ?? undefined, externalSignal);
-    if (isAborted(externalSignal) || Date.now() >= (readinessOptions.deadline ?? Infinity)) return;
+    if (isAborted(externalSignal) || Date.now() >= (readinessOptions.deadline ?? Infinity)) return await noteBudgetStop();
     if (!probeOk) {
       result.failures += readiness.blocked;
       result.failure_samples.push('Projection recovery requires a working embedding provider; existing projections were preserved.');
       return;
     }
     readiness = await prepareEmbeddingProjections(engine, { ...readinessOptions, repair: true, assertOwned: staleOpts?.assertOwned });
-    if (isAborted(externalSignal) || Date.now() >= (readinessOptions.deadline ?? Infinity)) return;
+    if (isAborted(externalSignal) || Date.now() >= (readinessOptions.deadline ?? Infinity)) return await noteBudgetStop();
   }
   if (readiness.blocked && !dryRun) {
     result.failures += readiness.blocked;
@@ -1723,7 +1745,11 @@ async function embedAllStale(
       try {
         const wide = await engine.countStaleChunks({ ...sourceOpt, signature, includeNullSignature: true });
         const narrow = await engine.countStaleChunks({ ...sourceOpt, signature });
-        const leftBehind = wide - narrow;
+        // #5527: a NULL-signature page whose vectors already match the current
+        // model, width and text is only missing its stamp, not in another space.
+        const currentSpace = await countRestampOnlyChunks(engine, { signature, sourceId, includeNullSignature: true })
+          - await countRestampOnlyChunks(engine, { signature, sourceId });
+        const leftBehind = wide - narrow - currentSpace;
         if (leftBehind > 0) {
           serr(
             `  [embed] WARNING: ${leftBehind} embedded chunk(s) sit on pages with no recorded ` +
@@ -2109,6 +2135,7 @@ async function embedAllStale(
     }
   }
 
+  if (budgetSignal.aborted) await noteBudgetStop();
   if (!staleOpts?.quiet) slog(`Embedded ${result.embedded} chunks across ${processedPageKeys.size} pages`);
 
   // #1946 (OV2a): a catch-up pass that completed without being aborted but left

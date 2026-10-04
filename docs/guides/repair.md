@@ -8,8 +8,8 @@ can load, and Google source files other local users can read. `gbrain repair`
 fixes those and the other kinds listed in
 [What each kind fixes](#what-each-kind-fixes). Every run is a preview unless
 you pass `--apply`.
-Three explicit-only kinds, `google-file-modes`, `stale-atoms` and `extractor-facts`, run only when
-you name them (see [Explicit-only repair kinds](#explicit-only-repair-kinds)).
+Seven explicit-only kinds, `google-file-modes`, `stale-atoms`, `extractor-facts`,
+`captured-facts`, `loop-facts`, `orphan-children` and `failed-writes`, run only when you name them (see [Explicit-only repair kinds](#explicit-only-repair-kinds)).
 `gbrain doctor --remediation-plan` lists the same kinds as repair steps, and
 `gbrain doctor --remediate --yes --include-repairs` runs them under a budget
 (see [Run repairs through doctor](#run-repairs-through-doctor)).
@@ -99,8 +99,8 @@ gives each a fresh row number); it never deletes or rewrites a page.
 | `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each kind). Rerun the same command to continue. |
 | `--no-embed` | `safe-chunks` and `contextual-mode`: skip the embedding provider. Run `gbrain embed --stale` later. `timeline` and `visibility` pages are re-embedded by their publication either way. |
 | `--all` | Run every automatic kind in order. Explicit-only kinds are listed with their preview command, never run. |
-| `--expect <hash>` | Explicit-only kinds: apply exactly the set the preview printed under this hash. Required with `--apply` for `stale-atoms` and `extractor-facts`. |
-| `--include-ambiguous` | `extractor-facts` only: widen the hashed set to `ambiguous` facts. Pass it to both the preview and the apply. See [Extractor facts](#extractor-facts). |
+| `--expect <hash>` | Explicit-only kinds: apply exactly the set the preview printed under this hash. Required with `--apply` for `stale-atoms`, `extractor-facts`, `captured-facts`, `loop-facts` and `failed-writes`. |
+| `--include-ambiguous` | `extractor-facts` and `captured-facts` only: widen the hashed set to `ambiguous` facts. Pass it to both the preview and the apply. See [Extractor facts](#extractor-facts) and [Captured facts](#captured-facts). |
 | `--json` | Print `{ scope, mode, results[], paid_kinds }`, one result per kind with `paid`, `affected`, `sample`, `residuals`, `cost`, `capacity`, `resumed_from`, `applied`, `skipped`, `complete`, `stopped` and `apply_command`, plus `explicit_kinds[]` when the run skipped explicit-only kinds. |
 
 The command exits 1 when a run stops early (capacity, a pending write, or a
@@ -118,7 +118,9 @@ should also check `results[].complete`.
 | `connector-checkpoints` | `connector_checkpoints` | Deletes managed connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days. They accumulate after a content setting such as `g_history_days` changes, or when a connector host older than v0.60.11.0 runs during an upgrade. Cleanup only: it never copies or re-keys a checkpoint, takes no journal admission and runs brain-wide (`--source` does not narrow it). | Rows a queued or running connector write, or a connector's recorded pending set, still references. |
 | `orphan-bindings` | `orphan_persistence_bindings` | Deletes persistence source bindings whose source was removed, or that belong to an earlier incarnation of a source re-added under the same id. Releases before this one left the binding behind on `gbrain sources remove` and `gbrain sources purge`, so the re-added source read as claimed and every `gbrain sync --source <id>` failed with `writer_coordinator_required`. Bookkeeping only: no journal admission, no page or file changes, and it runs brain-wide (`--source` does not narrow it). See [orphan bindings](#orphan-bindings). | A binding that a queued, running or recovering write request of the same source incarnation still references. |
 | `embedding-effects` | `stale_embedding_effects` | Settles stale queued and failed embedding effects of committed writes, which block receipt compaction and activation: `reconciled` when current vectors pass the effect verifier, `superseded` when the page was deleted or a newer revision owns its own effect, `retry_queued` for the owner (paid; a used-up retry allowance gets one new bounded cycle per explicit apply). See [stale queued embedding effects](#stale-queued-embedding-effects). | `blocked` effects, counted by reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). |
+| `attribution-backfill` | none | Fills write attribution (who wrote it) on pages, page versions and facts written before attribution was recorded, only where exactly one committed request in the write journal proves the writer: the page write whose recorded result is the row's revision, or the `remember` that inserted the fact. Fills NULLs only, in committed batches of 1,000 that resume after an interruption; no content, revision, page file or request ID changes. See [write attribution](../mcp/ADMIN.md#write-attribution). | `unrecorded_pages`, `unrecorded_page_versions`, `unrecorded_facts`: rows the journal cannot prove. They stay `unrecorded`; nothing is inferred. |
 | `safe-chunks` | `safe_index_pending` (also `contextual_retrieval_coverage`, `details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
+| `orphan-children` | `child_table_orphans` (also a `storage_corrupt` error) | Explicit-only. Deletes rows of page child tables (chunks, versions, tags, takes, raw data, timeline, links) whose page row no longer exists, and clears dangling `links.origin_page_id` and `files.page_id` references, each in one statement that rechecks the orphan condition. See [orphan children](#orphan-children). | `torn_pages`: page rows whose stored body cannot be read (torn TOAST). The preview names them; the repair never changes them. |
 | `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync or a connector source before this release), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. `embed_skip`: pages marked to skip embedding keep their stored vectors and are not stamped. |
 gbrain repair google-file-modes --apply             # explicit-only: runs only when named
 gbrain repair --all --apply                    # every automatic kind in order
@@ -314,6 +316,40 @@ Do not delete binding rows by hand: the repair rechecks, in the same
 statement, that the binding is still orphaned and that no pending write
 request uses it.
 
+### Orphan children
+
+**Say to your agent:** *"gbrain fails with `unexpected chunk number` or
+`tuple concurrently deleted`, or doctor warns `child_table_orphans`. Fix it."*
+
+These errors (SQLSTATE XX000) mean stored data is damaged, usually after a
+crash or a full disk. Child rows can outlive their page row, and a page body
+can be torn, so every command that reads it fails. Preview first; it changes
+nothing:
+
+```bash
+gbrain repair orphan-children            # orphan child rows per table, plus torn_pages
+gbrain repair orphan-children --apply    # deletes the orphan rows, clears dangling references
+gbrain doctor                            # child_table_orphans is ok
+```
+
+The preview also reads every page body and lists the rows it cannot read
+(`torn_pages`, with page id, source and slug). The repair never changes those
+rows. Recover them from a backup, or create a fresh brain and sync it again
+from its source files. Until then, a write that names the revision of a page
+the upgrade could not backfill is refused with `revision_backfill_pending`;
+`gbrain apply-migrations --yes` resumes that backfill and prints its progress.
+
+### Timeline history scan coverage
+
+Doctor's `timeline_history` check classifies at most 2,000 pages or 10
+seconds of work per run. On a larger brain each run continues where the last
+one stopped (the cursor is kept in the config row
+`doctor.timeline_history.scan:<sources>`), so a few consecutive `gbrain doctor`
+runs finish a full pass and report exact counts. While the next pass is in
+progress, a clean finished pass keeps the check `ok` until a newer timeline row
+is written. A run that has neither says `scan incomplete` and is a lower bound;
+`gbrain repair timeline` (preview) counts the whole brain in one go.
+
 ### Stale atoms
 
 `gbrain repair stale-atoms` (explicit-only, #5770) retires atoms that drifted
@@ -397,6 +433,134 @@ millisecond (PGLite's clock resolution).
 The preview warns, naming the host, when a consumer older than this release
 published writes after `writer_version_cutoff`: an old consumer expires
 restored facts again. Upgrade and restart it first.
+
+<a id="captured-facts"></a>
+### Captured facts
+
+Before v0.60.30.0, automatic capture (the writeback hook, the compaction
+harvest and the corpus sweep) extracted facts from gbrain's own claude-cli
+model sessions and from text you pasted into a conversation. New capture skips
+both, but the facts already stored stay active, so recall and hot memory keep
+returning them. `gbrain repair captured-facts` expires them. It is
+explicit-only and preview-bound, and it runs on the brain host (it reads the
+Claude Code session directory and the session corpus there).
+
+**Say to your agent:** *"Doctor says some facts were captured from gbrain's own
+sessions or from pasted text. Show me which ones before removing anything."*
+The agent runs `gbrain repair captured-facts`, shows you the list and, after
+you agree, runs the printed apply command.
+
+```bash
+gbrain doctor                                   # captured_facts_active
+gbrain repair captured-facts                    # preview: every candidate with its class
+gbrain repair captured-facts --apply --expect <hash>
+gbrain doctor
+```
+
+| Class | Meaning | Expired |
+| --- | --- | --- |
+| `evidenced` | The fact's session is one of gbrain's own claude-cli sessions: a harness transcript in a gbrain scratch project, or a corpus file `gbrain doctor` (`self_capture`) quarantined. | By `--apply --expect <hash>` |
+| `ambiguous` | A paste candidate: at least 60% of the fact's content words appear in the session's retained corpus file only inside pasted blocks. A heuristic, so it is listed in every preview but expired only on request. | Only with `--include-ambiguous` and that preview's hash |
+| `excluded:legitimate_duplicate` | The same claim and entity also has an active fact from another lane or an unsuspected session, so the claim is legitimate. | Never |
+
+Sessions that cannot be classified on this host (the harness transcript was
+pruned, the corpus file is gone) are counted as `unclassifiable` and kept.
+`captured_facts_active` counts facts; the `self_capture` check counts corpus
+files. Clear both: quarantine the files with the commands `self_capture`
+prints, then expire the facts here.
+
+The apply expires exactly the previewed set. A fact that changed since the
+preview reports `changed_since_preview` and stays active. A fact with a row in
+its entity page's `## Facts` fence is struck in the page (one revision-bound
+`put_page` per page, which re-embeds the page), so a later write of the page
+cannot reactivate it; a fact with no fence row expires database-only (one
+maintenance request per page on a managed brain). Nothing is withdrawn, so
+`gbrain remember` can save the same claim again.
+
+<a id="loop-facts"></a>
+### Loop facts
+
+Closing a commitment loop (`gbrain loops done`, `gbrain loops drop`, or the
+`loops_close` tool) retires its commitment fact. A loop closed while that
+retirement could not commit (for example on a managed brain, where the write
+was refused but the close still reported `fact_expired: true`) left the fact
+active, so entity cards and recall keep the finished promise. `gbrain repair
+loop-facts` retires those facts. It is explicit-only and preview-bound.
+
+**Say to your agent:** *"Doctor says some closed loops still have an active
+commitment. Preview retiring those facts, then apply after I agree."* The agent
+runs `gbrain repair loop-facts` and, after you agree, the printed apply command.
+
+```bash
+gbrain doctor                                   # loop_facts_drift
+gbrain repair loop-facts                        # preview: closed_loop_facts=N
+gbrain repair loop-facts --apply --expect <hash>
+gbrain doctor
+```
+
+Each candidate is a `done` or `dropped` loop whose commitment fact is active
+and lives in the loop's own source. A fact that another open loop still
+references is skipped (`shared_with_open_loop`); it is retired when the last
+loop that uses it closes. The apply expires the fact and strikes its fence row
+in one coordinated write, exactly for the previewed set; a loop or fact that
+changed since the preview reports `changed_since_preview` and is kept. No
+withdrawal is recorded, so the same promise made again is stored normally.
+
+<a id="failed-writes"></a>
+### Failed writes
+
+Before v0.60.38.0, on a managed brain whose `tags`, `timeline_entries` or
+`takes` table had a `source_id` column gbrain does not create, the managed
+writer guard refused writes it should have allowed (#5983). Each refused write
+keeps a failed receipt with its full intent until receipt compaction
+(`persistence.receipt_retention_days`, 30 days by default). `gbrain repair
+failed-writes` submits those writes again. It is explicit-only and
+preview-bound, and needs v0.60.38.0 or later (`gbrain doctor --json` reports
+schema version 197 or later).
+
+**Say to your agent:** *"Preview which refused writes gbrain can replay, show
+me the list, then apply after I agree."* The agent runs `gbrain repair
+failed-writes` and, after you agree, the printed apply command.
+
+```bash
+gbrain config set persistence.receipt_retention_days 90   # keep the receipts while you recover
+gbrain repair failed-writes --source <id>                 # preview: every refused write with its class
+gbrain repair failed-writes --source <id> --apply --expect <hash>
+gbrain repair failed-writes --source <id>                 # replayed writes now read already_written
+```
+
+Candidates are failed receipts refused by the guard: `writer_coordinator_required`,
+or `storage_error` "Publication failed (P0001)" from releases that did not keep
+the guard's message. Only writes a caller made directly are replayed:
+`put_page`, `add_timeline_entry` and `remember`. The preview gives every
+candidate one class:
+
+| Class | Meaning | What happens |
+| --- | --- | --- |
+| `replay` | No later write supersedes it. | Replayed on apply. |
+| `already_written` | A later request with the same intent committed, or an earlier apply replayed it. | Kept. |
+| `duplicate` | A later request with the same intent exists; that one is the candidate. | Kept. |
+| `superseded` | A later write or delete of the page committed or is still pending; for `put_page`, also a later failed `put_page` of the page (the newer content) or a page that changed after the revision the caller read. | Kept. Read the page and re-issue the change by hand if it is still wanted. |
+| `unpinned_target` | A `remember` saved unattributed; replaying would infer its subject again and could pick another page. | Kept. Re-issue it with an explicit `entity` if it is still wanted. |
+| `producer_owned` | gbrain produced it (sync or file import, reconcile, relink, maintenance page, job). | Kept. The preview prints the command that produces it again from current content, such as `gbrain sync --source <id> --no-pull --retry-failed --json`. |
+
+The apply replays exactly the previewed set. Each write is classified again
+and its original caller's authority is checked again first: a write that
+changed class since the preview reports `changed_since_preview`, and one whose
+caller lost its grant or whose source was re-created reports
+`authority_revoked`; both are kept. A replay goes through the operation's
+normal path on the original caller's trust lane: a write an agent sent over MCP
+is prepared as a remote write again, with its take-holder and delegated
+namespace limits, so it can do no more than the original could. A `put_page`
+replay is bound to the page revision the preview saw (an original `force: true`
+is dropped), so a page changed since the preview reports `changed_since_preview`
+or `conflict` instead of being overwritten. A `remember` replay targets the
+subject the original resolved. Each replay uses a new request id derived from
+the failed one, so a rerun after a crash resumes the same request and a second
+apply never writes it twice (`pending_elsewhere` when another writer holds that
+request). Attribution names the local owner's writer for that lane. A replay the
+brain refuses reports `refused` with the code. The failed receipts stay as
+history.
 
 ## Resume
 
@@ -568,12 +732,23 @@ walk me through it before changing anything."*
 
 | Symptom or error text | Issue | Preview | Apply | Verify |
 | --- | --- | --- | --- | --- |
+| Tag, timeline or take writes fail with `writer_coordinator_required` or `storage_error: Publication failed (P0001)` on a managed brain; sync ends `PARTIAL` at a tagged page | #5983 | `gbrain doctor --json` (`schema_version` is 197 or later) | the original `gbrain sync --source <source> … --no-pull --retry-failed --json`, then `gbrain extract --stale --source-id <source>` and `gbrain extract timeline --source db --source-id <source>`, then `gbrain facts relink --source <source> --dry-run` (paid tier only after the user agrees), then `gbrain repair failed-writes --source <source>` and, after the user agrees, its printed `--apply --expect <hash>` | `gbrain sources status` shows the new `last_commit`; a second `gbrain extract timeline --source db` run adds no rows; a second `gbrain repair failed-writes` preview lists nothing to replay |
 | Sync `BLOCKED` with `checkpoint_validation_timeout` | #5762 | `gbrain doctor` (`persistence_request_indexes`) | `gbrain repair request-indexes --apply` when an index is missing or INVALID, then the printed `gbrain sync --source <source> --no-pull --retry-failed …` | `gbrain doctor` shows `persistence_request_indexes` ok; `gbrain sources status` shows the new `last_commit` |
 | Doctor `persistence_request_indexes` warns | #5762 | `gbrain repair request-indexes` | `gbrain repair request-indexes --apply` | `gbrain doctor` |
 | Doctor `persistence_request_growth` warns | #5751, #5762 | `gbrain doctor --json` | the printed `gbrain config set persistence.limits.<limit> <value>` | `gbrain doctor --json` (check `persistence_request_growth`) |
 | Working-tree sync prints `legacy file(s) skipped … no contextual retrieval mode` | #5751 | `gbrain repair contextual-mode` | `gbrain repair contextual-mode --apply` | the next `gbrain sync --working-tree` no longer prints the line |
 | Working-tree sync prints `legacy file(s) skipped … not valid UTF-8` | #5751 | `find <checkout> -name '*.md' ! -exec iconv -f UTF-8 -t UTF-8 -o /dev/null {} \; -print` | re-save each listed file as UTF-8 | the next `gbrain sync --working-tree` no longer prints the line |
 | Doctor `google_file_modes` warns, or the upgrade printed `[google] Google source <id> keeps its files in <dir>, outside ~/.gbrain` | #5080 | `gbrain repair google-file-modes --source <id>` | `gbrain repair google-file-modes --source <id> --apply` | `gbrain doctor` (`google_file_modes` ok) |
+| Recall or hot memory returns facts from gbrain's own claude-cli sessions or from pasted text; doctor `captured_facts_active` warns; the upgrade banner prints `captured_facts_active: N (explicit_kind_required; …)` | #5812, #5820 | `gbrain repair captured-facts` (add `--include-ambiguous` to include paste candidates) | `gbrain repair captured-facts --apply --expect <hash>` with the hash that preview printed | `gbrain doctor` (`captured_facts_active` ok) |
+| A finished promise still shows on entity cards and in recall after its loop was closed; doctor `loop_facts_drift` warns; the upgrade banner prints `loop_facts_drift: N (explicit_kind_required; …)` | #5869 | `gbrain repair loop-facts` | `gbrain repair loop-facts --apply --expect <hash>` | `gbrain doctor` (`loop_facts_drift` ok) |
+| `gbrain upgrade` refuses with `requires Bun >=<floor>` (exit 78), or doctor `self_upgrade_health` says `Auto-upgrade to <target> held` | #5855 | `bun --version` | `bun upgrade`, then `gbrain upgrade` ([Bun floor](upgrades-auto-update.md#bun-floor)) | `gbrain --version` shows the target; `gbrain doctor` (`self_upgrade_health` ok) |
+
+**Say to your agent:** *"After the upgrade, preview the captured-facts and
+loop-facts repairs and tell me what each would expire before applying
+anything."* The agent runs `gbrain repair captured-facts` and `gbrain repair
+loop-facts`, shows you both lists, and after you agree runs each printed
+`--apply --expect <hash>` command. See [Captured facts](#captured-facts) and
+[Loop facts](#loop-facts).
 
 Hosted and thin-client callers see the same checks in `gbrain remote doctor`
 as one line each, for example
@@ -749,10 +924,10 @@ Each heading below is the `docs` anchor a refusal carries.
 
 ### Explicit-only repair kinds
 
-`google-file-modes`, `stale-atoms` and `extractor-facts` run only when named:
-`gbrain repair <kind>` previews, and `gbrain repair <kind> --apply` applies
-(`stale-atoms` and `extractor-facts` also need `--expect <hash>`, so they apply
-exactly the previewed set; `google-file-modes` re-checks each file's owner,
+`google-file-modes`, `stale-atoms`, `extractor-facts`, `captured-facts` and
+`loop-facts` run only when named: `gbrain repair <kind>` previews, and
+`gbrain repair <kind> --apply` applies (every kind but `google-file-modes`
+also needs `--expect <hash>`, so it applies exactly the previewed set; `google-file-modes` re-checks each file's owner,
 type and mode at apply time). They are excluded everywhere else:
 
 - `gbrain repair --all` (and `gbrain repair` with no kind) lists each with its
@@ -779,7 +954,8 @@ saved preview is older than 7 days, or the selection no longer matches it (for
 "The preview changed since <hash>; re-run <preview command> and use the new
 hash." Re-run the printed preview command and apply with the new hash. It
 applies to `gbrain jobs authorize-legacy --select`, `gbrain jobs cancel
---select`, `gbrain repair stale-atoms` and `gbrain repair extractor-facts`.
+--select`, `gbrain repair stale-atoms`, `gbrain repair extractor-facts`,
+`gbrain repair captured-facts` and `gbrain repair loop-facts`.
 
 ### Legacy job authority
 

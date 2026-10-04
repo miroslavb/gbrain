@@ -181,3 +181,20 @@ seals page projections after unmanaged metadata writes on newer cores. Host
 manifest8 admission is limited to the existing13files; runtime-specific Bun
 launchers are staged outside this core repository. Neither this commit nor a
 code canary activates production or closes ordinary-answer quality audits.
+
+## v0.60.45 port (acceptance pending)
+
+Production activation was authorized on2026-10-04 after cleanup. Ten new
+upstream migrations190..199 append as fork198..207; existing IDs and all eight
+fork migrations remain immutable. This is schema207, not upstream199.
+
+- `src/core/engine-sql/health-curated.ts` — shared fork curated graph counters;
+  source scope and both endpoint liveness preserve existing host score semantics
+  while shared health keeps upstream planner-safe embedding counters.
+
+Chronicle now uses the upstream persistent ledger, shared eligibility with the
+100-message conversation floor, and bounded max_total compatibility. Default
+automatic Chronicle must be explicitly off in deployed config. Paid atom and
+Chronicle routes remain fail-closed when a price is unknown; atoms retain the
+semantic validator under the same attempt-wide cap. Global maintenance adopts
+upstream durable phase resume and retains aggregate job progress.

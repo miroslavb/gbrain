@@ -38,6 +38,7 @@ import { operations, operationsByName, opAllowedForBoundClient } from '../core/o
 import type { AuthInfo } from '../core/operations.ts';
 import { VERSION } from '../version.ts';
 import { dispatchToolCall, requestLogStatusForResult } from './dispatch.ts';
+import { GBRAIN_CLIENT_HEADER, resolveResultRowsMode, resultRowsForRequest } from './result-rows.ts';
 import { parseStrictParamsMode } from './validate-params.ts';
 import { filterOpsForSurface, clampSurface, type McpSurface } from './surface.ts';
 import { disabledOpsForPublishGates } from './publish-gates.ts';
@@ -48,8 +49,8 @@ import { degradedLastError, isEngineDegraded } from '../core/degraded-marker.ts'
 import { classifyPgAccessError } from '../core/pg-access-classify.ts';
 import { redactConnectionInfo } from '../core/audit/redact-connection-info.ts';
 import { redactUrlsInText } from '../core/url-redact.ts';
-import { normalizeTokenScopes, parseLegacyTokenScope, parseTakesHoldersAllowList, coerceLegacyPermissions, parseLegacyOperationGrant } from '../core/legacy-token-scope.ts';
-export { parseLegacyTokenScope };
+import { authSourcesFromGrant, grantFromTokenRow } from '../core/grants/model.ts';
+export { parseLegacyTokenScope } from '../core/legacy-token-scope.ts';
 
 const DEFAULT_BODY_CAP = 1024 * 1024; // 1 MiB
 
@@ -252,39 +253,35 @@ export async function startHttpTransport(opts: HttpTransportOptions) {
     const token = authHeader.slice(7);
     const hash = hashToken(token);
     try {
+      // SELECT * reads every schema generation (pre-F3 rows lack the grant columns).
       const [row] = await sql`
-        SELECT id, name, permissions, scopes FROM access_tokens
+        SELECT * FROM access_tokens
         WHERE token_hash = ${hash} AND revoked_at IS NULL
       `;
       if (!row) return { ok: false };
       const rowId = row.id as string;
       const rowName = row.name as string;
       // Debounced last_used_at update — only writes once per token per 60s.
-      // SQL-level WHERE clause keeps this race-tolerant even under concurrent requests.
-      sql`UPDATE access_tokens
-          SET last_used_at = now()
-          WHERE id = ${rowId}
-            AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')`
+      // SQL-level WHERE clause keeps this race-tolerant even under concurrent requests;
+      // SKIP LOCKED keeps a row lock held elsewhere from parking a pool slot (#5730).
+      sql`UPDATE access_tokens SET last_used_at = now()
+          WHERE id IN (SELECT id FROM access_tokens WHERE id = ${rowId}
+            AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds') FOR UPDATE SKIP LOCKED)`
         .catch(() => { /* fire-and-forget */ });
-      // v0.28: extract per-token takes-holder allow-list. Fail-safe default
-      // is ['world'] — a token with no permissions row sees public claims only.
-      // #2529: decode + parse via the shared core helpers so this transport and
-      // the OAuth provider behind `serve --http` cannot drift — including a
-      // double-encoded jsonb string scalar (#2339 class), which both now decode
-      // identically instead of one honoring the grant while the other fails
-      // open to ['world'].
-      const perms = coerceLegacyPermissions((row as { permissions?: unknown }).permissions);
-      const allowList = parseTakesHoldersAllowList(perms?.takes_holders) ?? ['world'];
-      // #1336: honor the operator-set source grant stored on the token.
-      const { sourceId, allowedSources } = parseLegacyTokenScope(perms?.source_id);
+      // F3: one grant shape (grants/model.ts) shared with the OAuth provider
+      // behind `serve --http`, so the two transports cannot drift. Takes
+      // holders fail safe to ['world']; #1336 honors the stored source grant.
+      const grant = grantFromTokenRow(row);
+      const allowList = grant.takesHolders ?? ['world'];
+      const { sourceId, allowedSources, hasSourceGrant } = authSourcesFromGrant(grant);
       const auth: AuthInfo = {
         token,
         clientId: rowId,
         principal: { kind: 'legacy_token', id: rowId },
         clientName: rowName,
-        scopes: normalizeTokenScopes(row.scopes) ?? ['read', 'write', 'admin'],
+        scopes: grant.scopes,
         sourceId,
-        ...(perms?.allowed_operations === undefined ? {} : { allowedOperations: parseLegacyOperationGrant(perms.allowed_operations) }),
+        ...(grant.allowedOperations === null ? {} : { allowedOperations: grant.allowedOperations }),
         ...(allowedSources ? { allowedSources } : {}),
       };
       return {
@@ -298,7 +295,7 @@ export async function startHttpTransport(opts: HttpTransportOptions) {
         auth,
         // #3242: distinguish "operator granted a scope" from "historical
         // no-grant floor" — only the latter widens to federated sources.
-        hasSourceGrant: perms?.source_id != null,
+        hasSourceGrant,
       };
     } catch {
       return { ok: false };
@@ -542,6 +539,7 @@ export async function startHttpTransport(opts: HttpTransportOptions) {
           // WP4 (D2): this transport has no per-client rows, so its surface
           // IS the ceiling request_tools bounds catalog + persist by.
           surfaceCeiling: surface,
+          resultRows: resultRowsForRequest(req.headers.get(GBRAIN_CLIENT_HEADER), await resolveResultRowsMode(engine, fileConfig)), // C1; row shape only, never authority
         });
         // Same status taxonomy as the OAuth transport (denied_after_list /
         // success_with_warnings feed the amendment-33 metric + E4 usage).

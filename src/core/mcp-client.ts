@@ -19,6 +19,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { isPersistenceIpcMutation } from './persistence/ipc.ts';
+import { replayWhilePending } from './persistence/write-wait.ts';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
@@ -26,6 +27,8 @@ import { anySignal } from './abort-check.ts';
 import type { GBrainConfig } from './config.ts';
 import { discoverOAuth, mintClientCredentialsToken } from './remote-mcp-probe.ts';
 import { isWriteErrorCode, isWriteReceipt, isWriteRequestId, publicWriteReceipt, type WriteErrorCode, type WriteReceipt } from './persistence/types.ts';
+import { GBRAIN_CLIENT_HEADER, GBRAIN_THIN_CLIENT_NAME } from '../mcp/result-rows.ts';
+import { VERSION } from '../version.ts';
 
 interface CachedToken {
   access_token: string;
@@ -292,6 +295,9 @@ async function buildClient(mcpUrl: string, accessToken: string, signal?: AbortSi
     requestInit: {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
+        // Hosts serve full search/query rows to gbrain's own CLI (renderers,
+        // --explain). A row-shape hint only, never an authority claim.
+        [GBRAIN_CLIENT_HEADER]: `${GBRAIN_THIN_CLIENT_NAME}/${VERSION}`,
       },
     },
     fetch: (input, init) => fetch(input, {
@@ -300,7 +306,7 @@ async function buildClient(mcpUrl: string, accessToken: string, signal?: AbortSi
     }),
   });
   const client = new Client(
-    { name: 'gbrain-remote-cli', version: '1' },
+    { name: GBRAIN_THIN_CLIENT_NAME, version: '1' },
     { capabilities: {} },
   );
   try {
@@ -325,6 +331,12 @@ export interface CallRemoteToolOptions {
   timeoutMs?: number;
   /** External AbortSignal (e.g. SIGINT handler). Composed with the timeout. */
   signal?: AbortSignal;
+  /**
+   * #5232: keep a mutation's commit wait beyond the server's own bounded
+   * wait by replaying the identical request (same request_id) while it is
+   * pending. `timeoutMs` still bounds each exchange.
+   */
+  writeWaitMs?: number;
 }
 
 /**
@@ -390,6 +402,10 @@ export async function callRemoteTool(
   // Retain on the caller's object so transport refresh and caller retries use
   // the same durable identity. Explicit malformed IDs still reach validation.
   if (isPersistenceIpcMutation(toolName) && args.request_id === undefined && args.dry_run !== true) args.request_id = randomUUID();
+  if (opts.writeWaitMs !== undefined && isPersistenceIpcMutation(toolName) && args.dry_run !== true) {
+    const { writeWaitMs, ...exchange } = opts;
+    return replayWhilePending(() => callRemoteTool(config, toolName, args, exchange), writeWaitMs);
+  }
   const requestId = isPersistenceIpcMutation(toolName) && isWriteRequestId(args.request_id) ? args.request_id : undefined;
   let submitted = false;
 
