@@ -166,7 +166,7 @@ to add a new directory the synthesis subagent may write to:
 
 ## Takes attribution (v0.32+)
 
-When writing a `<!--- gbrain:takes:begin -->` fence, the **holder** column says
+When writing a takes fence (the `gbrain:takes:begin` comment marker), the **holder** column says
 WHO BELIEVES the claim, not who it's ABOUT. Cross-modal eval over 100K
 production takes scored attribution at 6.5/10 — holder/subject confusion was
 the #1 error. These six rules are the contract. Long form with worked
