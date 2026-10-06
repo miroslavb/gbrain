@@ -3019,6 +3019,8 @@ export interface ChatResult {
 export interface ChatOpts {
   /** "provider:modelId" — defaults to config.chat_model. */
   model?: string;
+  /** Per-call override of `chat_fallback_chain`; `[]` lets no other model answer this call. */
+  fallbackChain?: readonly string[];
   /** System prompt. */
   system?: string;
   messages: ChatMessage[];
@@ -3422,7 +3424,7 @@ export function toAISDKTools(tools: ChatToolDef[] | undefined): Record<string, a
     return acc;
   }, {} as Record<string, any>);
 }
-export const chat = (opts: ChatOpts): Promise<ChatResult> => runChatFallback(opts, opts.model ?? getChatModel(), getChatFallbackChain(), chatOnce);
+export const chat = (opts: ChatOpts): Promise<ChatResult> => runChatFallback(opts, opts.model ?? getChatModel(), opts.fallbackChain ?? getChatFallbackChain(), chatOnce);
 async function chatOnce(opts: ChatOpts): Promise<ChatResult> {
   const tracker = __budgetStore.getStore() ?? null;
   const modelStrEarly = opts.model ?? getChatModel();

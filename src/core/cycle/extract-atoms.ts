@@ -894,6 +894,7 @@ export async function runPhaseExtractAtoms(
   let maxInputChars = DEFAULT_EXTRACT_MAX_INPUT_CHARS;
   let maxOutputTokens = DEFAULT_EXTRACT_MAX_OUTPUT_TOKENS;
   let pacingMs = 0;
+  let modelFallback = true;
   try {
     extractModel = await resolveExtractAtomsModel(engine);
     const configuredValidatorModel = await engine.getConfig('models.dream.extract_atoms_validator');
@@ -928,6 +929,8 @@ export async function runPhaseExtractAtoms(
       // truncates every response into the malformed-output failure path.
       if (Number.isFinite(n) && n >= 256) maxOutputTokens = Math.floor(n);
     }
+    // 'false' pins extraction to its configured model: no chat_fallback_chain model answers it.
+    modelFallback = (await engine.getConfig('cycle.extract_atoms.model_fallback')) !== 'false';
     // Optional per-item pacing sleep (ms) so a large backlog doesn't hammer
     // a local/self-hosted provider back-to-back. 0 (default) = no pacing.
     const configuredPacing = await engine.getConfig('cycle.extract_atoms.pacing_ms');
@@ -1173,7 +1176,7 @@ export async function runPhaseExtractAtoms(
             content: transcriptMessage(originLabel, promptContent),
           },
         ],
-        maxTokens: maxOutputTokens, responseSchema: ATOMS_RESPONSE_SCHEMA,
+        maxTokens: maxOutputTokens, responseSchema: ATOMS_RESPONSE_SCHEMA, ...(modelFallback ? {} : { fallbackChain: [] }),
         abortSignal: opts.signal,
       });
       // The gateway reports the canonical requested model unless a fallback
