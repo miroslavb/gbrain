@@ -232,6 +232,38 @@ export function parseAtomsResponse(raw: string, sourceText?: string): ExtractedA
   return outcome.ok ? outcome.atoms : [];
 }
 
+const SOFT_WRAP_BLOCK_START_RE = /^\s*(?:[-*+]\s|\d+[.)]\s|#|\||>|```)/;
+
+/**
+ * The exact source span a model quote denotes. A verbatim quote is its own span.
+ * Otherwise accept the ONE source span that differs from the quote only in
+ * whitespace: models quote a hard-wrapped Markdown paragraph with a space where
+ * the source has a line break, and the strict substring check rejected every
+ * such quote. Returning the source's own text keeps the downstream exact-offset
+ * provenance (`promptContent.indexOf(source_quote)`) intact. A span that crosses
+ * a blank line or starts a list item, heading, table row, blockquote or fence is
+ * not one wrapped sentence and is refused, as is an ambiguous (repeated) match.
+ */
+export function groundedQuoteSpan(sourceText: string, quote: string): string | null {
+  let span: string | null = sourceText.includes(quote) ? quote : null;
+  if (span === null) {
+    const tokens = quote.split(/\s+/).filter(Boolean);
+    if (tokens.length < 2) return null;
+    const re = new RegExp(tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g');
+    let first: string | null = null;
+    for (let m = re.exec(sourceText); m; m = re.exec(sourceText)) {
+      if (first !== null) return null;
+      first = m[0];
+    }
+    span = first;
+  }
+  if (span === null || !/[\r\n]/.test(span)) return span;
+  const lines = span.split(/\r?\n/);
+  if (lines.some(line => !line.trim())) return null;
+  if (lines.slice(1).some(line => SOFT_WRAP_BLOCK_START_RE.test(line))) return null;
+  return span;
+}
+
 function atomsFromParsedArray(parsed: unknown[], sourceText?: string): ExtractedAtom[] {
 
   const atoms: ExtractedAtom[] = [];
@@ -246,18 +278,23 @@ function atomsFromParsedArray(parsed: unknown[], sourceText?: string): Extracted
     if (!ATOM_TYPES.includes(atomType as typeof ATOM_TYPES[number])) continue;
     const requireGrounding = typeof sourceText === 'string'
       && sourceText.length >= MIN_PAGE_CHARS_FOR_EXTRACTION;
+    let quote = sourceQuote;
     if (requireGrounding) {
-      if (!sourceQuote || sourceQuote.length > 200 || !sourceText.includes(sourceQuote)) continue;
-      if (!isSingleAtomicSentence(body, MAX_GROUNDED_BODY_CHARS)) continue;
-      if (!isSingleAtomicSentence(sourceQuote, 200)) continue;
-      if (!isSelfContainedAtomicEvidence(sourceQuote)) continue;
-      body = sourceQuote;
+      quote = sourceQuote ? groundedQuoteSpan(sourceText, sourceQuote) : null;
+      if (!quote || quote.length > 200) continue;
+      // Sentence shape is judged on the flattened text: a soft line break inside
+      // a hard-wrapped paragraph is not a sentence or list boundary.
+      const flat = quote.replace(/\s+/g, ' ');
+      if (!isSingleAtomicSentence(body.replace(/\s+/g, ' '), MAX_GROUNDED_BODY_CHARS)) continue;
+      if (!isSingleAtomicSentence(flat, 200)) continue;
+      if (!isSelfContainedAtomicEvidence(flat)) continue;
+      body = quote;
     }
     atoms.push({
       title,
       atom_type: atomType as typeof ATOM_TYPES[number],
       body,
-      source_quote: sourceQuote ? sourceQuote.slice(0, 200) : undefined,
+      source_quote: quote ? quote.slice(0, 200) : undefined,
       lesson: requireGrounding ? undefined : (typeof obj.lesson === 'string' ? obj.lesson : undefined),
       concepts: (() => {
         if (!Array.isArray(obj.concepts)) return undefined;
