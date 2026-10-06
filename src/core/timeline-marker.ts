@@ -57,3 +57,13 @@ export function firstMaterializedMarkerIndex(text: string): number {
 export function stripMaterializedMarkers(text: string): string {
   return text.includes('gbrain:materialized') ? text.replace(MARKER_LINES, '') : text;
 }
+
+/**
+ * A timeline row whose summary is a facts/takes fence (its table header or a fence marker)
+ * is projection junk, never an event: rendering it back into a page copies the table header
+ * into the timeline, and every later write re-extracts it.
+ */
+export function isFenceJunkSummary(summary: string): boolean {
+  const text = summary.trimStart();
+  return text.startsWith('| # | claim |') || text.startsWith('<!--- gbrain:facts:') || text.startsWith('<!--- gbrain:takes:');
+}

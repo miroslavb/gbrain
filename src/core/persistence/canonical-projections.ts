@@ -9,7 +9,7 @@ import { parseTimelineEntries } from '../link-extraction.ts';
 import { extractTimelineFromContent, type ExtractedTimelineEntry } from '../timeline-extract.ts';
 import { sanitizeRemoteBody } from '../remote-body.ts';
 import { sanitizeForJsonb } from '../batch-rows.ts';
-import { materializedMarker, materializedMarkerHash, timelineKey, timelineKeyHash } from '../timeline-marker.ts';
+import { isFenceJunkSummary, materializedMarker, materializedMarkerHash, timelineKey, timelineKeyHash } from '../timeline-marker.ts';
 import { OperationError } from '../ops/contract.ts';
 
 type CanonicalBody = Pick<ParsedPage, 'compiled_truth' | 'timeline'>;
@@ -163,6 +163,8 @@ export function renderMaterializedBullet(row: { date: string; source: string; su
   const detail = collapse(row.detail ?? '');
   // Pre-#4277 backlink receipts are graph noise the extractors deliberately skip.
   if (/^Referenced in\s+\[/i.test(tuple.summary)) return null;
+  // A fence-header summary is projection junk: never write it back into the page.
+  if (isFenceJunkSummary(tuple.summary)) return null;
   const block = [materializedMarker(tuple), `- **${tuple.date}** | ${tuple.source} — ${tuple.summary}`, ...(detail ? [`  ${detail}`] : [])].join('\n');
   const extracted = [...canonicalTimeline({ compiled_truth: block, timeline: '' }, slug).values()];
   if (extracted.length !== 1) return null;

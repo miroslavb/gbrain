@@ -13,7 +13,7 @@
 
 import { parseInlineCitationTimelineEntries, findTimelineSourceDelimiter, parseTimelineEntries } from './link-extraction.ts';
 import type { BrainEngine } from './engine.ts';
-import { firstMaterializedMarkerIndex } from './timeline-marker.ts';
+import { firstMaterializedMarkerIndex, isFenceJunkSummary } from './timeline-marker.ts';
 
 export interface ExtractedTimelineEntry {
   slug: string;
@@ -117,7 +117,8 @@ function markdownTimelineKeys(text: string, slug: string): Set<string> {
  * an earlier version of the page produced that the current text no longer
  * does (a corrected or deleted dated bullet, however many edits ago). Rows no
  * version of the page ever produced (enrichment, meeting fan-out, inferred
- * anchors) and event-page projections are never touched. The page_versions
+ * anchors) and event-page projections are never touched, except fence-header
+ * junk (`isFenceJunkSummary`), which is retracted too. The page_versions
  * scan only runs when the page holds a row the current text does not produce.
  * Returns the orphaned rows; they are deleted unless `dryRun`.
  */
@@ -142,7 +143,8 @@ export async function retractRemovedTimelineEntries(
   for (const version of versions) {
     for (const key of markdownTimelineKeys(`${version.compiled_truth}\n${version.timeline ?? ''}`, slug)) produced.add(key);
   }
-  const orphans = extra.filter(row => produced.has(tupleKey(row)));
+  // Fence-header junk is removed even when no stored version produced it (see isFenceJunkSummary).
+  const orphans = extra.filter(row => isFenceJunkSummary(row.summary) || produced.has(tupleKey(row)));
   if (!orphans.length || opts.dryRun) return orphans;
   await engine.executeRaw(
     `DELETE FROM timeline_entries WHERE id IN (SELECT jsonb_array_elements_text($1::text::jsonb)::int)`,
