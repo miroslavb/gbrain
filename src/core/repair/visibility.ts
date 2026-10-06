@@ -14,6 +14,7 @@
  */
 import type { BrainEngine } from '../engine.ts';
 import { serializePageToMarkdown } from '../markdown.ts';
+import { validatePageSlug } from '../ops/context.ts';
 import { submitPageMutation } from '../persistence/page-mutations.ts';
 import { effectiveVisibility, strictestVisibility, type Visibility } from '../search/private-visibility.ts';
 import { afterCursor, repairRequestId, type RepairHandler, type RepairItem, type RepairScope, type RepairCursor } from './core.ts';
@@ -98,6 +99,10 @@ export const visibilityRepair: RepairHandler = {
     return { items, residuals };
   },
   async apply(ctx, item) {
+    // A legacy row whose slug the current validator rejects (e.g. a segment
+    // that starts with '.') can be neither republished nor deleted through
+    // put_page; count it as skipped instead of aborting the whole batch.
+    try { validatePageSlug(item.slug); } catch { return false; }
     const snapshot = await ctx.engine.readPageSnapshot(item.slug, { sourceId: item.source_id });
     if (!snapshot || !item.change) return false;
     // Re-decide against current origins and inputs; a changed decision waits for the next run.

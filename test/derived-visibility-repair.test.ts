@@ -193,6 +193,24 @@ describe('#5525 backfill edge cases', () => {
       expect(await visibilityOf(engine, 'atoms/flipping')).toBe('private');
     }
   }, 120_000);
+
+  test('a legacy atom whose slug the validator now rejects is skipped, not fatal to the batch', async () => {
+    for (const engine of engines) {
+      await reset(engine);
+      await seed(engine, 'notes/world', 'note', {});
+      // Seeded first so it is planned before the valid atom; then given a slug
+      // with a dot-leading segment, as some pre-validator imports left behind.
+      await seed(engine, 'atoms/legacy-dot', 'atom', { source_slug: 'notes/world' });
+      await engine.executeRaw("UPDATE pages SET slug='atoms/.legacy-dot' WHERE slug='atoms/legacy-dot' AND source_id='default'");
+      await seed(engine, 'atoms/valid', 'atom', { source_slug: 'notes/world' });
+      await withEnv({ GBRAIN_HOME: home }, async () => {
+        const applied = await runRepair(ctx(engine, false), visibilityRepair, await resolveRepairScope(engine), { apply: true });
+        expect(applied).toMatchObject({ affected: 2, applied: 1, skipped: 1, complete: true });
+      });
+      expect(await visibilityOf(engine, 'atoms/valid')).toBe('world');
+      expect(await visibilityOf(engine, 'atoms/.legacy-dot')).toBeNull();
+    }
+  }, 120_000);
 });
 
 describe('#5525 a concept whose provenance edges cannot land stays private', () => {
