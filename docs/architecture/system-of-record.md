@@ -56,7 +56,7 @@ The CI gate constrains direct DB writes to the documented paths.
 
 | Category | How it's stored in markdown | Derived DB table | Reconciler |
 |---|---|---|---|
-| **Takes** (incl. hunches, bets) | `## Takes` fenced table between the `gbrain:takes:begin` / `gbrain:takes:end` comment markers | `takes` | `extract takes` |
+| **Takes** (incl. hunches, bets) | `## Takes` fenced table between the takes-fence begin/end comment markers | `takes` | `extract takes` |
 | **Facts** | `## Facts` fenced table between the `gbrain:facts:begin` / `gbrain:facts:end` comment markers | `facts` | `extract_facts` cycle phase |
 | **Links** | Inline `[text](slug)` / `[[slug]]` in markdown body + frontmatter `direction: incoming` | `links` | `extract links` |
 | **Timeline** | Dated markers anywhere in the page body — compiled truth AND the `## Timeline` section: `- **YYYY-MM-DD** \| Source — Summary` bullets, `### YYYY-MM-DD — Title` headers (FS extract), and inline `[Source: <text>, YYYY-MM-DD]` citations (one row per citation, dated by the citation, summary = the bullet/paragraph it sits in). The `<!-- timeline -->` sentinel only splits compiled_truth from timeline for storage; it does not scope extraction | `timeline_entries` | `extract timeline` + canonical page publication (independent of `auto_timeline`) |
