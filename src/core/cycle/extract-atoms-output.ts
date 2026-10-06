@@ -135,6 +135,24 @@ export function parseAtomsOutcome(raw: string, sourceText?: string): AtomsParseO
 
 const MAX_ARRAY_ANCHOR_CANDIDATES = 64;
 
+/** Index of the `]` that closes the array opening at text[0], skipping brackets inside JSON strings; null if unbalanced. */
+function balancedArrayEnd(text: string): number | null {
+  let depth = 0, inString = false, escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '[' || ch === '{') depth++;
+    else if ((ch === ']' || ch === '}') && --depth === 0) return ch === ']' ? i : null;
+  }
+  return null;
+}
+
 /**
  * Parse the JSON array anchored at ONE `[` offset, reproducing the historical
  * two-step exactly: whole-slice parse, then a trim-back to the last `]` to
@@ -151,14 +169,17 @@ function parseArrayAtOffset(
   try {
     parsed = JSON.parse(slice);
   } catch {
-    // Try trimming back from the end to recover from trailing prose.
+    // Recover from trailing prose: first the bracket-balanced array (prose that
+    // itself holds `]`, e.g. a `[Source: …]` note, defeated the last-`]` trim),
+    // then the historical trim back to the last `]`.
+    const balancedEnd = balancedArrayEnd(slice);
     const arrayEnd = slice.lastIndexOf(']');
     if (arrayEnd === -1) return { ok: false, reason: 'unterminated JSON array' };
-    try {
-      parsed = JSON.parse(slice.slice(0, arrayEnd + 1));
-    } catch {
-      return { ok: false, reason: 'unparseable JSON array' };
+    let recovered = false;
+    for (const end of balancedEnd === null ? [arrayEnd] : [balancedEnd, arrayEnd]) {
+      try { parsed = JSON.parse(slice.slice(0, end + 1)); recovered = true; break; } catch { /* next candidate */ }
     }
+    if (!recovered) return { ok: false, reason: 'unparseable JSON array' };
   }
   if (!Array.isArray(parsed)) return { ok: false, reason: 'JSON value is not an array' };
   return { ok: true, parsed };

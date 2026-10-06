@@ -104,7 +104,7 @@ import { effectiveVisibility } from '../search/private-visibility.ts';
 import { OperationError } from '../ops/contract.ts';
 import type { WriteReceipt } from '../persistence/types.ts';
 import { acceptedPendingReceipt } from '../persistence/accepted-pending.ts';
-import { AtomPageStateError, readAtomPageIdentity, writeAtomPageState, type AtomPageInput } from './extract-atoms-page-state.ts';
+import { AtomPageStateError, MAX_DETERMINISTIC_FAILURES, readAtomPageIdentity, writeAtomPageState, type AtomPageInput } from './extract-atoms-page-state.ts';
 import { ATOM_TYPES, ATOMS_RESPONSE_SCHEMA } from './extract-atoms-schema.ts';
 
 const DEFAULT_BUDGET_USD = 0.3;
@@ -128,7 +128,7 @@ export const DEFAULT_EXTRACT_MAX_OUTPUT_TOKENS = 4096;
  * edit resets the streak. Provider/validator operational failures never
  * consume this retry allowance.
  */
-export const MAX_DETERMINISTIC_FAILURES = 3;
+export { MAX_DETERMINISTIC_FAILURES };
 
 /**
  * Transient provider/infra failure shapes — retryable, never counted.
@@ -1201,7 +1201,7 @@ export async function runPhaseExtractAtoms(
 
       // gbrain#4148: typed outcome — malformed output is a FAILURE (counted
       // toward the bounded tombstone below), never a zero-yield success.
-      const parseOutcome = parseAtomsOutcome(result.text, promptContent);
+      const parseOutcome = result.stopReason === 'content_filter' && !result.text.trim() ? { ok: false as const, reason: 'provider content filter' } : parseAtomsOutcome(result.text, promptContent);
       if (!parseOutcome.ok) {
         malformedOutputs++;
         if (!opts.dryRun && managed && origin) writeRequests.push(...await publishManagedAtoms(engine, managed, origin, [], parseOutcome.reason));

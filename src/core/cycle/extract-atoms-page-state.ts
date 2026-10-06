@@ -3,6 +3,9 @@ import type { PageSnapshot } from '../page-state/types.ts';
 import { stableJson } from '../persistence/digest.ts';
 import type { BrainEngine } from '../engine.ts';
 
+/** Strikes on unchanged content before an extraction item is closed (managed and unmanaged paths alike). */
+export const MAX_DETERMINISTIC_FAILURES = 3;
+
 export interface AtomPageIdentity {
   pageId: number;
   sourceIncarnation: string;
@@ -37,24 +40,30 @@ export async function readAtomPageIdentity(engine: SqlEngine, sourceId: string, 
   return row && { pageId: row.id, sourceIncarnation: row.incarnation, revision: row.knowledge_revision };
 }
 
+/**
+ * Upsert the scan state for one page at its pinned content hash. `complete` closes the page (tombstoned);
+ * `failure` adds one strike, and with `maxFailures` the strike that reaches it closes the page too.
+ */
 export async function writeAtomPageState(
-  engine: SqlEngine, sourceId: string, item: AtomPageInput, outcome: 'complete' | 'failure',
+  engine: SqlEngine, sourceId: string, item: AtomPageInput, outcome: 'complete' | 'failure', maxFailures?: number,
 ): Promise<number> {
   if (!item.identity) throw new AtomPageStateError('unpinned');
   const { pageId, sourceIncarnation, revision } = item.identity;
   const [row] = await engine.executeRaw<{ fail_count: number }>(
     `INSERT INTO extract_atoms_page_state (source_incarnation, page_id, content_hash, fail_count, tombstoned)
-      SELECT s.incarnation, p.id, p.content_hash, $8::integer, $9::boolean
+      SELECT s.incarnation, p.id, p.content_hash, $8::integer, $9::boolean OR $8::integer >= $10::integer
       FROM pages p JOIN sources s ON s.id=p.source_id
       WHERE p.id=$1 AND s.incarnation=$2::uuid AND p.source_id=$3 AND p.slug=$4
         AND p.content_hash=$5 AND p.knowledge_revision=$6::uuid AND p.compiled_truth=$7 AND p.deleted_at IS NULL
       FOR SHARE OF p, s
       ON CONFLICT (source_incarnation, page_id, content_hash) DO UPDATE
         SET fail_count=extract_atoms_page_state.fail_count + EXCLUDED.fail_count,
-            tombstoned=extract_atoms_page_state.tombstoned OR EXCLUDED.tombstoned, updated_at=now()
+            tombstoned=extract_atoms_page_state.tombstoned OR EXCLUDED.tombstoned
+              OR extract_atoms_page_state.fail_count + EXCLUDED.fail_count >= $10::integer, updated_at=now()
       RETURNING fail_count`,
     [pageId, sourceIncarnation, sourceId, item.slug, item.contentHash, revision, item.content,
-      outcome === 'failure' ? 1 : 0, outcome === 'complete']).catch((error: unknown) => {
+      outcome === 'failure' ? 1 : 0, outcome === 'complete',
+      outcome === 'failure' && maxFailures !== undefined ? maxFailures : 2147483647]).catch((error: unknown) => {
     const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
     throw new AtomPageStateError(code === '42P01' ? 'schema' : code === '42501' ? 'denied' : 'storage');
   });

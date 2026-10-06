@@ -17,7 +17,7 @@ import { MaintenanceWriteWait } from './maintenance-wait.ts';
 import type { PreparedMutation } from './coordinator.ts';
 import type { WriteAuthority, WriteRequest } from './model.ts';
 import type { WriteReceipt } from './types.ts';
-import { writeAtomPageState } from '../cycle/extract-atoms-page-state.ts';
+import { MAX_DETERMINISTIC_FAILURES, writeAtomPageState } from '../cycle/extract-atoms-page-state.ts';
 import { effectiveVisibility } from '../search/private-visibility.ts';
 
 export interface AtomOrigin {
@@ -412,7 +412,7 @@ export async function prepareManagedAtomMutation(engine: BrainEngine, row: Write
         if (!snapshot) throw new OperationError('revision_conflict', 'The accepted atom source page changed.');
         await writeAtomPageState(tx, row.source_id, { slug: p.origin.locator, content: snapshot.page.compiled_truth,
           contentHash: p.origin.contentHash, identity: { pageId: p.origin.pageId!, sourceIncarnation: row.source_incarnation,
-            revision: p.origin.revision! } }, p.failure ? 'failure' : 'complete');
+            revision: p.origin.revision! } }, p.failure ? 'failure' : 'complete', MAX_DETERMINISTIC_FAILURES);
       }
       const checkpoint = JSON.stringify([{ sourceId: row.source_id, incarnation: row.source_incarnation, requestId: row.request_id,
         kind: p.origin.kind, locator: p.origin.locator, pageId: p.origin.pageId, contentHash: p.origin.contentHash, ...(p.failure ? { failure: p.failure } : {}) }]);
@@ -466,10 +466,12 @@ const LIVE_PAGE: CheckpointPage = { sourceId: 'p.source_id', slug: 'p.slug', pag
 export const MANAGED_ATOM_DISCOVERY_SQL = `AND NOT EXISTS (SELECT 1 FROM op_checkpoints ac
   WHERE ${managedAtomCheckpointSql(LIVE_PAGE)})`;
 
-/** Live pages of a source whose current content has a failed batch awaiting an explicit retry. */
+/** Live pages of a source whose current content has a failed batch awaiting an explicit retry (not yet closed by the strike limit). */
 export async function countManagedAtomFailures(engine: BrainEngine, sourceId: string): Promise<number> {
   const rows = await engine.executeRaw<{ cnt: string | number }>(`SELECT COUNT(*) AS cnt FROM pages p
     WHERE p.source_id=$1 AND p.deleted_at IS NULL AND EXISTS (SELECT 1 FROM op_checkpoints ac
-      WHERE ${managedAtomCheckpointSql(LIVE_PAGE)} AND ac.completed_keys->0->>'failure' IS NOT NULL)`, [sourceId]);
+      WHERE ${managedAtomCheckpointSql(LIVE_PAGE)} AND ac.completed_keys->0->>'failure' IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM extract_atoms_page_state s WHERE s.page_id=p.id AND s.content_hash=p.content_hash AND s.tombstoned
+        AND s.source_incarnation=(SELECT incarnation FROM sources WHERE id=p.source_id))`, [sourceId]);
   return Number(rows[0]?.cnt ?? 0);
 }
