@@ -99,7 +99,7 @@ import { utcDate } from './cycle-date.ts';
 import type { TranscriptPageIndex } from '../transcripts/discover.ts';
 import { createHash } from 'crypto';
 import { slugifySegment } from '../sync.ts';
-import { managedAtomSession, readAtomOrigin, resumeManagedAtoms, publishManagedAtoms, MANAGED_ATOM_DISCOVERY_SQL, type AtomOrigin } from '../persistence/atom-maintenance.ts';
+import { managedAtomSession, readAtomOrigin, resumeManagedAtoms, publishManagedAtoms, MANAGED_ATOM_DISCOVERY_SQL, countManagedAtomFailures, type AtomOrigin } from '../persistence/atom-maintenance.ts';
 import { effectiveVisibility } from '../search/private-visibility.ts';
 import { OperationError } from '../ops/contract.ts';
 import type { WriteReceipt } from '../persistence/types.ts';
@@ -1300,7 +1300,12 @@ export async function runPhaseExtractAtoms(
         scanEmpty = scanCompleted;
         // Candidates that all failed QUALITY gates get a bounded retry
         // allowance. Validator/config operational failures are never charged.
-        if (
+        // Managed runs count no attempt outside publication, so the allowance
+        // would never end: close the item like a zero-yield scan instead.
+        if (atoms.length > 0 && !itemGateOperationalFailure && !opts.dryRun && managed && origin) {
+          writeRequests.push(...await publishManagedAtoms(engine, managed, origin, []));
+          if (item.kind === 'page') tombstonedForQualityRejections.push(item.slug);
+        } else if (
           atoms.length > 0 &&
           !itemGateOperationalFailure &&
           !opts.dryRun &&
@@ -1607,7 +1612,7 @@ export async function runPhaseExtractAtoms(
       duplicates_skipped: duplicatesSkipped,
       write_pending: writesPending,
       failures,
-      ...(managed ? { write_requests: writeRequests } : {}),
+      ...(managed ? { write_requests: writeRequests, managed_failures_awaiting_retry: await countManagedAtomFailures(engine, sourceId) } : {}),
       ...(abortedGlobalError ? { aborted_global_error: abortedGlobalError } : {}),
       malformed_outputs: malformedOutputs,
       tombstoned_for_failures: tombstonedForFailures,

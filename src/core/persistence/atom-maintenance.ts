@@ -440,14 +440,36 @@ export async function prepareManagedAtomMutation(engine: BrainEngine, row: Write
   } };
 }
 
-/** The completed, failure-free `managed-atoms` checkpoint `ac` for one page at its current content hash. */
-export function managedAtomCompletedSql(page: { sourceId: string; slug: string; pageId: string; contentHash: string }): string {
+type CheckpointPage = { sourceId: string; slug: string; pageId: string; contentHash: string };
+
+/** Any `managed-atoms` checkpoint `ac` (completed or failed) for one page at its current content hash. */
+function managedAtomCheckpointSql(page: CheckpointPage): string {
   return `ac.op='managed-atoms' AND ac.completed_keys->0->>'sourceId'=${page.sourceId}
     AND ac.completed_keys->0->>'incarnation'=(SELECT incarnation::text FROM sources WHERE id=${page.sourceId})
     AND ac.completed_keys->0->>'kind'='page' AND ac.completed_keys->0->>'locator'=${page.slug}
-    AND ac.completed_keys->0->>'pageId'=${page.pageId}::text AND ac.completed_keys->0->>'contentHash'=${page.contentHash}
+    AND ac.completed_keys->0->>'pageId'=${page.pageId}::text AND ac.completed_keys->0->>'contentHash'=${page.contentHash}`;
+}
+
+/** The completed, failure-free `managed-atoms` checkpoint `ac` for one page at its current content hash. */
+export function managedAtomCompletedSql(page: CheckpointPage): string {
+  return `${managedAtomCheckpointSql(page)}
     AND ac.completed_keys->0->>'failure' IS NULL`;
 }
 
+const LIVE_PAGE: CheckpointPage = { sourceId: 'p.source_id', slug: 'p.slug', pageId: 'p.id', contentHash: 'p.content_hash' };
+
+/**
+ * Discovery and backlog skip a page whose current content already has ANY checkpoint. A failed batch only
+ * replays its failure until an explicit retry (extract-atoms-drain with retryRequestId) or a content edit, so
+ * rediscovering it each run spent the bounded discovery window on replays and starved never-scanned pages.
+ */
 export const MANAGED_ATOM_DISCOVERY_SQL = `AND NOT EXISTS (SELECT 1 FROM op_checkpoints ac
-  WHERE ${managedAtomCompletedSql({ sourceId: 'p.source_id', slug: 'p.slug', pageId: 'p.id', contentHash: 'p.content_hash' })})`;
+  WHERE ${managedAtomCheckpointSql(LIVE_PAGE)})`;
+
+/** Live pages of a source whose current content has a failed batch awaiting an explicit retry. */
+export async function countManagedAtomFailures(engine: BrainEngine, sourceId: string): Promise<number> {
+  const rows = await engine.executeRaw<{ cnt: string | number }>(`SELECT COUNT(*) AS cnt FROM pages p
+    WHERE p.source_id=$1 AND p.deleted_at IS NULL AND EXISTS (SELECT 1 FROM op_checkpoints ac
+      WHERE ${managedAtomCheckpointSql(LIVE_PAGE)} AND ac.completed_keys->0->>'failure' IS NOT NULL)`, [sourceId]);
+  return Number(rows[0]?.cnt ?? 0);
+}
