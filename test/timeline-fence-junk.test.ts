@@ -1,11 +1,13 @@
 // Timeline rows whose summary is a facts-fence header ("| # | claim | kind | ...") are projection junk.
-// They used to be written back into pages as materialized bullets on every database-rendered write,
-// and `--prune-orphans` kept them because no stored page version produced them. Now the renderer
-// refuses them and the orphan reconciliation retracts them; ordinary database-only rows are kept.
+// The inline-citation extractor read a whole facts fence as one paragraph, so every `[Source: …, date]`
+// cell produced such a row; they were written back into pages as materialized bullets on every
+// database-rendered write, and `--prune-orphans` kept them. Now fences are skipped by the extractor,
+// the renderer refuses junk and the orphan reconciliation retracts it; ordinary rows are kept.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { renderMaterializedBullet } from '../src/core/persistence/canonical-projections.ts';
-import { retractRemovedTimelineEntries } from '../src/core/timeline-extract.ts';
+import { extractTimelineFromContent, retractRemovedTimelineEntries } from '../src/core/timeline-extract.ts';
+import { parseTimelineEntries } from '../src/core/link-extraction.ts';
 import { isFenceJunkSummary } from '../src/core/timeline-marker.ts';
 
 const JUNK = '| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context | |---|-------|------|';
@@ -21,6 +23,21 @@ describe('fence-header timeline junk', () => {
   test('is never rendered back into a page; an ordinary row still is', () => {
     expect(renderMaterializedBullet({ date: '2026-10-02', source: 'User', summary: JUNK }, 'notes/a')).toBeNull();
     expect(renderMaterializedBullet({ date: '2026-10-02', source: 'User', summary: 'Kickoff held' }, 'notes/a')).not.toBeNull();
+  });
+
+  test('a facts fence whose rows cite [Source: …, date] yields no timeline entry; prose citations still do', () => {
+    const page = ['Release verified on the rig. [Source: notes/release.md, 2026-09-01]', '', '## Facts', '',
+      '<!--- gbrain:facts:begin -->', '',
+      '| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |',
+      '|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|',
+      '| 1 | Rig A mines to hop | fact | 1.0 | world | medium | 2026-09-19 |  | [Source: /root/x/README.md#hive, 2026-09-19] |  |',
+      '', '<!--- gbrain:facts:end -->', ''].join('\n');
+    const fileSide = extractTimelineFromContent(page, 'projects/x');
+    const dbSide = parseTimelineEntries(page);
+    for (const entries of [fileSide, dbSide]) {
+      expect(entries.some(e => isFenceJunkSummary(e.summary))).toBe(false);
+      expect(entries.map(e => e.date)).toEqual(['2026-09-01']);
+    }
   });
 
   describe('orphan reconciliation', () => {

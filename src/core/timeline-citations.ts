@@ -12,6 +12,10 @@ interface CitationParagraph {
   text: string;
 }
 
+// Facts/takes fences project stored rows: their `[Source: …, date]` cells date the facts, not timeline
+// events, and the fenced table read as one paragraph turned its header row into an event summary.
+const FENCE_MARKER_RE = /<!--- gbrain:(?:facts|takes):(begin|end) -->/;
+
 function startsMarkdownBlock(line: string): boolean {
   return /^#{1,6}\s/.test(line) || /^\s*(?:[-*+]|\d+\.)\s+/.test(line);
 }
@@ -23,6 +27,7 @@ function citationParagraphs(
   const paragraphs: CitationParagraph[] = [];
   let lines: string[] = [];
   let skippedBlock = false;
+  let inFence = false;
 
   const flush = () => {
     if (lines.length === 0) return;
@@ -31,6 +36,9 @@ function citationParagraphs(
   };
 
   for (const line of stripCodeBlocks(content).split(/\r?\n/)) {
+    const fence = FENCE_MARKER_RE.exec(line);
+    if (fence) { flush(); inFence = fence[1] === 'begin'; continue; }
+    if (inFence) continue;
     if (line.trim().length === 0) {
       flush();
       continue;
