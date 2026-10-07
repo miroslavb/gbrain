@@ -127,6 +127,15 @@ Only send the link on `200`. If you just pushed and the host API is lagging,
 the push output proving the ref moved is sufficient evidence — but never
 invent or guess a URL.
 
+If `gh api` is unavailable, verify that `gh` is actually GitHub CLI before
+troubleshooting authentication: an unrelated executable can use the same name.
+Do not print credential-helper output or send tokens to a guessed host. An
+authenticated `git fetch origin <branch>` plus equality of `git hash-object
+<path>` and `git rev-parse FETCH_HEAD:<path>` provides direct remote-path/content
+proof when the API client is absent. Record that as Git/blob verification, not
+an HTTP200 check, and still derive the rendered URL from the verified remote and
+tracked repo-relative path.
+
 **Send the token only to its issuing host.** The `Authorization: token` header
 above targets `api.github.com` because the remote is a github.com remote. Never
 send `$GITHUB_TOKEN` to a host you derived from `git remote get-url origin`
