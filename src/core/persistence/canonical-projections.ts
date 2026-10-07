@@ -3,7 +3,7 @@ import type { ParsedPage } from '../import-file.ts';
 import type { PageSnapshot } from '../page-state/types.ts';
 import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, parseFactsFence } from '../facts-fence.ts';
 import { TAKES_FENCE_BEGIN, TAKES_FENCE_END, parseTakesFence } from '../takes-fence.ts';
-import { extractFactsFromFenceText } from '../facts/extract-from-fence.ts';
+import { extractFactsFromFenceText, duplicateActiveFenceRows } from '../facts/extract-from-fence.ts';
 import { takesPreparation } from '../takes-write.ts';
 import { parseTimelineEntries } from '../link-extraction.ts';
 import { extractTimelineFromContent, type ExtractedTimelineEntry } from '../timeline-extract.ts';
@@ -230,7 +230,13 @@ export function compileCanonicalProjections(page: ParsedPage, slug: string, sour
   for(const rows of [facts,takes]) if(new Set(rows.map(row=>row.rowNum)).size!==rows.length) {
     throw new OperationError('invalid_params','Canonical row numbers must be unique across the entire page.');
   }
-  return { factRows: extractFactsFromFenceText(facts,slug,sourceId), takes };
+  // A fence may carry the same active (claim, source) at two rows; materializing both would create
+  // a duplicate DB fact that every page render regenerates. Drop the later duplicate-active rows —
+  // the same rule the extract_facts reconcile applies (duplicateActiveFenceRows) — so the projection
+  // stays one-row-per-claim and the body re-renders deduped from the kept DB facts.
+  const dupRows=duplicateActiveFenceRows(facts);
+  const projectedFacts=dupRows.size ? facts.filter(f=>!(f.active && dupRows.has(f.rowNum))) : facts;
+  return { factRows: extractFactsFromFenceText(projectedFacts,slug,sourceId), takes };
 }
 
 function takeCollision(): OperationError {
