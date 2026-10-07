@@ -172,6 +172,11 @@ production takes scored attribution at 6.5/10 — holder/subject confusion was
 the #1 error. These six rules are the contract. Long form with worked
 examples lives in `docs/takes-vs-facts.md`.
 
+Write each fence marker on its own line, the way the fence writer emits it.
+A marker shown inline as prose (inside backticks, mid-sentence) is read as
+documentation, not as a live fence — so this page can safely describe the
+markers without the guard treating the page as a fence that needs repair.
+
 1. **Holder ≠ subject.** The test: did this person SAY or CLEARLY IMPLY this?
    - YES → `holder = people/<slug>`
    - NO, it's your analysis OF them → `holder = brain`
