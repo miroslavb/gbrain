@@ -1,4 +1,4 @@
-import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, parseFactsFence, renderFactsTable } from './facts-fence.ts';
+import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, factsFenceMarkers, parseFactsFence, renderFactsTable } from './facts-fence.ts';
 import { TAKES_FENCE_BEGIN, TAKES_FENCE_END } from './takes-fence.ts';
 import { sanitizeText } from './batch-rows.ts';
 import { stripMaterializedMarkers } from './timeline-marker.ts';
@@ -25,8 +25,10 @@ export function sanitizeRemoteBody(body: string, opts: { includeWithdrawn?: bool
   let open: { start: number; endMarker: string; facts: boolean } | undefined;
   // Each token is visited once. Looking for every marker from each block's
   // cursor would repeatedly scan the remaining body when a marker is absent.
+  const canonicalFacts = new Set([...factsFenceMarkers(body)].map(token => token.index));
   for (const token of body.matchAll(protectedMarkerPattern)) {
     const marker = token[0];
+    if ((marker === FACTS_FENCE_BEGIN || marker === FACTS_FENCE_END) && !canonicalFacts.has(token.index)) continue;
     if (!open) {
       const facts = marker === FACTS_FENCE_BEGIN;
       if (!facts && marker !== TAKES_FENCE_BEGIN) continue;

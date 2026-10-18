@@ -1,7 +1,7 @@
 import type { BrainEngine } from '../engine.ts';
 import type { ParsedPage } from '../import-file.ts';
 import type { PageSnapshot } from '../page-state/types.ts';
-import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, parseFactsFence } from '../facts-fence.ts';
+import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, factsFenceMarkers, parseFactsFence } from '../facts-fence.ts';
 import { TAKES_FENCE_BEGIN, TAKES_FENCE_END, parseTakesFence } from '../takes-fence.ts';
 import { extractFactsFromFenceText, duplicateActiveFenceRows } from '../facts/extract-from-fence.ts';
 import { takesPreparation } from '../takes-write.ts';
@@ -221,8 +221,11 @@ function canonicalTakeRows(body: CanonicalBody): Set<number> {
 /** Validate a canonical body and compile its provider-free projections. */
 export function compileCanonicalProjections(page: ParsedPage, slug: string, sourceId: string) {
   const fields=[page.compiled_truth,page.timeline ?? ''];
-  for(const field of fields) for(const marker of [FACTS_FENCE_BEGIN,FACTS_FENCE_END,TAKES_FENCE_BEGIN,TAKES_FENCE_END]) {
-    if(field.split(marker).length>2) throw new OperationError('invalid_params','Each canonical body section must contain at most one facts fence and one takes fence.');
+  for (const field of fields) {
+    const factsMarkers = [...factsFenceMarkers(field)];
+    const duplicatedFacts = [FACTS_FENCE_BEGIN, FACTS_FENCE_END].some(marker => factsMarkers.filter(token => token.marker === marker).length > 1);
+    const duplicatedTakes = [TAKES_FENCE_BEGIN, TAKES_FENCE_END].some(marker => field.split(marker).length > 2);
+    if (duplicatedFacts || duplicatedTakes) throw new OperationError('invalid_params','Each canonical body section must contain at most one facts fence and one takes fence.');
   }
   const factSets=fields.map(parseFactsFence),takeSets=fields.map(parseTakesFence);
   if ([...factSets,...takeSets].some(set=>set.warnings.length)) throw new OperationError('invalid_params','A canonical facts or takes fence cannot be parsed losslessly.');

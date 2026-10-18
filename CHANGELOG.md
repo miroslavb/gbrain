@@ -10,6 +10,22 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## Fork maintenance — facts-marker boundaries, 2026-10-18
+
+Facts markers are canonical only when standalone outside Markdown fenced code
+examples. Parsing, replacement, visibility projection, remote body sanitization
+and canonical-projection duplicate checks use the same boundary. Inline historical
+quotations remain byte-identical; true malformed protected blocks still fail
+closed. Dedicated Bun1.4.0:151focused tests and native build passed. Three additional
+date tests were blocked by the host managed-root fixture boundary, not accepted
+as green. No schema/version upgrade, source-protection change, mass reindex or
+resident-worker restart was performed. Fresh CLI loads the fix; old resident
+processes are not thereby certified. The protected AGENTS.md edit was denied by
+approval timeout and was not retried or bypassed. Two old full-sync cursors remain
+tracked; never full-sync production merely to erase them. See the host runbook
+`/root/agent-guardrails/docs/code-index.md` and private incident receipts under
+`/root/.local/state/gbrain-doctor-alert-20261018/`.
+
 ## [0.60.45.0] - 2026-10-04
 
 **Meeting notes, conversations and past calendar events turn into timeline events on their own again. Each page costs one paid chat call, capped at $0.25 per page and 200 calls a day. Turn it off with `gbrain config set auto_chronicle false`.**

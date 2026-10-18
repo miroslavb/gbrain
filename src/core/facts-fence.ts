@@ -53,6 +53,39 @@ import {
 export const FACTS_FENCE_BEGIN = '<!--- gbrain:facts:begin -->';
 export const FACTS_FENCE_END   = '<!--- gbrain:facts:end -->';
 
+// One block-level boundary for parsing, writes and remote/privacy projection.
+// Markdown fenced examples are ordinary text, never the system-of-record fence.
+export function* factsFenceMarkers(body: string): Generator<{ marker: string; index: number }> {
+  let offset = 0;
+  let code: { char: string; length: number } | undefined;
+  for (const line of body.split('\n')) {
+    const start = offset;
+    offset += line.length + 1;
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      const delimiter = fence[1], tail = fence[2];
+      if (code) {
+        if (delimiter[0] === code.char && delimiter.length >= code.length && tail.trim() === '') code = undefined;
+      } else if (delimiter[0] !== '`' || !tail.includes('`')) {
+        code = { char: delimiter[0], length: delimiter.length };
+      }
+      continue;
+    }
+    if (code) continue;
+    const marker = line.trim();
+    if (marker === FACTS_FENCE_BEGIN || marker === FACTS_FENCE_END) {
+      yield { marker, index: start + line.indexOf(marker) };
+    }
+  }
+}
+
+function standaloneFactsMarker(body: string, marker: string, from = 0): number {
+  for (const token of factsFenceMarkers(body)) {
+    if (token.marker === marker && token.index >= from) return token.index;
+  }
+  return -1;
+}
+
 // Mirror src/core/engine.ts FactKind. Re-declared (not imported) because
 // the fence parser has zero engine dependencies — it must run in pure-
 // markdown contexts (the chunker strip, the CI invariant check) where
@@ -177,8 +210,8 @@ function parseForgottenFromContext(context: string | undefined): boolean {
  * `FACTS_TABLE_MALFORMED` sync-failures entries.
  */
 export function parseFactsFence(body: string): FactsFenceParseResult {
-  const beginIdx = body.indexOf(FACTS_FENCE_BEGIN);
-  const endIdx   = body.indexOf(FACTS_FENCE_END, beginIdx + FACTS_FENCE_BEGIN.length);
+  const beginIdx = standaloneFactsMarker(body, FACTS_FENCE_BEGIN);
+  const endIdx   = standaloneFactsMarker(body, FACTS_FENCE_END, beginIdx < 0 ? 0 : beginIdx + FACTS_FENCE_BEGIN.length);
   const warnings: string[] = [];
 
   if (beginIdx === -1 && endIdx === -1) return { facts: [], warnings };
@@ -405,9 +438,9 @@ export function renderFactsTable(facts: ParsedFact[]): string {
  */
 export function projectFactsFenceWorldOnly(body: string): string {
   if (typeof body !== 'string') return body;
-  const beginIdx = body.indexOf(FACTS_FENCE_BEGIN);
+  const beginIdx = standaloneFactsMarker(body, FACTS_FENCE_BEGIN);
   if (beginIdx === -1) return body;
-  const endIdx = body.indexOf(FACTS_FENCE_END, beginIdx + FACTS_FENCE_BEGIN.length);
+  const endIdx = standaloneFactsMarker(body, FACTS_FENCE_END, beginIdx < 0 ? 0 : beginIdx + FACTS_FENCE_BEGIN.length);
   if (endIdx === -1) return body;
 
   const inner = body.slice(beginIdx + FACTS_FENCE_BEGIN.length, endIdx);
@@ -598,8 +631,8 @@ export function upsertFactRow(
  * had a timeline froze the fence permanently. No sentinel → EOF append.
  */
 export function replaceOrInsertFactsFence(body: string, fenceBlock: string): string {
-  const beginIdx = body.indexOf(FACTS_FENCE_BEGIN);
-  const endIdx   = body.indexOf(FACTS_FENCE_END, beginIdx + FACTS_FENCE_BEGIN.length);
+  const beginIdx = standaloneFactsMarker(body, FACTS_FENCE_BEGIN);
+  const endIdx   = standaloneFactsMarker(body, FACTS_FENCE_END, beginIdx < 0 ? 0 : beginIdx + FACTS_FENCE_BEGIN.length);
   if (beginIdx !== -1 && endIdx !== -1) {
     return body.slice(0, beginIdx) + fenceBlock + body.slice(endIdx + FACTS_FENCE_END.length);
   }
@@ -700,9 +733,9 @@ export function stripFactsFence(body: string, opts: StripFactsFenceOpts = {}): s
   // Pages without a compiled body have nothing to strip. Guard so the privacy
   // strip is a safe no-op rather than crashing on `undefined.indexOf`.
   if (typeof body !== 'string') return body;
-  const beginIdx = body.indexOf(FACTS_FENCE_BEGIN);
+  const beginIdx = standaloneFactsMarker(body, FACTS_FENCE_BEGIN);
   if (beginIdx === -1) return body;
-  const endIdx = body.indexOf(FACTS_FENCE_END, beginIdx + FACTS_FENCE_BEGIN.length);
+  const endIdx = standaloneFactsMarker(body, FACTS_FENCE_END, beginIdx < 0 ? 0 : beginIdx + FACTS_FENCE_BEGIN.length);
   if (endIdx === -1) return body;
 
   // Whole-fence strip mode (chunker case).
