@@ -98,7 +98,11 @@ This skill guarantees:
    correct; a monitor that *speaks* at its act-line is a false-positive
    generator.
 
-5. **Only now design the fix** — against the number you measured.
+5. **Exercise the monitor as a state machine before changing its threshold.** Reproduce at least `failure → reduced/partial observation → same failure` and `failure → explicit healthy observation`. A check omitted by a fast, maintenance, timed-out, or otherwise partial run is **unknown**, not healthy: carry its prior incident key forward. Clear a prior failure only when an authoritative full run explicitly reports that same check healthy. Keep independent critical probes active in reduced mode.
+
+6. **Verify notification commit semantics.** Treat delivery and state advancement as one commit: if the notifier fails, do not advance the acknowledged problem signature or event-log offset. The next run must retry both a new incident and a recovery. Otherwise the monitor silently loses the only notification while believing it was delivered.
+
+7. **Only now design the fix** — against the number you measured and the reproduced transition defect.
 
 ## The threshold-mismatch failure mode
 
@@ -139,6 +143,12 @@ directly.
   fix starvation that does not exist adds surface area and fixes nothing.
 - **Trusting the alert's causal claim.** Alerts report symptoms accurately and
   causes badly. The staleness number is real; the reason attached to it is a guess.
+- **Treating absence as recovery.** Preserve prior incident keys across partial,
+  fast, timed-out, and missing-check observations; only an explicit authoritative
+  healthy result may clear them, because omitted checks were not evaluated.
+- **Advancing state after failed delivery.** Commit the new signature and scanned
+  offset only after the notifier succeeds; otherwise neither the incident nor its
+  recovery is retried.
 - **Skillifying or persisting a root cause you have not measured.** A confident
   wrong diagnosis baked into a playbook is worse than the original bug.
 
