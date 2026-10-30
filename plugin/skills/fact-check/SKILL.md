@@ -193,6 +193,10 @@ between revenue/profit/GMV/ARR (writers frequently conflate). Check the date
 of any financial figure. Watch for "annualized" or "run rate" presented as
 actual full-year. Currency: note the exchange rate date.
 
+### Private allegation files and payment evidence
+
+Keep sensitive uploaded allegation packages inside their authorized document scope; do not promote accusations or personal selectors to a shared source as established facts. Separate the claimant's narrative, visible exhibit text, independently retrieved records, and your inference. Inspect embedded exhibit images: extraction often captures a website's caption rather than the bank's actual status. For money transfers distinguish requested/scheduled/submitted from settled/received; reconcile cancelled checks, rejected attempts, separate tranches, refunds and duplicate screenshots before asserting a total. A demand, read receipt, editable contact label or later asset purchase is not by itself an acknowledgment, authenticated identity or proof of original fraudulent intent. Record limitations without converting absence in the supplied excerpt into absence in all evidence. Compare source dates when a live fundraiser or company page differs from an older PDF, and distinguish carrier-registration inactivity from corporate dissolution. Registry fleet counts may include leased vehicles, not personally owned unencumbered assets. Read cited statutes before treating a private filing as a governmental decision.
+
 ### Historical Claims
 Cross-reference dates against 2+ independent sources. Be skeptical of founding
 myths. Check contemporaneous news reports, not later retrospectives. Verify
@@ -212,6 +216,18 @@ These claims date quickly; check whether they're still current.
 The hardest category. Check: Is there a proposed mechanism? Temporal
 precedence? Have confounders been controlled? Single-study causal claims
 get extreme skepticism.
+
+### Accusatory dossiers and evidentiary packets
+
+When a document accuses a named person of fraud, debt evasion, harassment,
+or another offense, verify the **proposition proved by each artifact**, not
+merely whether the artifact looks authentic. A submitted payment instruction
+is not settlement; a registry association is not beneficial ownership; a
+served demand is not a judgment; a current asset is not traced proceeds; and
+a detention or company-status record does not prove the alleged misconduct.
+Use `references/adversarial-allegation-dossiers.md` for the claim ledger,
+transaction-state checks, registry semantics, procedural-document checks,
+privacy limits, and conclusion format.
 
 ## Step 0: Brain Context Check (run first)
 
@@ -457,6 +473,10 @@ Follow the [agent operator protocol](../conventions/agent-operator-protocol.md) 
 - **[perplexity-research](../perplexity-research/SKILL.md)** — open-ended
   topic research (finding new information). fact-check verifies claims
   already written.
+
+## Linked references
+
+- `references/adversarial-allegation-dossiers.md` — evidence-proposition review for accusatory dossiers, including bank screenshots, registries, procedural labels, dynamic fundraising pages, and privacy-safe reporting.
 
 ## Related skills
 

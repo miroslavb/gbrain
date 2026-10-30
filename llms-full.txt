@@ -2713,6 +2713,8 @@ fact projection and conversation epochs refuse incompatible segmented writes.
 Do not enable the new storage mode as part of an upgrade or mass repair.
 Separate qualification must prove canonical file, withdrawal and epoch parity.
 
+The 2026-10-30 v0.60.502 fork integration is a preparation checkpoint, not deployment acceptance. Read `docs/architecture/key-files/fork-memory-contracts.md` before running or promoting it; preserve recorded failed gates and historical fixture lineage.
+
 ---
 
 ## CLAUDE.md

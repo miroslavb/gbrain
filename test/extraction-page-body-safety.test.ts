@@ -101,7 +101,7 @@ test('segmented proposal in another source cannot poison an inline scoped list',
 test('a page becoming segmented after proposal enumeration is refused by the fresh snapshot', async () => {
   await proposal();
   const read = engine.readPageSnapshot;
-  engine.readPageSnapshot = async function(slug, opts) {
+  engine.readPageSnapshot = async function(this: PGLiteEngine, slug, opts) {
     await makeSegmented(slug);
     return read.call(this, slug, opts);
   };

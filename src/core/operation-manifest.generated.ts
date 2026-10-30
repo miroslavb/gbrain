@@ -14,7 +14,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "name": "remember",
     "idempotent": true,
     "outputRedaction": "no_stored_text",
-    "description": "Save facts with provenance; set `entity` (the subject) or recall misses it. Branch on `status`; write_pending: poll get_write_request.",
+    "description": "Save one fact with required provenance. Set `entity` for scoped recall. World-only; ttl accepts 30d, 12h or an ISO timestamp. Branch on `status`; duplicate returns the existing id. For write_pending poll get_write_request with the same request_id.",
     "params": {
       "source_id": {
         "type": "string",
@@ -89,11 +89,9 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "visibility": {
         "type": "string",
         "enum": [
-          "world",
-          "private"
+          "world"
         ],
-        "description": "world (default) or private (local CLI).",
-        "fullSurfaceOnly": true
+        "description": "Only world is supported."
       },
       "replaces": {
         "type": "string",
@@ -121,7 +119,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "Person/company/account card, zero LLM. Previews are not evidence: fetch the page before stating status or dates. Miss: found:false with near matches (create_safety). Facts: recall.",
+    "description": "Person/company/account card, zero LLM. Canonical IDs outrank aliases; ambiguous:true requires source review. Previews are not evidence: fetch the page before stating status or dates. Miss: found:false with near matches (create_safety). Facts: recall.",
     "params": {
       "name": {
         "type": "string",
@@ -1498,7 +1496,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       },
       "expand": {
         "type": "boolean",
-        "description": "Default off; one LLM call, rarely helps."
+        "description": "Omit: config/mode. false: off. Cloud expansion sends the query and may cost. See expansion_applied."
       },
       "detail": {
         "type": "string",
@@ -2831,7 +2829,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "description": "Ranked, read-only \"what to do next\" for this brain: version drift, pending migrations, schema-pack issues, stalled jobs, usage-shape gaps, and setup smells. Each finding has a severity, why-it-matters, and the exact fix command. Never mutates. Tell the user; ask before running any fix. On by default for the local stdio server; remote HTTP callers need mcp.publish_advisor (separate from mcp.publish_skills because diagnostics are not prose skills).",
     "publishGateKey": "mcp.publish_advisor",
     "params": {},
-    "scope": "read",
+    "scope": "admin",
     "cliHints": {
       "name": "advisor",
       "hidden": true
@@ -5246,10 +5244,9 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "visibility": {
         "type": "string",
         "enum": [
-          "private",
           "world"
         ],
-        "description": "Default private."
+        "description": "The only supported visibility is world."
       }
     },
     "cliHints": {
@@ -5339,6 +5336,10 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "recent": {
         "type": "boolean",
         "description": "Only pages within chronicle.auto_recent_days (the automatic path's window)."
+      },
+      "max_total": {
+        "type": "number",
+        "description": "Compatibility hard cap across all sources and types; zero queues nothing."
       },
       "limit": {
         "type": "number",
@@ -5615,7 +5616,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "name": "extract_facts",
     "idempotent": true,
     "outputRedaction": "no_stored_text",
-    "description": "Extract personal-knowledge facts (events, preferences, commitments, beliefs, ideas, and plain facts) from a conversation turn into the per-source hot memory. Sanitizes turn_text via INJECTION_PATTERNS, calls the configured extraction model (key-aware: any servable provider — OpenAI or Anthropic key both work), runs the cosine fast-path + classifier dedup pipeline, INSERTs into facts. Returns counts by status. With NO servable chat model, returns skipped: extraction_unavailable + an agent_action telling YOU to extract and write via `remember` (visibility: \"private\"). Skips extraction when the turn is dream-generated content (anti-loop). For agent memory writes of a SINGLE already-formed fact, prefer the `remember` verb (zero LLM, mandatory provenance).",
+    "description": "v0.31: extract personal-knowledge facts (events, preferences, commitments, beliefs, ideas, and plain facts) from a conversation turn into the per-source hot memory. Sanitizes turn_text via INJECTION_PATTERNS, calls the configured extraction model (key-aware: any servable provider — OpenAI or Anthropic key both work), runs the cosine fast-path + classifier dedup pipeline, INSERTs into facts. Returns counts by status. With NO servable chat model, returns skipped: extraction_unavailable + an agent_action telling YOU to extract and write via `remember` (visibility: \"world\"). Skips extraction when the turn is dream-generated content (anti-loop). For agent memory writes of a SINGLE already-formed fact, prefer the `remember` verb (zero LLM, mandatory provenance).",
     "params": {
       "request_id": {
         "type": "string",
@@ -5651,7 +5652,10 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       },
       "visibility": {
         "type": "string",
-        "description": "Default visibility for extracted facts. private (default) | world."
+        "enum": [
+          "world"
+        ],
+        "description": "The only supported visibility is world."
       }
     },
     "mutating": true,
@@ -5669,7 +5673,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
         ]
       }
     },
-    "description": "Read facts by entity, since or session_id; `query` also searches pages. Remote callers: world facts only. One card: entity; reasoning: synthesize.",
+    "description": "Read saved facts by entity, since or session. Host world-only policy includes legacy facts. Add query for page evidence; budget_tokens packs server-side. Next: `query` for broader evidence or synthesize for reasoning.",
     "params": {
       "entity": {
         "type": "string",
@@ -5805,7 +5809,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       },
       "include_private": {
         "type": "boolean",
-        "description": "Local trusted callers only.",
+        "description": "No-op; legacy facts remain visible.",
         "fullSurfaceOnly": true
       },
       "min_trust": {
@@ -5919,7 +5923,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       },
       "include_private": {
         "type": "boolean",
-        "description": "Local trusted callers only.",
+        "description": "No-op; legacy facts remain visible.",
         "fullSurfaceOnly": true
       },
       "min_trust": {
@@ -5956,7 +5960,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "name": "forget_fact",
     "idempotent": true,
     "outputRedaction": "no_stored_text",
-    "description": "Forget a fact by recording a durable withdrawal in its source and visibility. Strikes the Markdown facts fence when writable; otherwise keeps the withdrawal in the database. Stale imports cannot reactivate the same normalized claim. This retracts memory; original prose, files and backups may retain the text. Idempotent on already-expired or unknown ids.",
+    "description": "Forget a fact with a durable, source-scoped withdrawal that blocks stale reimport. The withdrawal and expiry commit in the database first; the durable mirror then strikes the page's `## Facts` fence row (valid_until=today) when the source file is writable, so the forget survives `gbrain rebuild`. Retains DB-only withdrawal protection for pre-v51 / thin-client rows; original prose and backups may retain text. Scoped to the caller's source (and, for remote callers, to world-visible rows): an out-of-scope id reads as fact_not_found. NOT idempotent — an unknown id raises fact_not_found and an already-expired one raises fact_already_expired (the v1 `forget` verb is the idempotent surface).",
     "params": {
       "request_id": {
         "type": "string",
@@ -6190,7 +6194,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "Return the chronological claim trajectory for an entity (typed metric values over time, plus auto-detected regressions and narrative drift). Use this when the user asks 'how has Acme's MRR trended', 'show me what alice-example said about runway over time', 'is this founder consistent', 'find regressions for fund-a's portfolio', or wants a time-series view of an entity's structured claims. Returns `{points: [{fact_id, valid_from, metric, value, unit, period, text, source_session, source_markdown_slug}], regressions: [{metric, from_value, from_date, to_value, to_date, delta_pct}], drift_score: number|null, schema_version: 1}`. Drift score 0 = stable narrative, 1 = every consecutive claim is unrelated; null when fewer than 3 typed points exist. Visibility-filtered for remote callers (world-only); source-scoped by the caller's OAuth source binding. Pair with `gbrain founder scorecard <slug>` for an aggregated rollup of the same data.",
+    "description": "Return the chronological claim trajectory for an entity (typed metric values over time, plus auto-detected regressions and narrative drift). Use this when the user asks 'how has Acme's MRR trended', 'show me what alice-example said about runway over time', 'is this founder consistent', 'find regressions for fund-a's portfolio', or wants a time-series view of an entity's structured claims. Returns `{points: [{fact_id, valid_from, metric, value, unit, period, text, source_session, source_markdown_slug}], regressions: [{metric, from_value, from_date, to_value, to_date, delta_pct}], drift_score: number|null, schema_version: 1}`. Drift score 0 = stable narrative, 1 = every consecutive claim is unrelated; null when fewer than 3 typed points exist. Visibility is world-only at write time; source-scoped by the caller's OAuth source binding. Pair with `gbrain founder scorecard <slug>` for an aggregated rollup of the same data.",
     "scope": "read",
     "params": {
       "entity_slug": {
@@ -6233,7 +6237,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "BEFORE editing any function, run code_callers with the symbol name to find every caller (the people who'd be affected by your change). Returns direct callers from the tree-sitter call graph. Use during plan-mode to size the change. Defaults to source-scoped; for multi-source brains pass source_id or all_sources=true. `resolved:false` marks a call matched by name only: the resolver links calls within one file, so a cross-file call stays unresolved and may name a different symbol with the same name. Returns: `{symbol, count, callers: [{from_symbol_qualified, to_symbol_qualified, edge_type, resolved}]}`. Example: `{symbol:'parseMarkdown', count:4, callers:[{from_symbol_qualified:'callerInA', to_symbol_qualified:'parseMarkdown', edge_type:'calls', resolved:true}]}`. Temporarily available only to trusted local CLI callers; agent-facing code reads are suspended.",
+    "description": "BEFORE editing any function, run code_callers with the symbol name to find every caller (the people who'd be affected by your change). Returns direct callers from the tree-sitter call graph. Use during plan-mode to size the change. Defaults to source-scoped; for multi-source brains pass source_id or all_sources=true. `resolved:false` marks a call matched by name only: the resolver links calls within one file, so a cross-file call stays unresolved and may name a different symbol with the same name. Returns: `{symbol, count, callers: [{from_symbol_qualified, to_symbol_qualified, edge_type, resolved}]}`. Example: `{symbol:'parseMarkdown', count:4, callers:[{from_symbol_qualified:'callerInA', to_symbol_qualified:'parseMarkdown', edge_type:'calls', resolved:true}]}`. Temporarily available only to trusted local CLI callers until remote trust and safe-chunk policy parity is verified.",
     "params": {
       "symbol": {
         "type": "string",
@@ -6265,7 +6269,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "When tracing how a function flows to its dependencies (DB calls, HTTP calls, file I/O), run code_callees from the entry point. Forward view of the call graph: what does this symbol call? Use this when debugging unexpected behavior or when planning to extract / inline a function. Same shape as code_callers but the field is `callees` and the edge direction is reversed. Temporarily available only to trusted local CLI callers; agent-facing code reads are suspended.",
+    "description": "When tracing how a function flows to its dependencies (DB calls, HTTP calls, file I/O), run code_callees from the entry point. Forward view of the call graph: what does this symbol call? Use this when debugging unexpected behavior or when planning to extract / inline a function. Same shape as code_callers but the field is `callees` and the edge direction is reversed. Temporarily available only to trusted local CLI callers until remote trust and safe-chunk policy parity is verified.",
     "params": {
       "symbol": {
         "type": "string",
@@ -6297,7 +6301,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "Where is this symbol defined? Returns one row per definition site (function, class, type, interface, enum, struct, trait, module, contract). Use this BEFORE reaching for grep when you want to read a definition. Single-result is the common case; multiple results indicate same-name symbols across files (which is information in itself). Returns: `{symbol, count, defs: [{slug, file, language, symbol_type, start_line, end_line, snippet}]}`. Filter by --lang to scope a polyglot brain (e.g., lang='typescript'). Temporarily available only to trusted local CLI callers; agent-facing code reads are suspended.",
+    "description": "Where is this symbol defined? Returns one row per definition site (function, class, type, interface, enum, struct, trait, module, contract). Use this BEFORE reaching for grep when you want to read a definition. Single-result is the common case; multiple results indicate same-name symbols across files (which is information in itself). Returns: `{symbol, count, defs: [{source_id, slug, file, language, symbol_type, start_line, end_line, snippet}]}`. Pass source_id to filter before the result limit; omitted source retains legacy brain-wide behavior. Filter by --lang to scope a polyglot brain (e.g., lang='typescript'). Temporarily available only to trusted local CLI callers until remote trust and safe-chunk policy parity is verified.",
     "params": {
       "symbol": {
         "type": "string",
@@ -6307,6 +6311,10 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "limit": {
         "type": "number",
         "description": "Max definition sites returned. Default 20."
+      },
+      "source_id": {
+        "type": "string",
+        "description": "Explicit source filter applied before the result limit; checked against caller grants. Omit for the default read scope (brain-wide for trusted local callers, your granted sources for remote callers)."
       },
       "lang": {
         "type": "string",
@@ -6325,7 +6333,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "Find every reference to a symbol across the codebase (every file, every line). Differs from code_callers in two ways: (1) catches references in comments, strings, imports, type annotations — not just call sites; (2) returns line numbers, not symbol-qualified edges. Use this when planning a rename or deprecation where you need to touch every literal mention. Returns: `{symbol, count, refs: [{slug, file, language, line, context}]}`. Temporarily available only to trusted local CLI callers; agent-facing code reads are suspended.",
+    "description": "Find indexed chunks containing a symbol across the codebase. Differs from code_callers in two ways: (1) catches references in comments, strings, imports, type annotations — not just call sites; (2) returns line spans, not symbol-qualified edges. Use this when planning a rename or deprecation where you need to touch every literal mention. Returns: `{symbol, count, status, ready, refs: [{source_id, slug, file, language, symbol_name, symbol_type, start_line, end_line, snippet}]}` — `status`/`ready` are the code-graph readiness signal (a brain whose chunks predate symbol extraction reports `no_symbols`, not an empty match). Pass source_id and an exact file path to filter before top-k. This is bounded substring retrieval, not exhaustive semantic references. Temporarily available only to trusted local CLI callers until remote trust and safe-chunk policy parity is verified.",
     "params": {
       "symbol": {
         "type": "string",
@@ -6336,9 +6344,17 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
         "type": "number",
         "description": "Max references returned. Default 50."
       },
+      "source_id": {
+        "type": "string",
+        "description": "Explicit source filter applied before the result limit; checked against caller grants. Omit for the default read scope (brain-wide for trusted local callers, your granted sources for remote callers)."
+      },
       "lang": {
         "type": "string",
         "description": "Filter by content_chunks.language."
+      },
+      "file": {
+        "type": "string",
+        "description": "Exact indexed file path (frontmatter.file), applied before the result limit together with source_id. No glob or regex matching."
       }
     },
     "scope": "read",
@@ -6353,7 +6369,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "BEFORE editing any function, run code_blast with the symbol name to surface every transitive caller grouped by depth (direct → 2-hop → 3-hop). Use this during plan-mode to size the change. Returns up to 200 nodes. Trust an empty/not_found result only when ready=true; ready=false means impact is unknown and requires a safe fallback. Returns: {result, status, ready, depth_groups?, truncation?, cycles_detected?, did_you_mean?, candidates?}. Example ok: {result:\"ok\", status:\"ready\", ready:true, depth_groups:[{depth:1, nodes:[{symbol,chunk_id}], confidence:0.77}], truncation:\"none\"}. Temporarily available only to trusted local CLI callers; agent-facing code reads are suspended.",
+    "description": "BEFORE editing any function, run code_blast with the symbol name to surface every transitive caller grouped by depth (direct → 2-hop → 3-hop). Use this during plan-mode to size the change. Returns up to 200 nodes. Trust an empty/not_found result only when ready=true; ready=false means impact is unknown and requires a safe fallback. Returns: {result, status, ready, depth_groups?, truncation?, cycles_detected?, did_you_mean?, candidates?}. Example ok: {result:\"ok\", status:\"ready\", ready:true, depth_groups:[{depth:1, nodes:[{symbol,chunk_id}], confidence:0.77}], truncation:\"none\"}. Temporarily available only to trusted local CLI callers until remote trust and safe-chunk policy parity is verified.",
     "params": {
       "symbol": {
         "type": "string",
@@ -6389,7 +6405,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "When tracing how a request flows through the codebase from entry point to side effect (DB write, HTTP call, file I/O), run code_flow from the entry point. Returns ordered execution chain with terminal-node tags. Returns: same envelope as code_blast plus terminal_nodes: [{symbol, sink_kind}] where sink_kind ∈ \"db_call\"|\"http_call\"|\"file_io\"|\"process_exec\"|\"unknown\". Temporarily available only to trusted local CLI callers; agent-facing code reads are suspended.",
+    "description": "When tracing how a request flows through the codebase from entry point to side effect (DB write, HTTP call, file I/O), run code_flow from the entry point. Returns ordered execution chain with terminal-node tags. Returns: same envelope as code_blast plus terminal_nodes: [{symbol, sink_kind}] where sink_kind ∈ \"db_call\"|\"http_call\"|\"file_io\"|\"process_exec\"|\"unknown\". Temporarily available only to trusted local CLI callers until remote trust and safe-chunk policy parity is verified.",
     "params": {
       "entry_point": {
         "type": "string",
