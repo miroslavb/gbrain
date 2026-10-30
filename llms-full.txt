@@ -2725,6 +2725,15 @@ Historical fixtures: [test/FORK_SCHEMA_HISTORY.md](test/FORK_SCHEMA_HISTORY.md).
 
 Forward migration289 and the guarded raw-schema proposal-table block preserve RLS on fork state tables without the auto-RLS event trigger. Keep exemptions, ownership/BYPASS checks and rows unchanged; see [test/FORK_RLS.md](test/FORK_RLS.md). The current target schema is289; dated288 receipts cover only their stated checkpoint.
 
+
+### Preparation continuation — 2026-10-30 (no production cutover)
+
+Forward288/289, historical fixture adapters and reviewed goldens are preparation evidence, not release acceptance. Keep all202 production-applied migration modules through207 unchanged. The c5aebf862a checkpoint passed89verify checks and restored207→289 (82applied,repeat0); its full unit run exposed further compatibility failures and was deliberately preserved/interrupted, not accepted.
+
+Graduation treats only the exact native `facts.default_visibility=world` seed as an empty target; non-world values, unrelated config and data remain blockers ([test/FORK_GRADUATION.md](test/FORK_GRADUATION.md)). Inline canonical-cache comparison uses the same pure world-only fact visibility projection as `rowToPage`, without the withdrawal overlay; real claim/provenance/timeline changes and withdrawal mismatches must remain stale. Keep segmented hash comparison unchanged.
+
+Segmented test fixtures opt in only in their disposable databases. Host legacy fact visibility remains world-only while source grants, document ACLs, takes/credential hiding and withdrawal/purge/hold ledgers remain separate boundaries. Cross-segment facts may still be conservatively omitted; no complete-retention claim follows the focused tests. Explicit capability and test-policy limits remain in [test/FORK_SEGMENTED_PREPARATION.md](test/FORK_SEGMENTED_PREPARATION.md). Never enable production segmentation, remove a fail-closed guard, drop a failed case or auto-refresh retrieval labels to make the release gate green.
+
 ---
 
 ## CLAUDE.md

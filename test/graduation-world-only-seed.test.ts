@@ -36,7 +36,7 @@ for (const scenario of cases) describe(scenario.name, () => {
       await h.target.executeRaw("INSERT INTO graduation_foreign_data VALUES (1, 'keep-me')");
     }
     const opts: GraduationOptions = { config: { engine: 'pglite', database_path: h.dataDir }, to: 'postgres',
-      url: TARGET_URL, env: {}, force: false, deps: h.deps, handoffTimeoutMs: 1_000 };
+      url: TARGET_URL, env: {}, force: false, yes: false, drainTimeoutMs: 60_000, deps: h.deps, handoffTimeoutMs: 1_000 };
     const plan = await planGraduation(opts);
     if (scenario.kind === 'seed') {
       expect(plan.blockers).toEqual([]);
