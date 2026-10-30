@@ -129,3 +129,26 @@ test('captured retaxonomy is preserved and extraction-eligible taxonomy refuses 
  const after=await f.e.readPageSnapshot(f.slug,{sourceId:f.sid});expect(after.revision).toBe(before.revision);
  expect(after.page.type).toBe('concept');expect(after.page.compiled_truth).toContain('return 48');
 }),60000);
+
+test('finite code refresh enforces the native core budget and preserves the page on refusal',async()=>fixture(async f=>{
+ await f.publish(await f.input());
+ await disposePersistenceConsumer(f.e);await f.e.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+ try{await f.e.executeRaw("UPDATE pages SET frontmatter=frontmatter || '{\"always_load\":true}'::jsonb WHERE source_id=$1 AND slug=$2",[f.sid,f.slug])}
+ finally{await f.e.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1')}
+ const oldLimit=await f.e.getConfig('memory.core.max_chars');
+ await f.e.setConfig('memory.core.max_chars','500');
+ try{
+  const before=await f.e.readPageSnapshot(f.slug,{sourceId:f.sid});
+  f.put('// '+ 'core budget example '.repeat(80)+'\nexport const finiteValue = 48;\n');
+  await expect(f.publish(await f.input())).rejects.toMatchObject({code:'core_budget_exceeded'});
+  expect((await f.e.readPageSnapshot(f.slug,{sourceId:f.sid})).revision).toBe(before.revision);
+  f.put(48);await f.publish(await f.input());
+  const after=await f.e.getPage(f.slug,{sourceId:f.sid});
+  expect(after.compiled_truth).toContain('return 48');expect(after.frontmatter.always_load).toBe(true);
+ }finally{
+  await f.e.setConfig('memory.core.max_chars',oldLimit??'6000');
+  await disposePersistenceConsumer(f.e);await f.e.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+  try{await f.e.executeRaw("UPDATE pages SET frontmatter=frontmatter - 'always_load' WHERE source_id=$1 AND slug=$2",[f.sid,f.slug])}
+  finally{await f.e.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1')}
+ }
+}),60000);

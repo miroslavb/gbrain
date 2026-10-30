@@ -80,6 +80,7 @@ function buildMockEngine(): { engine: BrainEngine; captured: CapturedSql[] } {
     async transaction<T>(fn: (tx: BrainEngine) => Promise<T>): Promise<T> { return fn(this as unknown as BrainEngine); },
     async executeRaw<T>(sql: string, params?: unknown[]): Promise<T[]> {
       captured.push({ sql, params: params ?? [] });
+      if (sql.includes('FROM persistence_brain')) return [{ enabled: false } as unknown as T]; // #6482: the strict mode reader needs one well-formed unmanaged row.
       if (sql.includes('SELECT slug, source_id, compiled_truth')) {
         return [{
           slug: 'wiki/one-page',

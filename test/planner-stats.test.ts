@@ -1,7 +1,7 @@
 /**
  * F4b (spec 5.3, O-ENG-12): transactional planner-statistics accounting and
  * row-delta ANALYZE on PGLite. In-memory PGLite ($0). Restart and crash cases
- * live in test/planner-stats-restart.serial.test.ts, the 2,000-page import in
+ * live in test/planner-stats-restart.test.ts, the 2,000-page import in
  * test/planner-stats-import.slow.test.ts, Postgres in
  * test/e2e/planner-stats-postgres.test.ts.
  */
@@ -40,6 +40,9 @@ beforeEach(async () => {
   await engine.executeRaw('DELETE FROM planner_stats_deltas');
   await engine.executeRaw('DELETE FROM planner_stats_state');
   await engine.executeRaw("DELETE FROM config WHERE key LIKE 'planner.%' OR key = 'import.analyze_every_pages'");
+  // The reset deletes rows but keeps catalog row counts; re-sample the emptied pages table so an index
+  // count left by an earlier test's narrow ANALYZE is not read as an expression index without statistics.
+  await engine.executeRaw('ANALYZE pages');
   __testing.reset(engine);
   __testing.hooks.afterWatermark = undefined;
   __testing.hooks.onAnalyzed = undefined;

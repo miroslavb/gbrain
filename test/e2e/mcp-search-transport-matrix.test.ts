@@ -243,7 +243,7 @@ for (const backend of backends) describe(`search transport safety matrix (${back
       const miss = await search(client, PRIVATE);
       expect(miss.rows).toEqual([]);
       expect(miss.meta.degraded).toEqual([]);
-      expect(miss.content[1]!.text).toContain('clean miss');
+      expect(miss.content.find(c => c.text.startsWith('[gbrain notice empty_retrieval'))!.text).toContain('clean miss');
     });
   }, 60_000);
 
@@ -363,7 +363,7 @@ for (const backend of backends) describe(`search transport safety matrix (${back
           const miss = await search(client, query);
           expect(miss.rows).toEqual([]);
           expect(miss.meta.degraded ?? []).toEqual([]);
-          expect(miss.content[1]!.text).toContain('clean miss');
+          expect(miss.content.find(c => c.text.startsWith('[gbrain notice empty_retrieval'))!.text).toContain('clean miss');
         }
       };
       await withStdio(BOUND, verify);

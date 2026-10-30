@@ -1,4 +1,4 @@
-import { stripReasoningBlocks } from '../llm-json.ts';
+import { matchingCloseBracket, stripReasoningBlocks } from '../llm-json.ts';
 import { normalizeForGrounding } from './synthesize-verify.ts';
 import { ATOM_TYPES } from './extract-atoms-schema.ts';
 export const MIN_PAGE_CHARS_FOR_EXTRACTION = 500;
@@ -114,9 +114,19 @@ export function locateQuote(
  */
 export type AtomsParseOutcome =
   | { ok: true; atoms: ExtractedAtom[] }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; stopped?: true };
 
-export function parseAtomsOutcome(raw: string, sourceText?: string): AtomsParseOutcome {
+export function parseAtomsOutcome(raw: string, sourceTextOrStop?: string, stopReason?: string): AtomsParseOutcome {
+  const legacyStop = stopReason === undefined && ['length', 'refusal', 'content_filter', 'other', 'tool_calls', 'end_turn', 'stop'].includes(sourceTextOrStop ?? '');
+  const sourceText = legacyStop ? undefined : sourceTextOrStop;
+  const stop = legacyStop ? sourceTextOrStop : stopReason;
+  if (stop === 'length' || stop === 'refusal' || stop === 'content_filter') return { ok: false, stopped: true, reason: `output stopped before the end (stopReason=${stop})` };
+  const outcome = parseAtomsText(raw, sourceText);
+  if ((stop === 'other' || stop === 'tool_calls') && outcome.ok && outcome.atoms.length === 0) return { ok: false, stopped: true, reason: `an empty answer under stopReason=${stop} is not taken as complete` };
+  return outcome;
+}
+
+function parseAtomsText(raw: string, sourceText?: string): AtomsParseOutcome {
   const direct = parseAtomsOutcomeInner(raw, sourceText);
   if (direct.ok) return direct;
   // Same reasoning-block hazard as the facts extractor: `indexOf('[')` below
@@ -169,17 +179,11 @@ function parseArrayAtOffset(
   try {
     parsed = JSON.parse(slice);
   } catch {
-    // Recover from trailing prose: first the bracket-balanced array (prose that
-    // itself holds `]`, e.g. a `[Source: …]` note, defeated the last-`]` trim),
-    // then the historical trim back to the last `]`.
-    const balancedEnd = balancedArrayEnd(slice);
-    const arrayEnd = slice.lastIndexOf(']');
+    // Only this array's closing bracket may terminate the response.
+    const arrayEnd = matchingCloseBracket(slice);
     if (arrayEnd === -1) return { ok: false, reason: 'unterminated JSON array' };
-    let recovered = false;
-    for (const end of balancedEnd === null ? [arrayEnd] : [balancedEnd, arrayEnd]) {
-      try { parsed = JSON.parse(slice.slice(0, end + 1)); recovered = true; break; } catch { /* next candidate */ }
-    }
-    if (!recovered) return { ok: false, reason: 'unparseable JSON array' };
+    try { parsed = JSON.parse(slice.slice(0, arrayEnd + 1)); }
+    catch { return { ok: false, reason: 'unparseable JSON array' }; }
   }
   if (!Array.isArray(parsed)) return { ok: false, reason: 'JSON value is not an array' };
   return { ok: true, parsed };
@@ -215,18 +219,25 @@ function parseAtomsOutcomeInner(raw: string, sourceText?: string): AtomsParseOut
   let firstAttempt: ReturnType<typeof parseArrayAtOffset> | null = null;
   let sawEmptyArray = false;
   let candidates = 0;
+  const priorStarts: number[] = [];
+  const enclosed = (at: number): boolean => priorStarts.some(start => {
+    const end = matchingCloseBracket(cleaned, start);
+    return end === -1 || end > at;
+  });
   for (
     let start = firstStart;
     start !== -1 && candidates < MAX_ARRAY_ANCHOR_CANDIDATES;
     start = cleaned.indexOf('[', start + 1)
   ) {
     candidates++;
+    const nested = enclosed(start);
+    priorStarts.push(start);
     const attempt = parseArrayAtOffset(cleaned, start);
     // Captured on the FIRST iteration only — every reason string this function
     // can return still describes the first bracket, unchanged.
     if (firstAttempt === null) firstAttempt = attempt;
     if (attempt.ok) {
-      if (attempt.parsed.length === 0) { sawEmptyArray = true; continue; }
+      if (attempt.parsed.length === 0) { if (!nested) sawEmptyArray = true; continue; }
       const atoms = atomsFromParsedArray(attempt.parsed, sourceText);
       if (atoms.length > 0) return { ok: true, atoms };
     }
@@ -291,7 +302,7 @@ function atomsFromParsedArray(parsed: unknown[], sourceText?: string): Extracted
   for (const item of parsed) {
     if (typeof item !== 'object' || item === null) continue;
     const obj = item as Record<string, unknown>;
-    const title = typeof obj.title === 'string' ? obj.title.slice(0, 80) : null;
+    const title = typeof obj.title === 'string' ? obj.title.slice(0, 200) : null;
     const atomType = typeof obj.atom_type === 'string' ? obj.atom_type.trim().toLowerCase() : null;
     let body = typeof obj.body === 'string' ? obj.body.trim() : null;
     const sourceQuote = typeof obj.source_quote === 'string' ? obj.source_quote.trim() : null;

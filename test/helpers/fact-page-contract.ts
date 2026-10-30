@@ -32,12 +32,20 @@ export function factPageContract(getEngine: () => BrainEngine) {
         const before = readFileSync(file, 'utf8');
         const pageBefore = await engine.getPage(slug, { sourceId: source });
         if (scenario === 'insert-rollback') {
-          const original = engine.insertFacts;
-          engine.insertFacts = (rows, ctx, opts) => original.call(engine, rows, ctx,
-            { ...opts, postCommitCheck: () => { throw new Error('injected commit failure'); } });
-          try {
-            await expect(writeFactsToFence(engine, target, [input('Use automatic mode.', first.ids[0])])).rejects.toThrow('injected');
-          } finally { engine.insertFacts = original; }
+          // Fail the outer database commit after the callback renamed the file.
+          // Recursive transaction proxies keep the fault on the real transaction engine.
+          const failing = (base: BrainEngine, depth = 0): BrainEngine => new Proxy(base, {
+            get(target, prop, receiver) {
+              if (prop === 'transaction') return <T>(fn: (tx: BrainEngine) => Promise<T>) => target.transaction(async tx => {
+                const result = await fn(failing(tx, depth + 1));
+                if (depth === 0) throw new Error('injected commit failure');
+                return result;
+              });
+              const value = Reflect.get(target, prop, receiver);
+              return typeof value === 'function' ? value.bind(target) : value;
+            },
+          });
+          await expect(writeFactsToFence(failing(engine), target, [input('Use automatic mode.', first.ids[0])])).rejects.toThrow('injected');
           expect(readFileSync(file, 'utf8')).toBe(before);
           expect((await engine.getPage(slug, { sourceId: source }))?.compiled_truth).toBe(pageBefore?.compiled_truth);
           expect((await engine.listFactsByEntity(source, slug)).map(f => f.id)).toEqual(first.ids);

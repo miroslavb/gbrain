@@ -21,6 +21,8 @@
  *
  * Pure function; no engine, no LLM.
  */
+import { assertInlineBody } from '../page-body/page-shape.ts';
+import { OperationError } from '../ops/contract.ts';
 import type { BrainEngine } from '../engine.ts';
 import { FACTS_FENCE_BEGIN, FACTS_FENCE_END } from '../facts-fence.ts';
 import { TAKES_FENCE_BEGIN, TAKES_FENCE_END } from '../takes-fence.ts';
@@ -121,8 +123,10 @@ export function computeFactsDelta(previous: string | null | undefined, next: str
 export async function readPriorBody(engine: BrainEngine, slug: string, sourceId: string): Promise<string | null | undefined> {
   try {
     const prior = await engine.getPage(slug, { sourceId });
+    if (prior) assertInlineBody(prior, 'facts delta prior body');
     return prior ? (prior.compiled_truth ?? '') : null;
-  } catch {
+  } catch (error) {
+    if (error instanceof OperationError && error.code === 'page_body_segmented') throw error;
     return undefined;
   }
 }
@@ -134,14 +138,16 @@ export async function readPriorBody(engine: BrainEngine, slug: string, sourceId:
  */
 export async function readLastSnapshotBody(engine: BrainEngine, slug: string, sourceId: string): Promise<string | null | undefined> {
   try {
-    const rows = await engine.executeRaw<{ compiled_truth: string | null }>(
-      `SELECT pv.compiled_truth FROM page_versions pv JOIN pages p ON p.id = pv.page_id
+    const rows = await engine.executeRaw<{ compiled_truth: string | null; body_storage: 'inline' | 'segmented' }>(
+      `SELECT pv.compiled_truth,pv.body_storage FROM page_versions pv JOIN pages p ON p.id = pv.page_id
         WHERE p.slug = $1 AND p.source_id = $2 AND p.deleted_at IS NULL
         ORDER BY pv.snapshot_at DESC, pv.id DESC LIMIT 1`,
       [slug, sourceId],
     );
+    if (rows[0]) assertInlineBody({ ...rows[0], slug, source_id: sourceId }, 'facts delta snapshot body');
     return rows.length > 0 ? (rows[0].compiled_truth ?? '') : null;
-  } catch {
+  } catch (error) {
+    if (error instanceof OperationError && error.code === 'page_body_segmented') throw error;
     return undefined;
   }
 }

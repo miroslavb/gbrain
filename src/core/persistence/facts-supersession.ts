@@ -9,16 +9,16 @@ export async function decideManagedFact(engine: BrainEngine, sourceId: string,
   const id = fact.supersedes_fact_id;
   if (id === undefined) return decideSingleFact(engine, sourceId, fact, embedding, fact.embedding_model, fact.source);
   if (!Number.isSafeInteger(id) || id <= 0 || !fact.entity_slug || fact.entity_inferred) {
-    throw new OperationError('invalid_params', 'Explicit supersession requires a valid fact ID and a resolved entity.');
+    throw new OperationError('invalid_params', 'Explicit supersession requires a valid fact ID and a resolved entity.', 'Recall the intended entity and use its active fact ID; resolve the entity explicitly before retrying.');
   }
   const [candidate] = await engine.executeRaw<FactCandidate>(`SELECT * FROM facts WHERE id=$1 AND source_id=$2
     AND entity_slug=$3 AND visibility=$4 AND expired_at IS NULL AND superseded_by IS NULL
     AND (valid_until IS NULL OR valid_until>now())
     AND (source_markdown_slug IS NULL OR source_markdown_slug=$3)`, [id, sourceId, fact.entity_slug, fact.visibility]);
-  if (!candidate) throw new OperationError('invalid_params', 'The explicit supersession target is unavailable in this fact scope.');
+  if (!candidate) throw new OperationError('invalid_params', 'The explicit supersession target is unavailable in this fact scope.', 'Recall the active facts of this entity in this source and choose a current target, or omit explicit supersession.');
   // Refuse conflicting replay/duplicate intent instead of expiring a target
   // without publishing its replacement. Exact request replay is handled by the journal.
   const exact = await decideSingleFact(engine, sourceId, fact, null);
-  if (exact.candidate) throw new OperationError('invalid_params', 'The replacement claim already exists in this fact scope.');
+  if (exact.candidate) throw new OperationError('invalid_params', 'The replacement claim already exists in this fact scope.', 'Recall the existing claim and keep its fact ID; do not retire another fact without publishing a distinct replacement.');
   return { status: 'superseded', candidate: { ...candidate, id: Number(candidate.id) } };
 }

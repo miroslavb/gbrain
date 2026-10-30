@@ -10,7 +10,7 @@
  * stale unset advice comes back.
  * Seams: the provider view is passed in (pricing/provider state is config, not under test here).
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { CHRONICLE_ACK_KEY, CHRONICLE_NOTICE_SHOWN_KEY } from '../src/core/chronicle/config.ts';
 import { autoChronicleUpgradeNotice, printAutoChronicleUpgradeNotice } from '../src/core/chronicle/upgrade-notice.ts';
@@ -25,6 +25,8 @@ const priced = { model: 'anthropic:claude-sonnet-4-6', priced: true, chatAvailab
 
 beforeAll(async () => { engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema(); }, 120_000);
 afterAll(async () => { await engine.disconnect(); });
+// The unconfigured-gateway case restores inline; the hook covers a throw before that restore (isolation lint R7).
+afterEach(() => { resetGateway(); });
 beforeEach(async () => { for (const k of ['auto_chronicle', CHRONICLE_ACK_KEY, CHRONICLE_NOTICE_SHOWN_KEY]) await engine.unsetConfig(k); });
 
 describe('auto_chronicle upgrade notice', () => {
@@ -33,7 +35,8 @@ describe('auto_chronicle upgrade notice', () => {
     expect(text).toContain('now ON by default');
     expect(text).toContain('200 calls/day x $0.25 per-page cap = $50.00/day with anthropic:claude-sonnet-4-6');
     expect(text).toContain('sends page text to the configured chat provider');
-    expect(text).toContain('[AGENT] Opt out: gbrain config set auto_chronicle false');
+    expect(text).toContain('opt_out: Turn automatic extraction off (run: gbrain config set auto_chronicle false)');
+    expect(text).toContain('[/AGENT]');
     expect(text).toMatch(/gbrain chronicle-backfill --since \d{4}-\d{2}-\d{2} --limit 50 --dry-run/);
     expect(text).toContain('gbrain dream --phase chronicle');
     expect(text).not.toContain('No chat provider is configured');

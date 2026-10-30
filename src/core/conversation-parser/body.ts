@@ -12,6 +12,26 @@ import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import type { Page } from '../types.ts';
 import { loadSourceRow } from '../contextual-retrieval-service.ts';
+import { PAGE_MAX_BYTES } from '../page-size-policy.ts';
+import { isSegmentedPage } from '../page-body/page-shape.ts';
+import { CONVERSATION_WINDOW_BYTES, readSegmentedConversationInput, type SegmentedConversationInput } from '../page-body/segment-conversation.ts';
+
+/**
+ * The largest conversation parser input (UTF-8 bytes): the page ceiling plus
+ * 1 MiB of headroom (25 MiB today, the historical cap). Derived from
+ * PAGE_MAX_BYTES so it moves with the ceiling and never sits below it, so no
+ * page ingest accepts is skipped for size. A `raw_transcript` sidecar over it
+ * is never read.
+ */
+export const CONVERSATION_BODY_MAX_BYTES = PAGE_MAX_BYTES + 1024 ** 2;
+
+/** A `raw_transcript` sidecar over CONVERSATION_BODY_MAX_BYTES: refused from its size before any read. */
+export class ConversationBodyTooLargeError extends Error {
+  constructor(readonly bytes: number, readonly mtimeMs: number) {
+    super(`raw_transcript sidecar is ${bytes} bytes, over the ${CONVERSATION_BODY_MAX_BYTES}-byte conversation body cap; it was not read`);
+    this.name = 'ConversationBodyTooLargeError';
+  }
+}
 
 export function readSummaryBody(page: Page): string {
   const compiled = page.compiled_truth ?? '';
@@ -154,6 +174,7 @@ export interface ConversationBodySnapshot {
   rawTranscriptRoot: string | null;
   byteLength: number;
   tooLarge: boolean;
+  window?: SegmentedConversationInput['window'];
 }
 
 export function readRawTranscriptPathSnapshot(
@@ -233,6 +254,11 @@ export async function readConversationBodySnapshot(
       tooLarge: false,
     };
   }
+  if (isSegmentedPage(page)) {
+    const input = await readSegmentedConversationInput(engine, page);
+    return { ...input, rawTranscriptPath: null, rawTranscriptRoot: null,
+      byteLength: Buffer.byteLength(input.body, 'utf8'), tooLarge: Buffer.byteLength(input.body, 'utf8') > maxBytes };
+  }
   const body = readSummaryBody(page);
   return {
     body,
@@ -247,5 +273,18 @@ export async function readConversationBodyForParsing(
   engine: BrainEngine,
   page: Page,
 ): Promise<string> {
-  return (await readConversationBodySnapshot(engine, page)).body;
+  return (await readConversationInput(engine, page)).body;
+}
+
+/** Bounded input with the same containment-checked sidecar snapshot as epoch publication. */
+export async function readConversationInput(engine: BrainEngine, page: Page,
+  opts: { priorFacts?: () => Promise<number> } = {}): Promise<SegmentedConversationInput & { sidecar?: true }> {
+  const snapshot = await readConversationBodySnapshot(engine, page, { maxBytes: CONVERSATION_BODY_MAX_BYTES });
+  if (snapshot.tooLarge) throw new ConversationBodyTooLargeError(snapshot.byteLength, 0);
+  if (snapshot.window) {
+    const priorFacts = snapshot.window.totalBytes > CONVERSATION_WINDOW_BYTES ? await opts.priorFacts?.() ?? 0 : 0;
+    if (priorFacts > 0) return { body: '', window: { ...snapshot.window, priorFacts } };
+    return { body: snapshot.body, window: snapshot.window };
+  }
+  return { body: snapshot.body, ...(snapshot.rawTranscriptPath ? { sidecar: true as const } : {}) };
 }

@@ -3,7 +3,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '../spawn.ts';
 import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { importCodeFile } from '../import-file.ts';
@@ -16,6 +16,8 @@ import { maintenancePreflight, submitDatabaseMaintenanceIntent } from './prepare
 import type { PreparedMutation } from './coordinator.ts';
 import type { PreparedContentImport } from './prepared-import.ts';
 import type { WriteRequest } from './model.ts';
+import { assertInlineBody } from '../page-body/page-shape.ts';
+import { prepareCoreGuard } from './core-guard.ts';
 
 type Entry = { path: string; action: 'index' | 'tombstone'; expected_content_hash?: string; chunker_version?: number };
 export interface FiniteCodeInput {
@@ -29,7 +31,7 @@ interface FiniteCodeIntent extends Record<string, unknown> {
   runtimeHead: string; runtimeSourceHash: string;
 }
 const HEX = /^[a-f0-9]{64}$/;
-function invalid(message: string): never { throw new OperationError('source_changed', message); }
+function invalid(message: string): never { throw new OperationError('source_changed', message, 'Nothing was published. Inspect the exact source, manifest and file preimages, then generate a new reviewed finite manifest before retrying.'); }
 export function finiteCodeRuntimeAttestation() {
   const core = resolve(import.meta.dir, '../../..');
   const head = execFileSync('git', ['-C', core, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -62,8 +64,7 @@ function readRegular(path: string, max: number): Buffer {
   } finally { closeSync(fd); }
 }
 function absent(path: string): void {
-  try { lstatSync(path); }
-  catch (e: unknown) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; throw e; }
+  if (!lstatSync(path, { throwIfNoEntry: false })) return;
   invalid('The reviewed tombstone file still exists.');
 }
 function readTarget(p: FiniteCodeIntent, sourceId: string) {
@@ -90,8 +91,10 @@ function readTarget(p: FiniteCodeIntent, sourceId: string) {
       let ancestor = source.repo;
       for (const part of entry.path.split('/').slice(0, -1)) {
         ancestor = join(ancestor, part);
-        try { if (!lstatSync(ancestor).isDirectory() || realpathSync(ancestor) !== ancestor) invalid('The finite path has an untrusted ancestor.'); }
-        catch (e: unknown) { if (entry.action === 'tombstone' && (e as NodeJS.ErrnoException).code === 'ENOENT') break; throw e; }
+        const directory = lstatSync(ancestor, { throwIfNoEntry: false });
+        if (!directory && entry.action === 'tombstone') break;
+        // The manifest is one reviewed authorization unit: unreadable or invalid ancestors refuse it in full.
+        if (!directory?.isDirectory() || realpathSync(ancestor) !== ancestor) invalid('The finite path has an untrusted ancestor.');
       }
       if (entry.action === 'index') {
         if (entry.chunker_version !== CHUNKER_VERSION) invalid('The finite chunker version was not admitted.');
@@ -116,6 +119,7 @@ async function assertTarget(engine: BrainEngine, sourceId: string, incarnation: 
   if (!source || source.local_path !== null || source.archived || source.config?.federated !== false || source.config.remote_url ||
       incarnation && source.incarnation !== incarnation) invalid('Finite refresh requires the same active, nonfederated, pathless source.');
   const page = await engine.getPage(slug, { sourceId, includeDeleted: true });
+  if (page) assertInlineBody(page, 'finite code maintenance');
   const [kind] = await engine.executeRaw<{ page_kind: string }>('SELECT page_kind FROM pages WHERE source_id=$1 AND slug=$2', [sourceId, slug]);
   if (page && (kind?.page_kind !== 'code' || page.frontmatter?.file !== sourcePath ||
       PROPOSE_TAKES_ALLOWED_PAGE_TYPES.includes(page.type as never))) invalid('The finite page identity or taxonomy changed.');
@@ -128,7 +132,7 @@ export async function publishFiniteCodeFile(engine: BrainEngine, input: FiniteCo
   // Resolve local source-wide authority before opening any manifest or file.
   const authority = await maintenancePreflight(engine, input.sourceId);
   if (!authority || authority.binding || authority.writer.remote !== false || authority.writer.principal.kind !== 'local_cli') {
-    throw new OperationError('writer_coordinator_required', 'Finite managed refresh requires database-only local CLI maintenance.');
+    throw new OperationError('writer_coordinator_required', 'Finite managed refresh requires database-only local CLI maintenance.', 'Run the reviewed finite refresh from the trusted local CLI against its pathless source; do not retry it as a remote or worktree writer.');
   }
   const runtime = finiteCodeRuntimeAttestation();
   if (input.runtimeHead !== undefined && input.runtimeHead !== runtime.runtimeHead ||
@@ -144,7 +148,7 @@ export async function publishFiniteCodeFile(engine: BrainEngine, input: FiniteCo
 
 export async function prepareFiniteCodeMutation(engine: BrainEngine, row: WriteRequest): Promise<PreparedMutation> {
   if (row.authority.remote !== false || row.principal_kind !== 'local_cli' || row.worktree_id || row.intent?.kind !== 'managed_maintenance_finite_code') {
-    throw new OperationError('permission_denied', 'Finite code refresh requires trusted database-only local CLI authority.');
+    throw new OperationError('permission_denied', 'Finite code refresh requires trusted database-only local CLI authority.', 'Submit a new reviewed finite refresh from the trusted local CLI for this pathless source.');
   }
   const p = row.intent as FiniteCodeIntent;
   attestRuntime(p);
@@ -152,8 +156,10 @@ export async function prepareFiniteCodeMutation(engine: BrainEngine, row: WriteR
   const target = readTarget(p, row.source_id);
   const page = await assertTarget(engine, row.source_id, row.source_incarnation, row.slug, p.sourcePath);
   if ((page?.id ?? null) !== row.page_id || (page?.knowledge_revision ?? null) !== p.expected_revision) {
-    throw new OperationError('revision_conflict', 'The finite page changed after admission.');
+    throw new OperationError('revision_conflict', 'The finite page changed after admission.', 'Read the current page revision and review a new finite manifest before submitting a new request.');
   }
+  const snapshot = await engine.readPageSnapshot(row.slug, { sourceId: row.source_id, includeDeleted: true });
+  if ((snapshot?.revision ?? null) !== p.expected_revision) invalid('The finite page changed while its core guard was prepared.');
   const validate = async (tx: BrainEngine) => {
     attestRuntime(p);
     readTarget(p, row.source_id);
@@ -161,9 +167,13 @@ export async function prepareFiniteCodeMutation(engine: BrainEngine, row: WriteR
   };
   if (target.entry.action === 'tombstone') {
     if (page && page.content_hash !== p.inputHash) invalid('The reviewed tombstone content hash changed.');
-    return { observedRevision: p.expected_revision, noop: !page || !!page.deleted_at, deferEmbedding: true, validate,
+    const coreGuard = await prepareCoreGuard(engine, { row, snapshot, incoming: null });
+    return { observedRevision: p.expected_revision, noop: !page || !!page.deleted_at, deferEmbedding: true,
+      exclusiveSources: coreGuard?.exclusiveSources,
+      validate: async tx => { await validate(tx); await coreGuard?.validate(tx); },
       apply: async tx => {
         if (page && !page.deleted_at) await tx.softDeletePage(row.slug, { sourceId: row.source_id });
+        await coreGuard?.record(tx, null);
         readTarget(p, row.source_id);
         attestRuntime(p);
         return { ok: true, status: 'tombstoned', source_id: row.source_id, slug: row.slug, model_calls: 0, jobs_enqueued: 0 };
@@ -174,8 +184,10 @@ export async function prepareFiniteCodeMutation(engine: BrainEngine, row: WriteR
     prepare: async value => { ready = value; return value.result; } });
   if (!ready || ready.slug !== row.slug || ready.observedRevision !== p.expected_revision) invalid('The finite import could not be prepared against its accepted revision.');
   const prepared = ready;
+  const coreGuard = await prepareCoreGuard(engine, { row, snapshot, incoming: prepared.parsedPage });
   return { observedRevision: p.expected_revision, noop: false, deferEmbedding: true,
-    validate: async tx => { await validate(tx); await prepared.validate(tx); }, apply: async tx => {
+    exclusiveSources: coreGuard?.exclusiveSources,
+    validate: async tx => { await validate(tx); await prepared.validate(tx); await coreGuard?.validate(tx); }, apply: async tx => {
       await prepared.apply(tx);
       const marker = { atom_extract: false, code_chunker_version: CHUNKER_VERSION,
         embed_skip: { reason: 'finite_lexical_symbols', bytes: target.rawBytes } };
@@ -187,6 +199,7 @@ export async function prepareFiniteCodeMutation(engine: BrainEngine, row: WriteR
           after.frontmatter?.atom_extract !== false || (after.frontmatter?.embed_skip as Record<string, unknown> | undefined)?.reason !== 'finite_lexical_symbols' ||
           after.frontmatter?.code_chunker_version !== CHUNKER_VERSION ||
           after.compiled_truth !== target.text!.replaceAll('\0', '\\0') || page && after.type !== page.type) invalid('The finite publication readback did not match its admitted file.');
+      await coreGuard?.record(tx, after.knowledge_revision ?? null);
       if (target.rawBytes === 0 && (await tx.getChunks(row.slug, { sourceId: row.source_id })).length) invalid('An empty finite file retained stale chunks.');
       readTarget(p, row.source_id);
       attestRuntime(p);

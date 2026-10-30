@@ -98,11 +98,20 @@ describe('facts write-path failures (B-21)', () => {
     mkdirSync(join(brainDir, 'people'), { recursive: true });
     writeFileSync(path, serializePageToMarkdown(snapshot.page, snapshot.tags));
     const before = readFileSync(path);
-    const write = spyOn(engine, 'insertFacts').mockRejectedValue(new Error('projection write failed'));
+    // The mirror runs on the maintenance transaction's engine, so the fault is injected there too.
+    const failing = (base: BrainEngine): BrainEngine => new Proxy(base, {
+      get(target, prop, receiver) {
+        if (prop === 'insertFacts') return async () => { throw new Error('projection write failed'); };
+        if (prop === 'transaction') return <T>(fn: (tx: BrainEngine) => Promise<T>) => target.transaction(tx => fn(failing(tx)));
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const broken = failing(engine);
     try {
-      await expect(writeFactsToFence(engine, { sourceId: 'default', localPath: brainDir, slug: 'people/alice-example', resolutionSource: 'exact_page' }, [input])).rejects.toThrow('projection write failed');
+      await expect(writeFactsToFence(broken, { sourceId: 'default', localPath: brainDir, slug: 'people/alice-example', resolutionSource: 'exact_page' }, [input])).rejects.toThrow('projection write failed');
       expect(readFileSync(path)).toEqual(before);
       expect(await engine.executeRaw('SELECT id FROM facts')).toEqual([]);
-    } finally { write.mockRestore(); }
+    } finally { /* the proxy never mutates the real engine */ }
   });
 });

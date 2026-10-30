@@ -15,7 +15,7 @@ function key(f: FenceInputFact, now: Date): string | null {
   if (f.supersedesFactId !== undefined || f.kind === 'event' || f.kind === 'commitment') return null;
   return JSON.stringify([f.fact, f.kind ?? 'fact', f.confidence ?? 1,
     f.visibility, f.notability ?? 'medium', day(f.validFrom ?? now), day(f.validUntil),
-    f.source, f.context ?? null, f.sessionId]);
+    f.source, f.context ?? null, f.sessionId, f.attributedTo ?? null]);
 }
 
 type Ref = { id: number } | { index: number };
@@ -37,9 +37,9 @@ export async function selectExactFenceFacts(
       id: string | number; row_num: number; fact: string; kind: FenceInputFact['kind'];
       confidence: number; visibility: FenceInputFact['visibility']; notability: FenceInputFact['notability'];
       valid_from: Date | string; valid_until: Date | string | null; source: string;
-      context: string | null; source_session: string | null;
+      context: string | null; source_session: string | null; attributed_to: FenceInputFact['attributedTo'];
     }>(`SELECT id,row_num,fact,kind,confidence,visibility,notability,valid_from,
-               valid_until,source,context,source_session FROM facts
+               valid_until,source,context,source_session,attributed_to FROM facts
         WHERE source_id=$1 AND entity_slug=$2 AND source_markdown_slug=$2
           AND row_num=ANY($3::int[]) AND expired_at IS NULL
           AND (valid_until IS NULL OR valid_until>now())
@@ -54,12 +54,12 @@ export async function selectExactFenceFacts(
       const dbKey = key({ fact: row.fact, kind: row.kind, confidence: row.confidence,
         visibility: row.visibility, notability: row.notability,
         validFrom: new Date(row.valid_from), validUntil: row.valid_until ? new Date(row.valid_until) : null,
-        source: row.source, context: row.context, sessionId: row.source_session, embedding: null }, now);
+        attributedTo: row.attributed_to, source: row.source, context: row.context, sessionId: row.source_session, embedding: null }, now);
       const fileKey = key({ fact: f.claim, kind: f.kind, confidence: f.confidence,
         visibility: 'world', notability: f.notability,
         validFrom: f.validFrom ? new Date(f.validFrom) : undefined,
         validUntil: f.validUntil ? new Date(f.validUntil) : null,
-        source: f.source ?? '', context: f.context, sessionId: row.source_session, embedding: null }, now);
+        attributedTo: f.attributedTo, source: f.source ?? '', context: f.context, sessionId: row.source_session, embedding: null }, now);
       const id = Number(row.id);
       if (dbKey && fileKey === dbKey && Number.isSafeInteger(id) && id > 0 && !existing.has(dbKey)) {
         existing.set(dbKey, id);

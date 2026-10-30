@@ -93,7 +93,7 @@ describe('collect-chronicle source scoping', () => {
             type: 'meeting',
             slug: 'meetings/in-grant-page',
             frontmatter: { message_count: 150 },
-            body_chars: 5000,
+            body_prefix: 'x'.repeat(5000),
           },
         ];
       },

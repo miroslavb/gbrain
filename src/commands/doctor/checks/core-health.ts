@@ -14,6 +14,8 @@ import { loadConfig } from '../../../core/config.ts';
 import type { ProgressReporter } from '../../../core/progress.ts';
 import type { Check } from '../../doctor.ts';
 import { PAGE_CHILD_FK_TARGETS, orphanPredicate } from '../../../core/repair/orphan-children.ts';
+import { checkError } from '../check-fix.ts';
+import { isMissingSchemaObject } from '../../../core/utils.ts';
 
 /**
  * Doctor check: takes.weight grid integrity (v0.32 — EXP-2).
@@ -124,11 +126,7 @@ export async function whoknowsHealthCheck(_engine: BrainEngine): Promise<Check> 
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return {
-      name: 'whoknows_health',
-      status: 'warn',
-      message: `Could not check whoknows fixture: ${msg}`,
-    };
+    return checkError('whoknows_health', 'check whoknows fixture', msg);
   }
 }
 
@@ -150,7 +148,7 @@ export async function pgvectorCheck(engine: BrainEngine): Promise<Check> {
     }
     return { name: 'pgvector', status: 'fail', message: 'Extension not found. Run: CREATE EXTENSION vector;' };
   } catch {
-    return { name: 'pgvector', status: 'warn', message: 'Could not check pgvector extension' };
+    return checkError('pgvector', 'check pgvector extension');
   }
 }
 
@@ -188,7 +186,7 @@ export async function pagesUpsertArbiterCheck(engine: BrainEngine): Promise<Chec
         `Run \`gbrain apply-migrations --yes\` to heal it.`,
     };
   } catch {
-    return { name: 'pages_upsert_arbiter', status: 'warn', message: 'Could not check the pages upsert arbiter' };
+    return checkError('pages_upsert_arbiter', 'check the pages upsert arbiter');
   }
 }
 
@@ -231,7 +229,7 @@ export async function linkSourceCheckConstraintCheck(engine: BrainEngine): Promi
         : `links_link_source_check is NOT VALID — existing rows were never validated. ${heal}`,
     };
   } catch {
-    return { name, status: 'warn', message: 'Could not check the links_link_source_check constraint' };
+    return checkError(name, 'check the links_link_source_check constraint');
   }
 }
 
@@ -275,7 +273,7 @@ export async function jsonbIntegrityCheck(
       );
       if (!existsRows[0]?.exists) continue;
       const damage = jsonPayloadOnly
-        ? `jsonb_typeof(${col}) = 'string' AND (${col} #>> '{}') ~ '^[[:space:]]*[\\[{]' AND pg_input_is_valid(${col} #>> '{}', 'jsonb')`
+        ? `jsonb_typeof(${col}) = 'string' AND (${col} #>> '{}') ~ '^[[:space:]]*[\\[{]' AND gbrain_try_jsonb(${col} #>> '{}') IS NOT NULL`
         : `jsonb_typeof(${col}) = 'string'`;
       const rows = await engine.executeRaw<{ n: number }>(
         `SELECT count(*)::int AS n FROM ${table} WHERE ${damage}`,
@@ -292,7 +290,7 @@ export async function jsonbIntegrityCheck(
       message: `${totalBad} row(s) double-encoded (${breakdown.join(', ')}). Fix: gbrain repair-jsonb`,
     };
   } catch {
-    return { name: 'jsonb_integrity', status: 'warn', message: 'Could not check JSONB integrity' };
+    return checkError('jsonb_integrity', 'check JSONB integrity');
   }
 }
 
@@ -397,7 +395,7 @@ export async function checkVolunteerChannels(
     // a connection blip on a fully-migrated brain must not be misreported
     // as an old schema. Info-only either way; never block doctor.
     const msg = e instanceof Error ? e.message : String(e);
-    const tableAbsent = /does not exist|undefined table|no such table|42P01/i.test(msg);
+    const tableAbsent = isMissingSchemaObject(e, 'table', 'context_volunteer_events');
     return {
       name,
       status: 'ok',
@@ -448,11 +446,7 @@ export async function takesWeightGridCheck(engine: BrainEngine): Promise<Check> 
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // takes table missing on a fresh pre-v37 brain — warn, don't fail.
-    return {
-      name: 'takes_weight_grid',
-      status: 'warn',
-      message: `Could not check takes weight grid: ${msg}`,
-    };
+    return checkError('takes_weight_grid', 'check takes weight grid', msg);
   }
 }
 
@@ -539,6 +533,10 @@ export async function childTableOrphansCheck(engine: BrainEngine): Promise<Check
  *   - an attached `raw_data` row
  *   - `synthesis_evidence` rows (think-op citations)
  *   - explicit `raw_trace_exempt: true` (reason in `raw_trace_exempt_reason`)
+ *   - an extract_atoms atom (`type: atom`, `extracted_by: extract_atoms-*`)
+ *     naming its origin: `source_slug` (page origin) or `source_path`
+ *     (transcript origin), as the writer stamps them (#6537). Other pages
+ *     carrying `source_slug` do not count.
  *
  * v1 is deliberately warn-only — no write path is blocked. Escalation to
  * fail-closed enforcement in the synthesis/import write paths is the v2
@@ -552,6 +550,9 @@ export async function rawProvenanceCheck(engine: BrainEngine): Promise<Check> {
         p.deleted_at IS NULL
     AND (COALESCE(p.frontmatter->>'dream_generated', '') = 'true' OR p.type = 'synthesis')
     AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ?| ARRAY['raw_trace', 'raw_source', 'source_uri', 'raw_trace_exempt'])
+    AND NOT (p.type = 'atom'
+      AND COALESCE(p.frontmatter->>'extracted_by', '') LIKE 'extract\\_atoms%'
+      AND COALESCE(p.frontmatter, '{}'::jsonb) ?| ARRAY['source_slug', 'source_path'])
     AND NOT EXISTS (SELECT 1 FROM raw_data rd WHERE rd.page_id = p.id)
     AND NOT EXISTS (SELECT 1 FROM synthesis_evidence se WHERE se.synthesis_page_id = p.id)`;
   try {
@@ -580,7 +581,7 @@ export async function rawProvenanceCheck(engine: BrainEngine): Promise<Check> {
         `raw_trace_exempt_reason in frontmatter. Warn-only (#1978).`,
     };
   } catch {
-    return { name: 'raw_provenance', status: 'warn', message: 'Could not check raw provenance (older schema?)' };
+    return checkError('raw_provenance', 'check raw provenance (older schema?)');
   }
 }
 
@@ -691,7 +692,7 @@ export async function checkPgliteScratchProbe(opts: {
             `A scratch PGLite store initialized, wrote and read back fine on this machine (${secs}s), ` +
             `so the runtime is healthy and YOUR STORE is damaged — not the WASM runtime. ` +
             `Your markdown is unaffected: the DB holds derived data (chunks, embeddings, links, facts) that a re-sync rebuilds. ` +
-            `Recover: \`gbrain pglite-repair --dry-run\` to diagnose, \`gbrain pglite-repair --yes\` for in-place WAL repair (data preserved); ` +
+            `Recover: \`gbrain pglite-repair --dry-run\` diagnoses it and prints the plan-bound in-place WAL repair command (data preserved) to run once the user approves; ` +
             `if that can't fix it, restore a backup of the store directory or run \`gbrain reinit-pglite\` (wipes + re-inits + re-syncs; ` +
             `defaults embedding flags from your config file).`,
           details: { scratch_ok: true, duration_ms: r.duration_ms },

@@ -28,6 +28,7 @@ import { parseMarkdown } from '../src/core/markdown.ts';
 import { configureGateway, resetGateway, __setChatTransportForTests } from '../src/core/ai/gateway.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { freezeCorpusSessions } from './helpers/frozen-corpus.ts';
 import { testBackends } from './helpers/test-backends.ts';
 
 const backends = testBackends();
@@ -136,9 +137,10 @@ for (const managed of [true, false]) describe(`${managed ? 'managed' : 'unmanage
       writeSession(corpus, 'sess-alice', 'the durable storage plan', 'alice-desk');
       writeSession(corpus, 'sess-bob', 'the household budget review', 'bob-desk');
       writeSession(corpus, 'sess-plain', 'the garden watering schedule');
+      freezeCorpusSessions(corpus, sourceId);
       const opts = { brainDir: root, sourceId, dryRun: false };
       const first = await runPhaseSynthesize(engine, opts);
-      expect(first.status).toBe('ok');
+      expect(first).toMatchObject({ status: 'ok' });
       const pages = await pagesByTranscript(engine, sourceId);
       expect([...pages.keys()].sort()).toEqual(['sess-alice.txt', 'sess-bob.txt', 'sess-plain.txt']);
       expect(pages.get('sess-alice.txt')!.frontmatter.seat).toBe('alice-desk');
@@ -153,7 +155,7 @@ for (const managed of [true, false]) describe(`${managed ? 'managed' : 'unmanage
       writeSession(corpus, 'sess-plain', 'the garden watering schedule', 'carol-desk');
       await disposePersistenceConsumer(engine);
       const replay = await runPhaseSynthesize(engine, opts);
-      expect(replay.status).toBe('ok');
+      expect(replay).toMatchObject({ status: 'ok' });
       expect(calls()).toBe(spent);
       const [{ n: jobsAfter }] = await engine.executeRaw<{ n: number }>('SELECT count(*)::int AS n FROM minion_jobs');
       expect(jobsAfter).toBe(jobs);
@@ -161,8 +163,11 @@ for (const managed of [true, false]) describe(`${managed ? 'managed' : 'unmanage
     });
   }, 120_000);
 
-  test('patterns credit a seat only when every input reflection shares it', async () => {
-    for (const seats of [['alice-desk', 'alice-desk', 'alice-desk'], ['alice-desk', 'bob-desk', 'alice-desk']]) {
+  // A model updating an existing pattern page copies its frontmatter, seat included; once the reflections
+  // that earned the seat age out of the window, the rewrite must not keep crediting it.
+  test('patterns credit a seat only when every input reflection shares it, and drop one they no longer earn', async () => {
+    for (const [seats, carried] of [[['alice-desk', 'alice-desk', 'alice-desk'], ''], [['alice-desk', 'bob-desk', 'alice-desk'], ''],
+      [['alice-desk', 'bob-desk', 'alice-desk'], 'seat: alice-desk\n']] as const) {
       await fixture(managed, async ({ engine, sourceId, root }) => {
         await engine.setConfig('agent.use_gateway_loop', 'true');
         const ctx = pageCtx(engine, sourceId);
@@ -175,7 +180,7 @@ for (const managed of [true, false]) describe(`${managed ? 'managed' : 'unmanage
           calls++;
           const write = calls === 1;
           return { text: write ? '' : 'Saved the pattern.', blocks: write ? [{ type: 'tool-call', toolCallId: 'pattern-write', toolName: 'brain_put_page', input: {
-            slug: 'wiki/personal/patterns/durability', content: '---\ntitle: Durability pattern\ntype: note\n---\nA recurring theme in [[wiki/personal/reflections/example-0]].',
+            slug: 'wiki/personal/patterns/durability', content: `---\ntitle: Durability pattern\ntype: note\n${carried}---\nA recurring theme in [[wiki/personal/reflections/example-0]].`,
           } }] : [{ type: 'text', text: 'Saved the pattern.' }], stopReason: write ? 'tool_calls' : 'end', usage, model: opts.model!, providerId: 'anthropic' };
         });
         const result = await runPhasePatterns(engine, { brainDir: root, sourceId, dryRun: false, once: true, cycleDate: '2026-09-20' });

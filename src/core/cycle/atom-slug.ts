@@ -9,7 +9,7 @@ import { slugifySegment } from '../sync.ts';
  * "trailing-dash twin" duplicate bug.
  */
 function atomSlugStem(title: string): string {
-  return slugifySegment(title).slice(0, 60).replace(/-+$/g, '') || 'untitled';
+  return slugifySegment(title).replace(/^[.-]+/, '').slice(0, 60).replace(/-+$/g, '') || 'untitled';
 }
 
 /**
@@ -19,7 +19,7 @@ function atomSlugStem(title: string): string {
  * `undatedDate` (C-14: the source page's creation date, or `undated`), never
  * the run date, so re-extraction on a later day upserts the same slugs.
  */
-function sourceDate(ref: string, undatedDate: string): string {
+export function sourceDate(ref: string, undatedDate: string): string {
   const base = ref.split('/').pop() ?? ref;
   const m = base.match(/(\d{4}-\d{2}-\d{2})/) ?? ref.match(/(\d{4}-\d{2}-\d{2})/);
   return m ? m[1] : undatedDate;

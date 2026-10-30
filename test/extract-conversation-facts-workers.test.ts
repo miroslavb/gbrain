@@ -32,6 +32,7 @@ import {
   extractConversationFactsLockId,
   PER_PAGE_LOCK_TTL_MINUTES,
   _resetLockBusyLogCacheForTest,
+  emptyExtractConversationFactsResult,
 } from '../src/commands/extract-conversation-facts.ts';
 
 const REPO_ROOT = resolve(import.meta.dir, '..');
@@ -125,21 +126,21 @@ describe('extract-conversation-facts — structural contracts (T5)', () => {
 
   test('page epoch is staged before extraction and reconciled only after the segment loop', () => {
     expect(SRC).not.toMatch(/deleteOrphanFactsForPage\(/);
-    const stagedIdx = SRC.indexOf('const stagedRows:');
+    const stagedIdx = SRC.indexOf('const pageRows:');
     const segmentLoopIdx = SRC.indexOf('for (const seg of segments)');
     const reconcileIdx = SRC.indexOf(
-      'includeSourcePrefixes: CONVERSATION_FACT_SOURCE_PREFIXES',
+      'const published = await publishPageFacts(state, snapshot, pageRows, scope)',
       segmentLoopIdx,
     );
     expect(stagedIdx).toBeGreaterThan(0);
     expect(segmentLoopIdx).toBeGreaterThan(stagedIdx);
     expect(reconcileIdx).toBeGreaterThan(segmentLoopIdx);
-    expect(SRC).toMatch(/requireAllRows:\s*true/);
+    expect(SRC).toMatch(/await assertCurrent\(\);[\s\S]{0,200}await publishConversationFacts[\s\S]{0,200}await assertCurrent\(\)/);
   });
 
-  test('exit 3 fires when lock-busy pages remain (codex #3)', () => {
+  test('retryable failure exits when lock-busy pages remain; exit 3 stays reserved for consent', () => {
     expect(SRC).toMatch(
-      /pages_lock_skipped\s*>\s*0[\s\S]{0,200}process\.exit\(3\)/,
+      /pages_lock_skipped\s*>\s*0[\s\S]{0,400}process\.exit\(FAILED_EXIT_CODE\)/,
     );
   });
 
@@ -164,12 +165,15 @@ describe('extract-conversation-facts — Result type carries new counters', () =
     expect(SRC).toMatch(/orphan_facts_cleaned:\s*number/);
   });
 
-  test('initial result object literal initializes both counters to 0', () => {
-    // Both call sites (core init + CLI aggregate init) must initialize
-    // the new counters or the aggregator will produce NaN under +=.
-    const initOccurrences = SRC.match(/pages_lock_skipped:\s*0/g) ?? [];
-    expect(initOccurrences.length).toBeGreaterThanOrEqual(2);
-    const cleanedOccurrences = SRC.match(/orphan_facts_cleaned:\s*0/g) ?? [];
-    expect(cleanedOccurrences.length).toBeGreaterThanOrEqual(2);
+  test('shared core and aggregate initializers return independent zero counters', () => {
+    const core = emptyExtractConversationFactsResult();
+    const aggregate = emptyExtractConversationFactsResult();
+    expect(core).toMatchObject({ pages_lock_skipped: 0, orphan_facts_cleaned: 0 });
+    expect(aggregate).toMatchObject({ pages_lock_skipped: 0, orphan_facts_cleaned: 0 });
+    core.pages_lock_skipped++;
+    core.orphan_facts_cleaned++;
+    expect(aggregate).toMatchObject({ pages_lock_skipped: 0, orphan_facts_cleaned: 0 });
+    expect(SRC).toContain('const result = emptyExtractConversationFactsResult()');
+    expect(SRC).toContain('const aggregate = emptyExtractConversationFactsResult()');
   });
 });

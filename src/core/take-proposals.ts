@@ -33,6 +33,8 @@ import type { OperationContext } from './ops/contract.ts';
 import { submitPageMutation } from './persistence/page-mutations.ts';
 import { waitForWrite } from './persistence/service.ts';
 import type { WriteRequest } from './persistence/model.ts';
+import { assertInlineBody } from './page-body/page-shape.ts';
+import type { BodyStorage } from './page-body/types.ts';
 
 export interface TakeProposalRow {
   id: number;
@@ -116,7 +118,7 @@ export async function listPendingProposals(
     params.push(opts.sourceId);
     where.push(`tp.source_id = $${params.length}`);
   }
-  type CandidateRow = TakeProposalRow & { current_compiled_truth: string };
+  type CandidateRow = TakeProposalRow & { current_body_storage: BodyStorage };
   const visible: TakeProposalRow[] = [];
   const batchSize = 500;
   let offset = 0;
@@ -124,24 +126,33 @@ export async function listPendingProposals(
     const batchParams = [...params, batchSize, offset];
     const candidates = await engine.executeRaw<CandidateRow>(
       `SELECT ${PROPOSAL_COLUMNS.split(', ').map((column) => `tp.${column}`).join(', ')},
-              p.compiled_truth AS current_compiled_truth
+              p.body_storage AS current_body_storage
          FROM take_proposals tp
          JOIN pages p
            ON p.source_id = tp.source_id AND p.slug = tp.page_slug
-          AND p.deleted_at IS NULL AND p.compiled_truth IS NOT NULL
+          AND p.deleted_at IS NULL
         WHERE ${where.join(' AND ')}
         ORDER BY tp.proposed_at DESC, tp.id DESC
         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       batchParams,
     );
     for (const candidate of candidates) {
+      // A prefix cannot prove the body-only receipt hash or complete evidence.
+      // Refuse segmented pages explicitly; never hide their pending proposals
+      // or interpret NULL body columns as stale/empty evidence.
+      assertInlineBody({ body_storage: candidate.current_body_storage, slug: candidate.page_slug,
+        source_id: candidate.source_id }, 'listPendingProposals');
+      const snapshot = await engine.readPageSnapshot(candidate.page_slug, { sourceId: candidate.source_id, resolveAlias: false });
+      if (!snapshot || snapshot.page.deleted_at) continue;
+      assertInlineBody(snapshot.page, 'listPendingProposals');
+      const body = snapshot.page.compiled_truth;
       if (
-        createHash('sha256').update(candidate.current_compiled_truth).digest('hex') !== candidate.source_hash ||
-        !candidate.current_compiled_truth.includes(candidate.evidence_span!) ||
+        createHash('sha256').update(body).digest('hex') !== candidate.source_hash ||
+        !body.includes(candidate.evidence_span!) ||
         !candidate.evidence_span!.includes(candidate.claim_text)
       ) continue;
       const proposal = { ...candidate };
-      delete (proposal as Partial<CandidateRow>).current_compiled_truth;
+      delete (proposal as Partial<CandidateRow>).current_body_storage;
       visible.push(normalizeTakeProposalRow(proposal));
       if (visible.length === limit) break;
     }
@@ -216,13 +227,11 @@ async function assertProposalSnapshotCurrent(
   engine: BrainEngine,
   proposal: TakeProposalRow,
 ): Promise<string> {
-  const pages = await engine.executeRaw<{ compiled_truth: string | null; knowledge_revision: string }>(
-    `SELECT compiled_truth,knowledge_revision FROM pages
-      WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL
-      LIMIT 1`,
-    [proposal.source_id, proposal.page_slug],
-  );
-  const body = pages[0]?.compiled_truth;
+  // Use the native exact, source-scoped snapshot so body and revision describe
+  // one read. Segmented bodies deliberately fail before any queue/file write.
+  const snapshot = await engine.readPageSnapshot(proposal.page_slug, { sourceId: proposal.source_id, resolveAlias: false });
+  if (snapshot) assertInlineBody(snapshot.page, 'acceptProposal');
+  const body = snapshot && !snapshot.page.deleted_at ? snapshot.page.compiled_truth : undefined;
   const currentHash = typeof body === 'string'
     ? createHash('sha256').update(body).digest('hex')
     : null;
@@ -236,7 +245,7 @@ async function assertProposalSnapshotCurrent(
       `Proposal #${proposal.id} no longer matches the current source snapshot and must be regenerated.`,
     );
   }
-  return pages[0].knowledge_revision;
+  return snapshot!.revision;
 }
 
 export interface ProposalActionTarget {
@@ -254,6 +263,9 @@ export interface ProposalActionTarget {
   /** An explicit `--dir`: validated against the source's canonical root, as `takes add --dir` is. */
   localDir?: string;
 }
+
+/** #5214: reviewer edits applied over the proposal at accept; the queue row keeps the original text. */
+export interface ProposalEdits { claim?: string; weight?: number; holder?: string; kind?: string }
 
 /**
  * One write request per claim: derived from the proposal id and the claim's
@@ -292,6 +304,7 @@ async function promoteProposalViaTakesAdd(
   target: ProposalActionTarget,
   proposal: TakeProposalRow,
   requestId: string,
+  edits: ProposalEdits,
 ): Promise<number> {
   const ctx: OperationContext = {
     engine: target.engine,
@@ -302,13 +315,15 @@ async function promoteProposalViaTakesAdd(
     logger: { info: message => console.error(message), warn: message => console.error(message), error: message => console.error(message) },
   };
   const expectedRevision = await assertProposalSnapshotCurrent(target.engine, proposal);
+  const edited = Object.values(edits).some(value => value !== undefined);
   const params: Record<string, unknown> = {
     expected_revision: expectedRevision,
     slug: proposal.page_slug,
-    claim: proposal.claim_text,
-    kind: coerceProposalKind(proposal.kind),
-    holder: proposal.holder,
-    weight: typeof proposal.weight === 'number' ? proposal.weight : Number(proposal.weight),
+    claim: edits.claim ?? proposal.claim_text,
+    kind: edits.kind ?? coerceProposalKind(proposal.kind),
+    holder: edits.holder ?? proposal.holder,
+    weight: edits.weight ?? (typeof proposal.weight === 'number' ? proposal.weight : Number(proposal.weight)),
+    source: `take_proposals#${proposal.id}${edited ? ' (edited)' : ''}`,
     source_id: proposal.source_id,
     request_id: requestId,
     ...(target.localDir !== undefined ? { local_dir: target.localDir } : {}),
@@ -332,6 +347,7 @@ async function promoteProposalViaTakesAdd(
 export async function acceptProposal(
   target: ProposalActionTarget,
   id: number,
+  edits: ProposalEdits = {},
 ): Promise<{ proposal: TakeProposalRow; rowNum: number }> {
   const { engine } = target;
   const proposal = await loadProposal(engine, id, target.sourceId, { allowStranded: true });
@@ -341,6 +357,10 @@ export async function acceptProposal(
       'Accept requires a brain directory (takes are markdown-canonical). Pass --dir or configure sync.repo_path.',
     );
   }
+  // Reject unsupported/stale pending input before claiming the queue row.
+  // Promotion re-reads the snapshot and threads its revision into takes_add,
+  // so a change after this preflight still cannot publish stale evidence.
+  if (proposal.status === 'pending') await assertProposalSnapshotCurrent(engine, proposal);
   // Claim-first CAS: exactly one caller wins the pending row. A claim that is
   // already held without a recorded take resumes under its own request id.
   const claimed = proposal.status === 'accepted'
@@ -389,7 +409,7 @@ export async function acceptProposal(
       // The row's OWN source, never the caller's, is what promoteProposalViaTakesAdd
       // scopes the mutation to — the scoped load above already proved they agree
       // when a caller scope was provided.
-      rowNum = await promoteProposalViaTakesAdd(target, proposal, requestId);
+      rowNum = await promoteProposalViaTakesAdd(target, proposal, requestId, edits);
       await target.afterCanonicalWrite?.();
     } catch (e) {
       // Release the claim only when its write provably cannot commit: no

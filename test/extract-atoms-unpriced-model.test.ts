@@ -19,7 +19,7 @@ describe('isModelPriceable', () => {
   // so a cap against them is enforceable and must not be skipped. `litellm` is
   // deliberately excluded from that set — a LiteLLM proxy can front a paid
   // provider — and `groq` is the paid-but-unpriced case this regression bit.
-  test('unknown providers are not priceable, so a default cap must be skipped', () => {
+  test('unknown provider pricing cannot certify the default cap', () => {
     expect(isModelPriceable('litellm:gemma4-12b', 'chat')).toBe(false);
     expect(isModelPriceable('groq:llama-3.3-70b', 'chat')).toBe(false);
   });
@@ -52,7 +52,7 @@ describe('extract_atoms shared extractor/validator budget policy', () => {
     expect(policy.pricingOverrides?.['together:glm-5.2']).toEqual({ input: 0.6, output: 2.2 });
   });
 
-  test('an unpriced validator disables the default cap instead of failing mid-phase', async () => {
+  test('an unpriced validator is reported to the fail-closed pre-spend gate', async () => {
     const engine = { getConfig: async () => null };
     const policy = await resolveExtractAtomsBudgetPricingPolicy(
       engine as never,

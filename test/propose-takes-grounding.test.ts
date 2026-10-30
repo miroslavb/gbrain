@@ -99,9 +99,9 @@ describe('grounded take proposal publication', () => {
       { claim_text: 'claim one', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: body },
       { claim_text: 'claim two', kind: 'take', holder: 'brain', weight: 0.6, evidence_span: body },
     ];
-    const original = engine.transaction.bind(engine);
-    (engine as unknown as { transaction: BrainEngine['transaction'] }).transaction = async (fn) =>
-      original(async (tx) => {
+    const original = engine.transaction;
+    (engine as unknown as { transaction: BrainEngine['transaction'] }).transaction = async function<T>(this: BrainEngine, fn: (tx: BrainEngine) => Promise<T>, opts?: Parameters<BrainEngine['transaction']>[1]): Promise<T> {
+      return original.call(this, async (tx) => {
         let inserts = 0;
         const proxy = new Proxy(tx, {
           get(target, prop, receiver) {
@@ -115,7 +115,8 @@ describe('grounded take proposal publication', () => {
           },
         });
         return fn(proxy);
-      });
+      }, opts) as Promise<T>;
+    };
     try {
       const result = await runShortFixture(ctx(), { extractor, pageLimit: 1 });
       expect(result.details).toMatchObject({ proposals_inserted: 0, page_receipts_failed: 1 });

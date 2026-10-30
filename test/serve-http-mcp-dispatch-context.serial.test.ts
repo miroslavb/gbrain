@@ -5,10 +5,11 @@
  * Protects: the options object the HTTP transport hands to
  * `dispatchToolCall`: remote: true, transport 'http', the fail-closed
  * takesHoldersAllowList default, the token's sourceId, the verified
- * AuthInfo, metaHook, the per-request surface / surfaceCeiling / allowedOps
- * and the stderr logger, with exactly today's key set.
+ * AuthInfo, effective config (#6589), metaHook, the per-request surface / surfaceCeiling / allowedOps,
+ * the request-level `_meta.session_id` as sessionId (CX2-11, as stdio threads
+ * it) and the stderr logger, with exactly today's key set.
  * Fails when: the decomposed handler drops or renames a dispatch option,
- * passes a stale surface, or widens allowedOps.
+ * passes a stale surface, widens allowedOps, or drops the request's session.
  * Why new: outcome tests show remote/auth/surface indirectly; nothing pinned
  * the literal dispatch context the handler builds.
  *
@@ -45,6 +46,7 @@ beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  await engine.setConfig('eval.capture', 'false');
 });
 
 afterAll(async () => {
@@ -87,7 +89,7 @@ async function rpc(base: string, token: string, method: string, params?: unknown
   return JSON.parse(dataLine ? dataLine.slice('data:'.length) : text).result;
 }
 
-const FULL_SURFACE_KEYS = ['auth', 'logger', 'metaHook', 'remote', 'resultRows', 'sourceId', 'surface', 'surfaceCeiling', 'takesHoldersAllowList', 'transport'];
+const FULL_SURFACE_KEYS = ['admissionOrigin', 'auth', 'config', 'inboundFrameBytes', 'isListed', 'logger', 'metaHook', 'noticeLedger', 'remote', 'resultRows', 'sourceId', 'surface', 'surfaceCeiling', 'takesHoldersAllowList', 'transport'];
 
 describe('POST /mcp dispatch context', () => {
   test('full surface: remote http dispatch with the verified auth and token source scope', async () => {
@@ -98,6 +100,9 @@ describe('POST /mcp dispatch context', () => {
     const { opts } = calls[0];
     expect(Object.keys(opts).sort()).toEqual(FULL_SURFACE_KEYS);
     expect(opts.remote).toBe(true);
+    expect(opts.config?.eval?.capture).toBe(false);
+    // #6696 (A5): a remote MCP write is interactive, so the background pause line never refuses it.
+    expect(opts.admissionOrigin).toBe('interactive');
     // C1: a client without the thin-client header gets the host default, lean rows.
     expect(opts.resultRows).toBe('lean');
     expect(opts.transport).toBe('http');
@@ -128,6 +133,22 @@ describe('POST /mcp dispatch context', () => {
     expect(calls[0].name).toBe('search');
     expect(calls[0].stderrBefore).toContain(line);
     expect(stderrLines.join('')).not.toContain('synthetic private phrase');
+  });
+
+  // CX2-11: MCP carries `_meta.session_id` beside `arguments`. Stdio threads it
+  // into dispatch; over HTTP it was dropped, so a remote `remember` stored no
+  // session and `recall({ session_id })` could not find the fact.
+  test('the request-level _meta.session_id reaches dispatch as sessionId; without it there is none', async () => {
+    const { base, token } = await start(undefined, 'session');
+    calls.length = 0;
+    await rpc(base, token, 'tools/call', { name: 'whoami', arguments: {}, _meta: { session_id: 'sess-http' } });
+    await rpc(base, token, 'tools/call', { name: 'whoami', arguments: {} });
+    expect(calls.map(c => c.name)).toEqual(['whoami', 'whoami']);
+    const [withSession, withoutSession] = calls.map(c => c.opts);
+    expect(withSession.sessionId).toBe('sess-http');
+    expect(Object.keys(withSession).sort()).toEqual([...FULL_SURFACE_KEYS, 'sessionId'].sort());
+    expect(withoutSession.sessionId).toBeUndefined();
+    expect(Object.keys(withoutSession).sort()).toEqual(FULL_SURFACE_KEYS);
   });
 
   test('starter ceiling: allowedOps is the surface-filtered remote catalog and the surface is threaded', async () => {

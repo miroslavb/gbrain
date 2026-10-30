@@ -1,14 +1,63 @@
 /**
- * mcp-registration.ts — shared MCP-registration helpers for HTTP+bearer
- * wiring (extracted from src/commands/connect.ts for #4043 [F5]: the harness
- * lane in src/core/bootstrap/ needs these, and core must not import from
- * commands). connect.ts re-exports everything here, so its public surface
- * and tests are unchanged.
+ * mcp-registration.ts — shared MCP-registration helpers: the one stdio
+ * registration surface and serve argv every stdio registration gbrain writes
+ * builds from (readiness, init's quickstart, `bootstrap hooks` for Claude
+ * Code / Codex / opencode, the plugin generator), plus the HTTP+bearer
+ * wiring helpers (extracted from src/commands/connect.ts for #4043 [F5]: the
+ * harness lane in src/core/bootstrap/ needs these, and core must not import
+ * from commands). connect.ts re-exports everything here, so its public
+ * surface and tests are unchanged.
  */
 
 import { shellQuote } from './shell-quote.ts';
+import type { McpSurface } from '../mcp/surface.ts';
 
 export { shellQuote };
+
+/**
+ * The surface a new stdio registration pins: `starter`, the daily-driver tool
+ * list (Garry, 2026-10-24: new installs register starter instead of full;
+ * gbrain-evals#191 measured unchanged reach and accuracy with 17-23% fewer
+ * input tokens). Every install path reads this one value: README, docs/mcp,
+ * the plugin manifests and every registration gbrain writes. An existing
+ * registration keeps its surface; `--surface full` is the opt-in for every
+ * operation, and any hidden parameter or tool stays reachable through
+ * `request_tools`.
+ */
+export const REGISTRATION_SURFACE: McpSurface = 'starter';
+
+/**
+ * The surface the Codex and Claude Code plugin manifests pin: `full`. A plugin
+ * update rewrites the registration of every existing plugin install, so
+ * narrowing it would change existing installs without asking; plugins keep
+ * full (as does a bare `serve`, whose default is unchanged).
+ */
+export const PLUGIN_SURFACE: McpSurface = 'full';
+
+/** A registration command's surface value (`verbs`, `starter` or `full`). */
+export function isRegistrationSurface(v: unknown): v is McpSurface {
+  return v === 'verbs' || v === 'starter' || v === 'full';
+}
+
+/**
+ * `<bin> serve --surface <surface>`. `null` renders a bare `<bin> serve`
+ * (config/default resolution): never-narrow keeps an existing bare
+ * registration bare when it replaces it.
+ */
+export function stdioServeArgv(bin: string, surface: McpSurface | null = REGISTRATION_SURFACE): string[] {
+  return surface ? [bin, 'serve', '--surface', surface] : [bin, 'serve'];
+}
+
+/**
+ * The surface form of an existing registration's command text (`mcp get`
+ * output, an opencode `command` array joined): the pinned value, `null` for
+ * a bare `serve`, `undefined` when no serve command is visible.
+ */
+export function registeredSurface(text: string): McpSurface | null | undefined {
+  const pinned = /--surface[\s=]+["']?(verbs|starter|full)\b/.exec(text);
+  if (pinned) return pinned[1] as McpSurface;
+  return /\bserve\b/.test(text) ? null : undefined;
+}
 
 export const REDACTED = '***';
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;

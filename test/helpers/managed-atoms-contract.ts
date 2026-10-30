@@ -10,13 +10,14 @@ import { submitPageMutation } from '../../src/core/persistence/page-mutations.ts
 import { claimWorktree } from '../../src/core/persistence/ownership.ts';
 import { isPhysicalRootMetadata } from '../../src/core/persistence/physical-root.ts';
 import { __setMaintenanceWriteWaitForTests } from '../../src/core/persistence/maintenance-wait.ts';
+import { testWaitMs, waitFor } from './wait-for.ts';
 import { registerLocalWriter, withVerifiedLocalRegistration, type LocalGrant } from '../../src/core/persistence/identity.ts';
 import { withCoordinatedWrite } from '../../src/core/persistence/context.ts';
 import { TEST_WRITE_ATTRIBUTION } from './write-attribution.ts';
 import { retryManagedAtomBatch } from '../../src/core/persistence/atom-retry.ts';
 import type { WriteRequest } from '../../src/core/persistence/model.ts';
 import { withSubmissionAuthority } from '../../src/core/minions/submission-authority.ts';
-import { serializePageToMarkdown } from '../../src/core/markdown.ts';
+import { serializePageToMarkdown, parseMarkdown } from '../../src/core/markdown.ts';
 import { digest, sha256 } from '../../src/core/persistence/digest.ts';
 import { purgeStaleCheckpoints } from '../../src/core/op-checkpoint.ts';
 import { __setChatTransportForTests } from '../../src/core/ai/gateway.ts';
@@ -26,6 +27,7 @@ import type { MinionJobContext } from '../../src/core/minions/types.ts';
 import { withEnv } from './with-env.ts';
 import { GROUNDED_ATOM_EVIDENCE, withPassingAtomValidator } from './fork-grounded-atoms.ts';
 import { atomSlug } from '../../src/core/cycle/atom-slug.ts';
+import { contentHash } from '../../src/core/utils.ts';
 
 export const atomContractCases = ['publication', 'zero_yield', 'revision', 'removal', 'deferred', 'unavailable', 'source_replaced', 'malformed', 'malformed_retry', 'malformed_retry_failure', 'malformed_retry_revision', 'publication_retry', 'pagination', 'transcript', 'transcript_changed', 'connector', 'connector_claimed'] as const;
 type Case = typeof atomContractCases[number];
@@ -33,14 +35,16 @@ type Case = typeof atomContractCases[number];
 export async function exerciseManagedAtoms(engine: BrainEngine, scenario: Case): Promise<void> {
   const home = mkdtempSync(join(tmpdir(), 'gbrain-managed-atoms-'));
   const sourceId = `atoms-${scenario.replaceAll('_', '-')}`;
-  // The deferred case only needs a pending publish; keep its wait at the pre-#5854 5 s.
-  if (scenario === 'deferred') __setMaintenanceWriteWaitForTests(5_000);
+  // The deferred case only needs a pending publish; a short wait proves the same deferral.
+  const restoreWait = scenario === 'deferred' ? __setMaintenanceWriteWaitForTests(testWaitMs(250)) : () => {};
   try {
     await withEnv({ GBRAIN_HOME: home }, async () => {
       await disposePersistenceConsumer(engine);
       await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
       await engine.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [sourceId]);
-      await engine.putPage('notes/example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40) + GROUNDED_ATOM_EVIDENCE, frontmatter: { visibility: 'private' } }, { sourceId });
+      const contentDate = '2026-07-09T15:45:00.000Z'; // #6720: page-derived atoms inherit it, transcript-derived ones never do
+      await engine.putPage('notes/example', { type: 'source', title: 'Example', compiled_truth: 'A private project record. '.repeat(40) + GROUNDED_ATOM_EVIDENCE,
+        frontmatter: { visibility: 'private', date: contentDate }, effective_date: new Date(contentDate), effective_date_source: 'date' }, { sourceId });
       const page = (await engine.getPage('notes/example', { sourceId }))!;
       const transcript = scenario.startsWith('transcript') ? join(home, 'meeting.txt') : null;
       if (transcript) writeFileSync(transcript, page.compiled_truth);
@@ -186,7 +190,8 @@ export async function exerciseManagedAtoms(engine: BrainEngine, scenario: Case):
         expect(await worker.getHandler('extract-atoms-drain')!(job)).toMatchObject({ replayed: true, model_rerun: false });
         await runPhaseExtractAtoms(engine, opts);
         expect(calls).toBe(expectedCalls);
-        expect(await engine.executeRaw("SELECT id FROM pages WHERE source_id=$1 AND type='atom'", [sourceId])).toHaveLength(1);
+        const retainedAtoms = await engine.executeRaw<{ date: string | null }>("SELECT frontmatter->>'date' AS date FROM pages WHERE source_id=$1 AND type='atom'", [sourceId]);
+        expect(retainedAtoms).toEqual([{ date: transcript ? null : contentDate }]);
         const [unchanged] = await engine.executeRaw<{ state: string; outcome: unknown }>('SELECT state,outcome FROM persistence_requests WHERE request_id=$1::uuid', [receipt.request_id]);
         expect(unchanged).toEqual(original);
         expect(await readState()).toEqual([{ content_hash: page.content_hash!, fail_count: scenario === 'malformed_retry_failure' ? 2 : scenario.startsWith('malformed_retry') ? 1 : 0, tombstoned: true }]);
@@ -251,12 +256,27 @@ export async function exerciseManagedAtoms(engine: BrainEngine, scenario: Case):
       }
       await disposePersistenceConsumer(engine);
       const replay = await runPhaseExtractAtoms(engine, opts);
-      expect(calls).toBe(1);
+      // #6325: a malformed batch is retried automatically (one strike per completed failure).
+      expect(calls).toBe(scenario === 'malformed' ? 2 : 1);
       expect(replay.status).toBe(scenario === 'malformed' ? 'warn' : 'ok');
+      // A short maintenance wait returns the phase while the consumer is still committing the batch (`write_pending`
+      // is progress, #5601); the final state below is the settled batch, so wait for the source's writes to end first.
+      if (scenario === 'deferred') {
+        await waitFor(async () => (await engine.executeRaw("SELECT 1 FROM persistence_requests WHERE source_id=$1 AND state IN ('queued','running','recovering')", [sourceId])).length === 0,
+          { timeoutMs: 10_000, label: 'deferred atom batch settles' });
+      }
       const atoms = await engine.executeRaw<{ slug: string; visibility: string }>("SELECT slug,frontmatter->>'visibility' AS visibility FROM pages WHERE source_id=$1 AND type='atom'", [sourceId]);
       expect(atoms).toHaveLength(scenario === 'zero_yield' || scenario === 'malformed' ? 0 : 1);
       if (atoms.length) {
         expect(atoms[0].visibility).toBe('private');
+        const atom = (await engine.getPage(atoms[0].slug, { sourceId }))!;
+        // The canonical hash uses Markdown frontmatter order; JSONB reorders keys.
+        // Compare with the actual receipted file, not an unordered database projection.
+        if (root) expect(atom.content_hash).toBe(contentHash(parseMarkdown(readFileSync(join(root, `${atoms[0].slug}.md`), 'utf8'), atoms[0].slug)));
+        expect(atom.text_projection_revision).toBe(atom.knowledge_revision);
+        expect(atom.frontmatter.date).toBe(transcript ? undefined : contentDate);
+        if (!transcript) expect(new Date(atom.effective_date!).toISOString()).toBe(contentDate);
+        if (root && !transcript) expect(readFileSync(join(root, `${atoms[0].slug}.md`), 'utf8')).toContain(contentDate);
         expect(await engine.executeRaw('SELECT c.id FROM content_chunks c JOIN pages p ON p.id=c.page_id WHERE p.source_id=$1 AND p.slug=$2', [sourceId, atoms[0].slug])).not.toHaveLength(0);
         if (!transcript) expect(await engine.executeRaw('SELECT l.id FROM links l JOIN pages f ON f.id=l.from_page_id JOIN pages t ON t.id=l.to_page_id WHERE f.source_id=$1 AND t.source_id=$1 AND f.slug=$2 AND t.slug=$3', [sourceId, page.slug, atoms[0].slug])).toHaveLength(1);
         if (root) expect(readFileSync(join(root, `${atoms[0].slug}.md`), 'utf8')).toContain('visibility: private');
@@ -270,15 +290,22 @@ export async function exerciseManagedAtoms(engine: BrainEngine, scenario: Case):
       if (scenario !== 'malformed' && !transcript) expect(await countExtractAtomsBacklog(engine, sourceId)).toBe(0);
       expect((await engine.getPage(page.slug, { sourceId }))?.frontmatter).not.toHaveProperty('atoms_scan_hash');
       if (scenario === 'zero_yield' || scenario === 'malformed') {
+        // #6325: the third malformed attempt holds the page; a held page is neither re-run nor re-struck.
+        if (scenario === 'malformed') {
+          await disposePersistenceConsumer(engine);
+          await runPhaseExtractAtoms(engine, opts);
+          expect(calls).toBe(3);
+          expect(await countExtractAtomsBacklog(engine, sourceId)).toBe(0);
+        }
         const state = await readState();
         await disposePersistenceConsumer(engine);
         await runPhaseExtractAtoms(engine, opts);
-        expect(calls).toBe(1);
+        expect(calls).toBe(scenario === 'malformed' ? 3 : 1);
         expect(await readState()).toEqual(state);
-        expect(state).toEqual([{ content_hash: page.content_hash!, fail_count: scenario === 'malformed' ? 1 : 0, tombstoned: scenario === 'zero_yield' }]);
+        expect(state).toEqual([{ content_hash: page.content_hash!, fail_count: scenario === 'malformed' ? 3 : 0, tombstoned: scenario === 'zero_yield' }]);
       }
     });
-  } finally { __setMaintenanceWriteWaitForTests(null); await disposePersistenceConsumer(engine); await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1'); __setChatTransportForTests(null); rmSync(home, { recursive: true, force: true }); }
+  } finally { restoreWait(); await disposePersistenceConsumer(engine); await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1'); __setChatTransportForTests(null); rmSync(home, { recursive: true, force: true }); }
 }
 
 export async function exerciseManagedAtomReconciliation(engine: BrainEngine): Promise<void> {
@@ -458,7 +485,10 @@ export async function exerciseManagedAtomRetirement(engine: BrainEngine, scenari
           const written = await writeSource(bodies[1]);
           for (const [name, hash] of [['legacy-prefix', written.content_hash!.slice(0, 16)], ['legacy-full', written.content_hash!]] as const) {
             await engine.putPage(`atoms/2026-01-01/${name}`, { type: 'atom', title: name, compiled_truth: `Legacy atom ${name}.`,
-              frontmatter: { source_slug: slug, source_hash: hash } }, { sourceId });
+              frontmatter: { source_slug: slug, source_hash: hash, extracted_by: 'extract_atoms-v0.41.2.1' } }, { sourceId });
+            // GBRA-161: an atom from before the generation ledger retires only on retained extractor evidence (a page
+            // version the extractor wrote, unedited since), which a real earlier extraction of the older content leaves.
+            if (name === 'legacy-full') await engine.createVersion(`atoms/2026-01-01/${name}`, { sourceId });
           }
           return written;
         });
@@ -612,11 +642,12 @@ export async function exerciseManagedAtomBatch(engine: BrainEngine, scenario: ty
       expect(first.status).toBe('warn');
       expect(first.details?.atoms_extracted).toBe(0);
       expect(calls).toBe(1);
-      const accepted = await engine.executeRaw<WriteRequest>('SELECT * FROM persistence_requests WHERE source_id=$1 ORDER BY sequence', [sourceId]);
+      const accepted = await engine.executeRaw<WriteRequest>("SELECT * FROM persistence_requests WHERE source_id=$1 AND intent->>'kind' IS DISTINCT FROM 'managed_generation_activate' ORDER BY sequence", [sourceId]);
       expect(accepted).toHaveLength(3);
+      expect(await engine.executeRaw("SELECT state FROM persistence_requests WHERE source_id=$1 AND intent->>'kind'='managed_generation_activate'", [sourceId])).toHaveLength(1);
       const completion = await waitForWrite(observedEngine, accepted[2], { engine: engine.kind });
       expect(completion.state).toBe(scenario === 'completion_rollback' ? 'failed' : 'conflict');
-      const originals = await engine.executeRaw('SELECT request_id,state,outcome,error_code,error_message FROM persistence_requests WHERE source_id=$1 ORDER BY sequence', [sourceId]);
+      const originals = await engine.executeRaw("SELECT request_id,state,outcome,error_code,error_message FROM persistence_requests WHERE source_id=$1 AND intent->>'kind' IS DISTINCT FROM 'managed_generation_activate' ORDER BY sequence", [sourceId]);
       expect(originals[0].state).toBe('committed');
       expect(originals[1].state).toBe(scenario === 'partial_publication' ? 'conflict' : 'committed');
       if (scenario !== 'partial_publication') expect(injected).toBe(true);
@@ -634,7 +665,7 @@ export async function exerciseManagedAtomBatch(engine: BrainEngine, scenario: ty
       const replay = await runPhaseExtractAtoms(observedEngine, { ...opts, _chat: providerFree });
       expect(replay.status).toBe('warn');
       expect(calls).toBe(1);
-      expect(await engine.executeRaw('SELECT request_id,state,outcome,error_code,error_message FROM persistence_requests WHERE source_id=$1 ORDER BY sequence', [sourceId])).toEqual(originals);
+      expect(await engine.executeRaw("SELECT request_id,state,outcome,error_code,error_message FROM persistence_requests WHERE source_id=$1 AND intent->>'kind' IS DISTINCT FROM 'managed_generation_activate' ORDER BY sequence", [sourceId])).toEqual(originals);
       if (scenario.endsWith('_after_provenance')) {
         await expect(retryManagedAtomBatch(observedEngine, sourceId, completion.request_id, 'reviewed-retry')).rejects.toMatchObject({ code: 'page_identity_changed' });
         expect(await countExtractAtomsBacklog(engine, sourceId)).toBe(1);

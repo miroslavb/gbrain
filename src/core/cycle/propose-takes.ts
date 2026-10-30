@@ -37,18 +37,29 @@
  * phase can run hermetically in unit tests without touching the gateway.
  */
 
+import { observationDateLine, observationDateRule, resolveObservationDate, type ObservationDate } from '../ai/date-grounding.ts';
+import { isConsumerDateGroundingOn } from '../facts/extract.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { BaseCyclePhase, CYCLE_DEADLINE_RESERVE_MS, type ScopedReadOpts, type BasePhaseOpts } from './base-phase.ts';
 import { defaultTimeoutMsFor } from '../minions/handler-timeouts.ts';
-import { chat as gatewayChat, getChatModel, probeChatModel } from '../ai/gateway.ts';
+import {
+  PROPOSE_TAKES_CALL_TIMEOUT_KEY, PROPOSE_TAKES_CALL_TIMEOUT_MAX_MS, PROPOSE_TAKES_CALL_TIMEOUT_MIN_MS, readPhaseConfigNumber,
+} from './phase-config-values.ts';
+import { chat as gatewayChat, getChatModel } from '../ai/gateway.ts';
+import { probeChatModelWithKey } from '../ai/chat-key-probe.ts';
 import { createGlobalLlmHaltTracker, haltedClassOf, type GlobalLlmErrorClass } from '../ai/errors.ts';
 import { normalizeModelId } from '../model-id.ts';
 import { writeReceipt } from '../extract/receipt-writer.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
-import { upsertExtractRollup, classifyRunStop } from '../extract/rollup-writer.ts';
+import { upsertExtractRollup, classifyRunStop, providerHaltReason } from '../extract/rollup-writer.ts';
 import { GBrainError } from '../types.ts';
 import { isConfigTruthy } from '../config.ts';
 import { loadSensitivityConfig, scanSensitive, type SensitivityScanConfig } from '../context/sensitivity-scan.ts';
+import { matchingCloseBracket } from '../llm-json.ts';
+import { TAKE_KIND_VALUES } from '../takes-fence.ts';
+import { attributionChecksEnabled } from './attribution-checks.ts';
+import { downgradeAssistantOnlyHolders } from './propose-takes-attribution.ts';
+import { ProposeTakesFailures, PROPOSE_TAKES_HOLD_RUNS, type FailedPage } from './propose-takes-failures.ts';
 import type { OperationContext } from '../operations.ts';
 import type { BrainEngine } from '../engine.ts';
 import type { PhaseStatus, CyclePhase } from '../cycle.ts';
@@ -307,10 +318,21 @@ export type ProposeTakesExtractor = (input: {
   /** #4494: escalated cap for the one truncation retry (default
    *  PROPOSE_TAKES_RETRY_MAX_TOKENS; clamped to >= maxTokens). */
   retryMaxTokens?: number;
-  // Fork: ProposeTakesExtraction is ProposedTake[] plus the quality-gate
-  // receipt fields the caller reads back (modelId, contractRejectedCount, …),
-  // so this stays assignable wherever upstream expects ProposedTake[].
+  /** #5958: operator-set bound (ms) for each extractor call, base and retry
+   *  alike. The phase reads dream.propose_takes.call_timeout_ms and caps it
+   *  by the phase time left. Absent: extractorCallTimeoutMs(maxTokens). */
+  callBoundMs?: number;
+  /** #5425: include EXTRACT_TAKES_ATTRIBUTION_RULES (opt-in). */
   attributionRules?: boolean;
+  /**
+   * extraction.date_grounding: resolve relative deadlines ("by Q3", "in 18
+   * months") against the page's observation date. Prompt-only; the
+   * idempotency key (prompt_version) is unchanged so enabling it never
+   * reprocesses pages.
+   */
+  dateGrounding?: boolean;
+  /** The page's observation date (date-grounding.ts), null when undated. */
+  observationDate?: ObservationDate | null;
 }) => Promise<ProposeTakesExtraction>;
 
 export interface ProposeTakesOpts extends BasePhaseOpts {
@@ -383,6 +405,12 @@ export interface ProposeTakesResult {
   models_used: string[];
   /** Aggregate-only rejection diagnostics, safe for receipts and phase output. */
   rejection_reason_counts: ProposalRejectionReasonCounts;
+  /** GBRA-130 A-25: every page whose extractor call failed this run, with its counted attempts; a `held` page got a failure tombstone. */
+  failed_pages: FailedPage[];
+  /** Failure tombstones written this run (pages held after PROPOSE_TAKES_HOLD_RUNS counted runs failing the same way). */
+  failure_tombstones_written: number;
+  /** Set when most fresh pages failed (item_failures_systemic): this run's failures were recorded but not counted. */
+  systemic?: { code: string; message: string };
   warnings: string[];
 }
 
@@ -408,6 +436,7 @@ async function listCandidatePages(
   scope: ScopedReadOpts,
   limit: number,
   minPageChars: number,
+  types: string[] | null = null,
 ): Promise<ProposeTakesPageRow[]> {
   const where = [
     'deleted_at IS NULL',
@@ -417,6 +446,12 @@ async function listCandidatePages(
     'length(compiled_truth) >= $3',
     'compiled_truth IS NOT NULL',
     "btrim(compiled_truth) <> ''",
+    // #5211: an atom is a fragment of a page that is itself a candidate; a legacy atom carries no writer stamp.
+    "type IS DISTINCT FROM 'atom'",
+    // #5212: never propose takes from the dream cycle's own output.
+    "COALESCE(frontmatter->>'dream_generated', '') <> 'true'",
+    "COALESCE(frontmatter->>'extracted_by', '') NOT LIKE 'extract_atoms%'",
+    "COALESCE(frontmatter->>'synthesized_by', '') NOT LIKE 'synthesize_concepts%'",
   ];
   const params: unknown[] = [
     PROPOSE_TAKES_ALLOWED_PAGE_TYPES,
@@ -430,6 +465,11 @@ async function listCandidatePages(
     params.push(scope.sourceId);
     where.push(`source_id = $${params.length}`);
   }
+  // #5213: `cycle.propose_takes.types` narrows candidates to listed page types.
+  if (types) {
+    params.push(types);
+    where.push(`type = ANY($${params.length}::text[])`);
+  }
   params.push(limit);
   return engine.executeRaw<ProposeTakesPageRow>(
     `SELECT slug, source_id, compiled_truth
@@ -439,6 +479,30 @@ async function listCandidatePages(
       LIMIT $${params.length}`,
     params,
   );
+}
+
+export const PROPOSE_TAKES_TYPES_KEY = 'cycle.propose_takes.types';
+
+/**
+ * #5213: the page types propose_takes may scan, from `cycle.propose_takes.types`
+ * (a JSON array of type names, the `cycle.enrich_thin.types` shape). Unset,
+ * empty, unreadable or malformed means every type stays a candidate; a
+ * malformed value also prints one stderr line so a typo is visible.
+ */
+export async function proposeTakesTypes(engine: BrainEngine): Promise<string[] | null> {
+  const raw = await engine.getConfig?.(PROPOSE_TAKES_TYPES_KEY).catch(() => null) ?? null;
+  if (raw == null || raw.trim() === '') return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const types = parsed.filter((t): t is string => typeof t === 'string' && t.trim().length > 0).map(t => t.trim());
+      if (types.length > 0) return types;
+    }
+  } catch {
+    // reported below
+  }
+  process.stderr.write(`[propose_takes] ignoring ${PROPOSE_TAKES_TYPES_KEY}: expected a JSON array of page types, e.g. gbrain config set ${PROPOSE_TAKES_TYPES_KEY} '["meeting","note"]'\n`);
+  return null;
 }
 
 /**
@@ -535,6 +599,16 @@ function extractorCallTimeoutMs(maxTokens: number): number {
 }
 
 /**
+ * #5958: the configured per-call bound, held to the phase time left so it
+ * never outlasts the phase deadline (never below the default 90s floor, which
+ * the unconfigured path already allows). Unset: no override.
+ */
+function phaseBoundedCallTimeout(configuredMs: number | undefined, phaseRemainingMs: number): { callBoundMs?: number } {
+  if (configuredMs === undefined) return {};
+  return { callBoundMs: Math.min(configuredMs, Math.max(EXTRACTOR_CALL_TIMEOUT_MS, phaseRemainingMs)) };
+}
+
+/**
  * #3763 — halt streak for a dead extractor lane. When EVERY extractor call in
  * the run has failed (zero successes) and the failure count reaches this
  * streak, the page loop halts instead of burning an LLM call (and its input
@@ -555,6 +629,12 @@ export const EXTRACTOR_FAILURE_HALT_STREAK = 5;
  * then, the production extractor returns whatever the stub LLM produces —
  * empirically often a sparse list or [].
  */
+/** Prompt flags read once per phase run: #5425 attribution rules and extraction.date_grounding. */
+async function takesPromptFlags(engine: BrainEngine): Promise<{ attributionRules: boolean; dateGrounding: boolean }> {
+  const attributionRules = String(await Promise.resolve(engine.getConfig?.('dream.propose_takes.attribution_rules')).catch(() => null) ?? '').trim() === 'true';
+  return { attributionRules, dateGrounding: await isConsumerDateGroundingOn(engine, 'takes') };
+}
+
 export async function defaultExtractor(
   input: Parameters<ProposeTakesExtractor>[0],
 ): Promise<ProposeTakesExtraction> {
@@ -562,6 +642,9 @@ export async function defaultExtractor(
     ? EXTRACT_TAKES_PROMPT.replace('For each gradeable claim,', `${EXTRACT_TAKES_ATTRIBUTION_RULES}For each gradeable claim,`)
     : EXTRACT_TAKES_PROMPT)
     .replace('{EXISTING_TAKES_JSON}', JSON.stringify(input.existingTakes, null, 2))
+    .replace('PAGE PROSE:\n', input.dateGrounding
+      ? `${observationDateRule()}\n${observationDateLine(input.observationDate ?? resolveObservationDate({ slug: input.pagePath }))}\n\nPAGE PROSE:\n`
+      : 'PAGE PROSE:\n')
     .replace('{PAGE_BODY}', input.pageBody);
 
   // #4494: per-run configurable caps (dream.propose_takes.max_tokens /
@@ -578,13 +661,32 @@ export async function defaultExtractor(
   // full gateway default (GBRAIN_AI_CHAT_TIMEOUT_MS, 300s) x pageLimit. The
   // caller already catches per-page errors, logs a warning, and continues.
   // The bound scales with maxTokens so an escalated or configured larger cap
-  // gets time to generate what it allows.
-  const call = (maxTokens: number) => gatewayChat({
-    messages: [{ role: 'user', content: prompt }],
-    ...(input.modelHint ? { model: input.modelHint } : {}),
-    maxTokens,
-    abortSignal: AbortSignal.timeout(extractorCallTimeoutMs(maxTokens)),
-  });
+  // gets time to generate what it allows. An operator bound (callBoundMs)
+  // takes its place for every call: claude-cli never reports a truncation,
+  // so on that route the retry and its longer scaled bound never happen.
+  const call = (maxTokens: number) => {
+    const boundMs = input.callBoundMs ?? extractorCallTimeoutMs(maxTokens);
+    const ownBound = AbortSignal.timeout(boundMs);
+    return gatewayChat({
+      messages: [{ role: 'user', content: prompt }],
+      ...(input.modelHint ? { model: input.modelHint } : {}),
+      maxTokens,
+      abortSignal: ownBound,
+    }).catch((err: unknown) => {
+      // Reword only what our own bound stopped; any other failure, including
+      // the gateway's shorter chat timeout, keeps its error untouched. The
+      // provider's abort text alone names neither the bound nor the key.
+      if (!ownBound.aborted) throw err;
+      const providerText = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `propose_takes extractor: ${input.pagePath} timed out after ${boundMs} ms, the per-call bound ` +
+        `(${providerText}). To move it, set ${PROPOSE_TAKES_CALL_TIMEOUT_KEY} to whole ms from ` +
+        `${PROPOSE_TAKES_CALL_TIMEOUT_MIN_MS} to ${PROPOSE_TAKES_CALL_TIMEOUT_MAX_MS}. ` +
+        `No tombstone was written; the page is retried next cycle.`,
+        { cause: err },
+      );
+    });
+  };
   let result = await call(baseMaxTokens);
 
   // #3763: a truncated response (stopReason 'length' — e.g. reasoning tokens
@@ -665,21 +767,10 @@ export function isWellFormedEmptyExtraction(raw: string): boolean {
 
 /** Parse the prompt-mandated top-level array without accepting malformed prose. */
 function parseCleanExtractionArray(raw: string): unknown[] | null {
-  if (!raw || raw.trim().length === 0) return null;
-  let text = raw.trim();
-  // Strip <think>...</think> reasoning tags (MiniMax-M3, DeepSeek-R1, etc.),
-  // same as parseExtractorOutput (#2559).
-  text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  const fenced = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
-  if (fenced) text = (fenced[1] ?? '').trim();
-  const arrStart = text.indexOf('[');
-  if (arrStart === -1) return null;
-  try {
-    const parsed = JSON.parse(text.slice(arrStart));
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  const located = locateFirstJsonValue(raw);
+  if (!located || !Array.isArray(located.value)) return null;
+  if (located.value.length === 0 && carriesLaterTakes(located.rest)) return null;
+  return located.value;
 }
 
 const PREDICTION_SIGNAL_RE = /\b(?:i\s+bet|will|won't|would|likely|unlikely|expect(?:s|ed|ing)?|predict(?:s|ed|ing)?|forecast(?:s|ed|ing)?|probab(?:le|ly|ility)|chance|risk|may|might|could|going\s+to|before|within|next\s+(?:(?:\d+|a|an)\s+)?(?:week|month|quarter|year)s?|by\s+(?:(?:early|mid|late)[-\s])?(?:q[1-4]|\d{4}|year(?:-end|\s+\d+)?))\b|(?:будет|будут|буду|вероятн\p{L}*|ожида\p{L}*|прогноз\p{L}*|предска\p{L}*|шанс\p{L}*|риск\p{L}*|может|могут|в\s+следующ\p{L}*|к\s+\d{4})/iu;
@@ -793,46 +884,88 @@ export function canonicalizeWhitespaceEquivalentSpan(
 }
 
 /**
- * Parse extractor output into ProposedTake[]. Handles common LLM output
- * sins (markdown fence wrapping, leading/trailing prose, single-object
- * instead of array). Returns [] on any unrecoverable parse error rather
- * than throwing. Kind tokens are case/whitespace-normalized, matched
- * against the fence vocabulary (with the #4736 legacy mapping), and
- * anything else coerces to 'take'.
+ * #6782: what one extractor reply holds. `valid_empty` only when the reply's
+ * first JSON value is a complete empty array and no JSON object, and no array
+ * holding a take-shaped object, follows it (a later `[1]` citation does not
+ * count); `valid_nonempty` when the first value (an array, or a lone object)
+ * yields at least one take; `invalid` for everything else (prose only,
+ * truncated or malformed JSON, a claim-less value, or an empty array followed
+ * by takes), which the caller retries and never tombstones.
+ */
+export type ExtractorOutcome = { kind: 'valid_empty' } | { kind: 'valid_nonempty'; takes: ProposedTake[] } | { kind: 'invalid' };
+
+export function extractorOutcome(raw: string): ExtractorOutcome {
+  const located = locateFirstJsonValue(raw);
+  if (!located) return { kind: 'invalid' };
+  if (Array.isArray(located.value) && located.value.length === 0) {
+    return carriesLaterTakes(located.rest) ? { kind: 'invalid' } : { kind: 'valid_empty' };
+  }
+  const takes = takesOf(located.value);
+  return takes.length ? { kind: 'valid_nonempty', takes } : { kind: 'invalid' };
+}
+
+/**
+ * Parse extractor output into ProposedTake[] (the takes of a `valid_nonempty`
+ * outcome, else none). Handles common LLM output sins (markdown fence
+ * wrapping, leading/trailing prose, single-object instead of array). Kind
+ * tokens are case/whitespace-normalized, matched against the fence vocabulary
+ * (with the #4736 legacy mapping), and anything else coerces to 'take'.
  */
 export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTakesExtraction {
-  if (!raw || raw.trim().length === 0) return [];
-  let text = raw.trim();
-  // Strip <think>...</think> reasoning tags (MiniMax-M3, DeepSeek-R1, etc.).
-  text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  // Strip markdown code fence wrapper.
+  const located = locateFirstJsonValue(raw);
+  if (!located || (Array.isArray(located.value) && !located.value.length && carriesLaterTakes(located.rest))) return [];
+  return takesOf(located.value, pageBody);
+}
+
+/**
+ * The reply's first JSON array or object after stripping `<think>` reasoning
+ * (#2559) and a whole-reply code fence: the whole remainder when it parses,
+ * else only up to the value's own closing bracket (#5209), with the text after it.
+ */
+function locateFirstJsonValue(raw: string): { value: unknown; rest: string } | null {
+  if (!raw || raw.trim().length === 0) return null;
+  let text = raw.trim().replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   const fenced = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
   if (fenced) text = (fenced[1] ?? '').trim();
-  // First-array-or-object substring extraction (defends against leading prose).
   const firstArr = text.indexOf('[');
   const firstObj = text.indexOf('{');
-  if (firstArr === -1 && firstObj === -1) return [];
+  if (firstArr === -1 && firstObj === -1) return null;
   const start = firstArr !== -1 && (firstObj === -1 || firstArr < firstObj) ? firstArr : firstObj;
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(text.slice(start));
+    return { value: JSON.parse(text.slice(start)), rest: '' };
   } catch {
-    // Fallback: truncate at last ] or } to handle trailing noise (e.g. leftover
-    // markdown fences after <think> stripping). Try array-closing first.
-    const sliced = text.slice(start);
-    const lastArr = sliced.lastIndexOf(']');
-    const lastObj = sliced.lastIndexOf('}');
-    const end = Math.max(lastArr, lastObj);
-    if (end > 0) {
-      try {
-        parsed = JSON.parse(sliced.slice(0, end + 1));
-      } catch {
-        return [];
-      }
-    } else {
-      return [];
+    const end = matchingCloseBracket(text, start);
+    if (end === -1) return null;
+    try {
+      return { value: JSON.parse(text.slice(start, end + 1)), rest: text.slice(end + 1) };
+    } catch {
+      return null;
     }
   }
+}
+
+/** True when `text` holds a parseable JSON object, or an array holding a take-shaped object. */
+function carriesLaterTakes(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '[' && text[i] !== '{') continue;
+    const end = matchingCloseBracket(text, i);
+    if (end === -1) continue;
+    let value: unknown;
+    try { value = JSON.parse(text.slice(i, end + 1)); } catch { continue; }
+    if (!Array.isArray(value) && value !== null && typeof value === 'object') return true;
+    if (Array.isArray(value) && value.some(v => v !== null && typeof v === 'object' && typeof (v as Record<string, unknown>).claim_text === 'string')) return true;
+    i = end;
+  }
+  return false;
+}
+
+function coerceTakeKind(raw: string): ProposedTake['kind'] {
+  const kind = raw.trim().toLowerCase();
+  if (kind === 'prediction' || kind === 'judgment') return 'take';
+  return TAKE_KIND_VALUES.has(kind) ? kind as ProposedTake['kind'] : 'take';
+}
+
+function takesOf(parsed: unknown, pageBody?: string): ProposeTakesExtraction {
   const arr = Array.isArray(parsed) ? parsed : [parsed];
   const out: ProposeTakesExtraction = [];
   const rejectionReasonCounts: ProposalRejectionReasonCounts = {};
@@ -863,9 +996,7 @@ export function parseExtractorOutput(raw: string, pageBody?: string): ProposeTak
           : rawKind === 'bet'
             ? 'bet'
             : null)
-      : (['fact', 'take', 'bet', 'hunch'].includes(rawKind)
-          ? rawKind as ProposedTake['kind']
-          : 'take');
+      : coerceTakeKind(rawKind);
     if (kind === null) {
       reject('unknown_kind');
       continue;
@@ -1086,7 +1217,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
     }
 
     const extractor = opts.extractor ?? defaultExtractor;
-    const attributionRules = String(await Promise.resolve(engine.getConfig?.('dream.propose_takes.attribution_rules')).catch(() => null) ?? '').trim() === 'true';
+    const [{ attributionRules, dateGrounding }, attributionChecks] = await Promise.all([takesPromptFlags(engine), attributionChecksEnabled(engine)]);
     const promptVersion = opts.promptVersion ?? `${PROPOSE_TAKES_PROMPT_VERSION}${attributionRules ? PROPOSE_TAKES_ATTRIBUTION_PROMPT_SUFFIX : ''}`;
     const pageLimit = opts.pageLimit ?? 100;
     const minPageChars = opts.minPageChars ?? PROPOSE_TAKES_MIN_PAGE_CHARS;
@@ -1133,15 +1264,15 @@ class ProposeTakesPhase extends BaseCyclePhase {
       if (retryCap != null) extractorRetryMaxTokens = Math.floor(retryCap);
     } catch { /* keep defaults */ }
     extractorRetryMaxTokens = Math.max(extractorMaxTokens, extractorRetryMaxTokens);
+    const callTimeout = await readPhaseConfigNumber(engine, PROPOSE_TAKES_CALL_TIMEOUT_KEY); // #5874
 
     // With the default (gateway) extractor, skip cheaply when the resolved
-    // model's provider can't run — same probe semantics as patterns.ts /
-    // think/index.ts: unknown provider/model or Anthropic-without-key skips;
-    // other providers' auth surfaces lazily at chat() time. An injected
+    // model's provider can't run: unknown provider/model, or any keyed provider
+    // without its key (#6705; same probe as patterns.ts). An injected
     // extractor bypasses the gateway, so it is never gated. (Takeover of
     // PR #1979's intent by @shawnduggan.)
     if (!opts.extractor) {
-      const probe = probeChatModel(normalizeModelId(modelId));
+      const probe = probeChatModelWithKey(normalizeModelId(modelId));
       if (!probe.ok) {
         return {
           summary: `propose_takes skipped: ${probe.detail}`,
@@ -1211,7 +1342,9 @@ class ProposeTakesPhase extends BaseCyclePhase {
       pages_rejected_sensitive: 0,
       models_used: [],
       rejection_reason_counts: {},
-      warnings: [],
+      failed_pages: [],
+      failure_tombstones_written: 0,
+      warnings: callTimeout.warning ? [callTimeout.warning] : [],
       deadline_hit: false,
     };
 
@@ -1229,7 +1362,13 @@ class ProposeTakesPhase extends BaseCyclePhase {
     }
 
     // Load pages eligible for proposal. Source-scoped per BaseCyclePhase.
-    const pages = await listCandidatePages(engine, scope, pageLimit, minPageChars);
+    // Load pages eligible for proposal. Source-scoped per BaseCyclePhase; #5213 types narrow it.
+    // GBRA-130 A-25: a page that failed before at this content hash and prompt
+    // version is retried after the fresh pages, so failing pages at the head of
+    // the list cannot halt the run before the rest are tried.
+    const listed = await listCandidatePages(engine, scope, pageLimit, minPageChars, await proposeTakesTypes(engine));
+    const failures = await ProposeTakesFailures.load(engine, listed.map(page => page.source_id ?? scope.sourceId ?? 'default'), promptVersion);
+    const pages = failures.order(listed, page => [page.source_id ?? scope.sourceId ?? 'default', contentHash(page.compiled_truth ?? '')]);
     // Load once, before the loop and before any external call. A malformed or
     // unreadable operator scanner config throws and aborts the whole phase —
     // fail-closed is safer than sending even the first page unscanned.
@@ -1341,9 +1480,14 @@ class ProposeTakesPhase extends BaseCyclePhase {
           // #4494: configurable output caps (see resolution above).
           maxTokens: extractorMaxTokens,
           retryMaxTokens: extractorRetryMaxTokens,
-          attributionRules,
+          ...phaseBoundedCallTimeout(callTimeout.value, deadlineMs - (Date.now() - phaseStartMs)),
+          attributionRules, dateGrounding,
         });
       } catch (err) {
+        // GBRA-130: a run-scoped error (abort, lost connection, failed
+        // transaction) stops the phase and records nothing. Every failure feeds
+        // the breaker except a recorded page repeating its content-class code.
+        failures.fail(sourceId, page.slug, ch, err);
         result.llm_calls_failed += 1;
         if (!dryRun) {
           try {
@@ -1375,9 +1519,12 @@ class ProposeTakesPhase extends BaseCyclePhase {
         // Halt instead of spending an LLM call on every remaining page. A
         // single success anywhere in the run keeps llm_calls_succeeded > 0
         // and permanently disarms this halt (mixed runs are per-page noise).
+        // GBRA-130 A-25: a recorded page repeating its content-class code is the
+        // expected outcome and does not count; a transient or provider failure
+        // always does, so an outage halts even on pages that failed before.
         if (
           result.llm_calls_succeeded === 0 &&
-          result.llm_calls_failed >= EXTRACTOR_FAILURE_HALT_STREAK
+          failures.freshFailures >= EXTRACTOR_FAILURE_HALT_STREAK
         ) {
           result.aborted_failure_streak = true;
           result.warnings.push(
@@ -1390,7 +1537,9 @@ class ProposeTakesPhase extends BaseCyclePhase {
         continue;
       }
       result.llm_calls_succeeded += 1;
+      failures.succeed(sourceId, page.slug, ch);
       llmHalt.reset();
+      if (attributionChecks) proposals = downgradeAssistantOnlyHolders(proposals, body);
 
       const actualModelId = (proposals as ProposeTakesExtraction).modelId ?? modelId;
       if (!result.models_used.includes(actualModelId)) result.models_used.push(actualModelId);
@@ -1511,6 +1660,12 @@ class ProposeTakesPhase extends BaseCyclePhase {
 
     if (opts.reporter) opts.reporter.finish();
 
+    if (!dryRun) {
+      const settled = await failures.settle(engine, { counted: result.aborted_global_error === undefined, proposalRunId, modelId });
+      result.failed_pages = settled.failed;
+      result.failure_tombstones_written = settled.tombstones;
+      if (settled.systemic) result.systemic = settled.systemic;
+    }
     // v0.42 Wave B3: receipt + rollup for propose_takes. Source-scoped
     // via the read scope. Receipt only when proposals actually written.
     const sourceIdForReceipt = scope.sourceId ?? 'default';
@@ -1579,6 +1734,9 @@ class ProposeTakesPhase extends BaseCyclePhase {
         `propose_takes: scanned ${result.pages_scanned} pages, ${result.cache_hits} cached, ${result.proposals_inserted} grounded proposals, ` +
         `${result.proposals_rejected_ungrounded} ungrounded rejected, ${result.pages_rejected_sensitive} sensitive skipped, ` +
         `${result.empty_runs_written} empty (run ${proposalRunId})` +
+        (result.failure_tombstones_written > 0
+          ? `; ${result.failure_tombstones_written} page(s) held after ${PROPOSE_TAKES_HOLD_RUNS} failed runs (gbrain takes propose --failed)`
+          : '') +
         (result.aborted_global_error
           ? `; aborted on ${result.aborted_global_error} error after ${result.pages_scanned} page(s)`
           : '') +
@@ -1590,6 +1748,57 @@ class ProposeTakesPhase extends BaseCyclePhase {
       status: phaseFailed ? 'fail' : halted || warningCount > 0 ? 'warn' : 'ok',
     };
   }
+}
+
+/** The takes.proposed receipt and rollup of one run; returns whether the run halted (any cap or halt). */
+async function recordProposeTakesRun(engine: BrainEngine, result: ProposeTakesResult, sourceIdForReceipt: string, proposalRunId: string): Promise<boolean> {
+  // v0.42 Wave B3: receipt + rollup for propose_takes. Source-scoped
+  // via the read scope. Receipt only when proposals actually written.
+  // Managed brains skip the receipt page (a legacy putPage the coordinator
+  // refuses), like extract_atoms and synthesize_concepts; the rollup stays.
+  if (result.proposals_inserted > 0 && !await managedPersistenceEnabled(engine)) {
+    try {
+      await writeReceipt(engine, {
+        kind: 'takes.proposed',
+        source_id: sourceIdForReceipt,
+        run_id: proposalRunId,
+        round: 'single',
+        extracted_at: new Date().toISOString(),
+        total_rows: result.proposals_inserted,
+        cost_usd: 0, // tracker isn't exposed at this layer; cost tracked centrally
+        summary:
+          `Proposed ${result.proposals_inserted} new takes from ${result.pages_scanned} pages ` +
+          `(${result.cache_hits} cached).`,
+      });
+    } catch (err) {
+      console.error(`[propose_takes] receipt write failed: ${(err as Error).message}`);
+    }
+  }
+  // #4482: three-way stop classification. A budget/deadline cap is the
+  // extractor working as designed (partial progress banked; the rest
+  // drains over future runs) — recorded as expected_limit_delta, a
+  // capacity signal doctor's failure rate excludes. A global-error abort
+  // (#3044) or an all-failures streak (#3763) is a REAL halt, unchanged
+  // from today. An error alongside a cap counts as the error.
+  // `halted` (any incomplete round, caps included) is kept for the phase
+  // result's status/details below — the diagnostic split is rollup-only.
+  const halted =
+    result.budget_exhausted ||
+    result.deadline_hit === true ||
+    result.aborted_global_error !== undefined ||
+    result.aborted_failure_streak === true;
+  await upsertExtractRollup(engine, {
+    kind: 'takes.proposed',
+    source_id: sourceIdForReceipt,
+    ...classifyRunStop({
+      budget_exhausted: result.budget_exhausted === true,
+      deadline_hit: result.deadline_hit === true,
+      error:
+        result.aborted_global_error !== undefined ? providerHaltReason(result.aborted_global_error) ?? 'item_error'
+          : result.aborted_failure_streak === true ? 'item_error' : false,
+    }),
+  });
+  return halted;
 }
 
 /**

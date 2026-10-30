@@ -10,6 +10,9 @@ export const PAGE_VERSION_DELETION_SCHEMA_SQL = `ALTER TABLE page_versions ADD C
  * row needs a value: `sources` is backfilled here (a handful of rows), an
  * empty `pages` (fresh install) is constrained here, and existing pages are
  * backfilled in committed batches by page-state/revision-backfill-schema.ts.
+ * A segmented page (Wave B) has NULL body columns, so its body identity is
+ * `body_generation`, read only when both sides are NULL: the column is
+ * migration-only (v248), and before it the body columns are NOT NULL.
  */
 export const PAGE_STATE_SCHEMA_STATEMENTS = [
   `DO $do$ BEGIN
@@ -49,18 +52,22 @@ export const PAGE_STATE_SCHEMA_STATEMENTS = [
     slug TEXT NOT NULL,
     PRIMARY KEY (source_incarnation, slug)
   )`,
-  `CREATE OR REPLACE FUNCTION gbrain_advance_page_revision() RETURNS trigger LANGUAGE plpgsql AS $fn$
+  `CREATE OR REPLACE FUNCTION gbrain_advance_page_revision() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $fn$
+    DECLARE body_moved boolean := false;
     BEGIN
       IF OLD.knowledge_revision IS NULL THEN
         NEW.knowledge_revision := COALESCE(NEW.knowledge_revision, gen_random_uuid());
         NEW.text_projection_revision := NULL;
         RETURN NEW;
       END IF;
+      IF NEW.compiled_truth IS NULL AND OLD.compiled_truth IS NULL THEN
+        body_moved := NEW.body_generation IS DISTINCT FROM OLD.body_generation;
+      END IF;
       IF (NEW.source_id, NEW.slug, NEW.type, NEW.page_kind, NEW.title, NEW.compiled_truth,
           NEW.timeline, NEW.frontmatter, NEW.deleted_at)
          IS DISTINCT FROM
          (OLD.source_id, OLD.slug, OLD.type, OLD.page_kind, OLD.title, OLD.compiled_truth,
-          OLD.timeline, OLD.frontmatter, OLD.deleted_at) THEN
+          OLD.timeline, OLD.frontmatter, OLD.deleted_at) OR body_moved THEN
         IF NEW.knowledge_revision = OLD.knowledge_revision AND NOT (
           COALESCE(current_setting('gbrain.materializing_revision', true), '') = OLD.knowledge_revision::text
           AND (NEW.source_id, NEW.slug, NEW.type, NEW.page_kind, NEW.title, NEW.frontmatter, NEW.deleted_at)
@@ -78,7 +85,7 @@ export const PAGE_STATE_SCHEMA_STATEMENTS = [
   `DROP TRIGGER IF EXISTS pages_knowledge_revision ON pages`,
   `CREATE TRIGGER pages_knowledge_revision BEFORE UPDATE ON pages
     FOR EACH ROW EXECUTE FUNCTION gbrain_advance_page_revision()`,
-  `CREATE OR REPLACE FUNCTION gbrain_advance_tag_revision() RETURNS trigger LANGUAGE plpgsql AS $fn$
+  `CREATE OR REPLACE FUNCTION gbrain_advance_tag_revision() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $fn$
     BEGIN
       IF TG_OP = 'UPDATE' AND (NEW.page_id, NEW.tag) IS NOT DISTINCT FROM (OLD.page_id, OLD.tag) THEN
         RETURN NULL;

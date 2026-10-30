@@ -208,6 +208,86 @@ import { v204 } from './v204-f4-planner-stats.ts';
 import { v205 } from './v205-managed-guard-null-source-fallback.ts';
 import { v206 } from './v206-publication-failure-detail.ts';
 import { v207 } from './v207-chronicle-page-state.ts';
+import { v208 } from './v208-sync-hold-page-index.ts';
+import { v209 } from './v209-persistence-graduation.ts';
+import { v210 } from './v210-legacy-token-grant-conversion.ts';
+import { v211 } from './v211-oauth-client-grant-axes.ts';
+import { v212 } from './v212-links-temporal-state.ts';
+import { v213 } from './v213-minion-spend-authorization.ts';
+import { v214 } from './v214-entity-mention-index.ts';
+import { v215 } from './v215-retrieval-feedback.ts';
+import { v216 } from './v216-delta-per-arm-cursor.ts';
+import { v217 } from './v217-page-facts-reconcile.ts';
+import { v218 } from './v218-clamp-oauth-token-ttl.ts';
+import { v219 } from './v219-function-search-path.ts';
+import { v220 } from './v220-decide-review-proposals.ts';
+import { v221 } from './v221-core-edit-notices.ts';
+import { v222 } from './v222-wanted-links.ts';
+import { v223 } from './v223-facts-attributed-to.ts';
+import { v224 } from './v224-chronicle-campaign-stamps.ts';
+import { v225 } from './v225-persistence-request-claim-phase.ts';
+import { v226 } from './v226-purge-legacy-worktree-manifest-files.ts';
+import { v227 } from './v227-pages-reconcile-name-indexes.ts';
+import { v228 } from './v228-persistence-request-preparation-attempts.ts';
+import { v229 } from './v229-chunk-embedding-pending-since.ts';
+import { v230 } from './v230-persistence-consumers.ts';
+import { v231 } from './v231-persistence-serve-loop-indexes.ts';
+import { v232 } from './v232-page-retrievals.ts';
+import { v233 } from './v233-drop-duplicate-embedding-null-index.ts';
+import { v234 } from './v234-trust-tiers.ts';
+import { v235 } from './v235-write-gate.ts';
+import { v236 } from './v236-memory-purge.ts';
+import { v237 } from './v237-trust-allow-rules.ts';
+import { v238 } from './v238-trust-generation.ts';
+import { v239 } from './v239-fact-purge-lookup-indexes.ts';
+import { v240 } from './v240-fts-cjk-boundary.ts';
+import { v241 } from './v241-oauth-client-registered-via.ts';
+import { v242 } from './v242-persistence-git-durability.ts';
+import { v243 } from './v243-pinned-questions.ts';
+import { v244 } from './v244-open-loops-counterparty-source.ts';
+import { v245 } from './v245-facts-question-recall-indexes.ts';
+import { v246 } from './v246-persistence-client-request-id.ts';
+import { v247 } from './v247-extract-rollup-halt-reasons.ts';
+import { v248 } from './v248-pages-name-lookup-indexes.ts';
+import { v249 } from './v249-persistence-request-slug-intent-index.ts';
+import { v250 } from './v250-extract-atoms-partial-input.ts';
+import { v251 } from './v251-persistence-consumer-process-start.ts';
+import { v252 } from './v252-chunk-projected-spans.ts';
+import { v253 } from './v253-page-search-vector-bounded-timeline.ts';
+import { v254 } from './v254-page-embedding-budget.ts';
+import { v255 } from './v255-page-extraction-state.ts';
+import { v256 } from './v256-segmented-page-storage.ts';
+import { v257 } from './v257-belief-ledger.ts';
+import { v258 } from './v258-persistence-request-id-index.ts';
+import { v259 } from './v259-take-horizons.ts';
+import { v260 } from './v260-segmented-chunk-gc-index.ts';
+import { v261 } from './v261-page-view-digests.ts';
+import { v262 } from './v262-segment-reader-marks.ts';
+import { v263 } from './v263-page-body-staging-texts.ts';
+import { v264 } from './v264-chunk-retirement-index.ts';
+import { v265 } from './v265-pages-live-origin-key.ts';
+import { v266 } from './v266-pages-links-extract-failure.ts';
+import { v267 } from './v267-ingest-log-marked-index.ts';
+import { v268 } from './v268-segmented-page-size-index.ts';
+import { v269 } from './v269-persistence-request-transient-retries.ts';
+import { v270 } from './v270-commit-notifier.ts';
+import { v271 } from './v271-try-jsonb-function.ts';
+import { v272 } from './v272-set-based-fact-insert-guards.ts';
+import { v273 } from './v273-derived-generations.ts';
+import { v274 } from './v274-derived-generation-activations.ts';
+import { v275 } from './v275-pages-title-search-index.ts';
+import { v276 } from './v276-effect-claim-owner.ts';
+import { v277 } from './v277-links-supersedes-index.ts';
+import { v278 } from './v278-pages-source-created-index.ts';
+import { v279 } from './v279-facts-superseded-by-index.ts';
+import { v280 } from './v280-git-canonical-declared.ts';
+import { v281 } from './v281-segment-derivations.ts';
+import { v282 } from './v282-pages-withheld-source-path.ts';
+import { v283 } from './v283-rls-backfill-unguarded-tables.ts';
+import { v284 } from './v284-persistence-foreground-committed-index.ts';
+import { v285 } from './v285-function-search-path-pg-temp.ts';
+import { v286 } from './v286-writer-fence-fail-closed.ts';
+import { v287 } from './v287-outcome-markers-skip-purge-guard.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -414,4 +494,84 @@ export const MIGRATIONS: Migration[] = [
   v205,
   v206,
   v207,
+  v208,
+  v209,
+  v210,
+  v211,
+  v212,
+  v213,
+  v214,
+  v215,
+  v216,
+  v217,
+  v218,
+  v219,
+  v220,
+  v221,
+  v222,
+  v223,
+  v224,
+  v225,
+  v226,
+  v227,
+  v228,
+  v229,
+  v230,
+  v231,
+  v232,
+  v233,
+  v234,
+  v235,
+  v236,
+  v237,
+  v238,
+  v239,
+  v240,
+  v241,
+  v242,
+  v243,
+  v244,
+  v245,
+  v246,
+  v247,
+  v248,
+  v249,
+  v250,
+  v251,
+  v252,
+  v253,
+  v254,
+  v255,
+  v256,
+  v257,
+  v258,
+  v259,
+  v260,
+  v261,
+  v262,
+  v263,
+  v264,
+  v265,
+  v266,
+  v267,
+  v268,
+  v269,
+  v270,
+  v271,
+  v272,
+  v273,
+  v274,
+  v275,
+  v276,
+  v277,
+  v278,
+  v279,
+  v280,
+  v281,
+  v282,
+  v283,
+  v284,
+  v285,
+  v286,
+  v287,
 ];

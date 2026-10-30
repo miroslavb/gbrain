@@ -264,7 +264,7 @@ describe('snapshot integrity (E5) and reconciliation (E8/C12/E9)', () => {
     ]);
   }), 120_000);
 
-  test('a genuine [] retires the previous generation; a failed run retires nothing', () => brain(async ({ engine, ctx }) => {
+  test('a genuine [] keeps the previous generation live (#7013); a failed run retires nothing', () => brain(async ({ engine, ctx }) => {
     await put(ctx, 'meetings/sync', meeting('Sync'));
     await settle(engine);
     await runPhaseChronicle(engine, { judge: async () => ({ events: [ev('Alice agreed to ship the beta')] }) });
@@ -274,8 +274,10 @@ describe('snapshot integrity (E5) and reconciliation (E8/C12/E9)', () => {
     expect((await events(engine)).map((e) => e.deleted)).toEqual([false]);
     await put(ctx, 'meetings/sync', meeting('Sync', `${BODY} v3.`));
     await settle(engine);
-    await runPhaseChronicle(engine, { judge: async () => ({ events: [] }) });
-    expect((await events(engine)).map((e) => [e.deleted, e.retired_by])).toEqual([[true, 'life-chronicle']]);
+    const r = await runPhaseChronicle(engine, { judge: async () => ({ events: [] }) });
+    expect(r.details).toMatchObject({ judged: 1, no_events: 1, events_retired: 0 });
+    expect((await events(engine)).map((e) => [e.deleted, e.retired_by])).toEqual([[false, null]]);
+    expect((await rows(engine)).at(-1)).toMatchObject({ slug: 'meetings/sync', state: 'extracted', reason: 'no_events' });
   }), 120_000);
 
   test('a depth page that stops being a meeting retires its automatic events without a model call', () => brain(async ({ engine, ctx }) => {
@@ -341,8 +343,10 @@ describe('ledger and discovery (E1/E6/D12)', () => {
     await runPhaseChronicle(engine, { judge });
     expect(judge.calls).toBe(0);
     await Bun.sleep(1700);
-    await runPhaseChronicle(engine, { judge });
-    expect(judge.calls).toBe(1);
+    const r = await runPhaseChronicle(engine, { judge });
+    // An ended invite projects without a chat call (invite-projection.ts).
+    expect(judge.calls).toBe(0);
+    expect(r.details).toMatchObject({ extracted: 1, events_written: 1 });
   }), 120_000);
 
   test('a managed page written without a decision is left to backfill (no_write_decision)', () => brain(async ({ engine }) => {

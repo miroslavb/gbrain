@@ -27,7 +27,7 @@ function legacyPrivateRow(table: string, claim: string): string {
   return table.split('\n').map(line => line.includes(`| ${claim} |`) ? line.replace('| world |', '| private |') : line).join('\n');
 }
 const history = (engine: BrainEngine, slug: string, remote?: boolean) =>
-  operationsByName.get_versions.handler(context(engine, remote), { slug }) as Promise<PageVersion[]>;
+  operationsByName.get_versions.handler(context(engine, remote), { slug, include_body: true }) as Promise<PageVersion[]>;
 function protectedBody(prefix: string): string {
   // Fork contract: renderFactsTable always renders `world` on the world-only
   // host, so re-create the legacy vault shape (a textual `private` cell) that
@@ -49,8 +49,9 @@ test('complete versions filter timeline and body fences remotely while local his
     await engine.addTag(slug, 'visible-tag', { sourceId });
     await engine.createVersion(slug, { sourceId });
     const stored = await engine.getVersions(slug, { sourceId });
-    // Trusted local history is the stored row plus who wrote and archived it (F1b, spec 2.7).
-    expect(await history(engine, slug, false)).toEqual(stored.map(version => ({ ...version,
+    // Trusted local history is the stored row plus who wrote and archived it (F1b, spec 2.7) and the
+    // snapshot's trust tier (#5575; an engine-level write carries no writer tier, so it is unknown).
+    expect(await history(engine, slug, false)).toEqual(stored.map(version => ({ ...version, trust_tier: 'unknown',
       written_by: expect.objectContaining({ origin: expect.any(String) }), archived_by: expect.objectContaining({ origin: expect.any(String) }) })));
     for (const remote of [true, undefined]) {
       const versions = await history(engine, slug, remote); expect(versions).toHaveLength(1);
@@ -87,8 +88,8 @@ test('legacy NULL and absent timeline fields stay unchanged while their body sti
     // of fabricating an empty timeline that a caller could mistake for data.
     const original = engine.getVersions;
     engine.getVersions = async function (this: BrainEngine, ...args: Parameters<BrainEngine['getVersions']>) {
-      return (await original.apply(this, args)).map(({ timeline: _timeline, ...version }) => version);
-    };
+      return ((await original.apply(this, args)) as PageVersion[]).map(({ timeline: _timeline, ...version }) => version);
+    } as BrainEngine['getVersions'];
     try {
       const [absent] = await history(engine, slug, true);
       expect(absent.timeline).toBeUndefined(); expect(Object.hasOwn(absent, 'timeline')).toBe(false);

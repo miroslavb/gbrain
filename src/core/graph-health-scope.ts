@@ -78,6 +78,12 @@ export function canonicalEntitySqlPredicate(alias: string): string {
   ) AND lower(${a}.slug) !~ '/readme$'`;
 }
 
+/** Additional pack entity types have their own contour; default host cards retain exact canonical roots. */
+export function entityCardContourSqlPredicate(alias: string): string {
+  const a = checkedAlias(alias);
+  return `(${a}.type NOT IN ('person','company','entity','organization') OR (${canonicalEntitySqlPredicate(a)}))`;
+}
+
 /** Independently resolvable parent-session project hint (Postgres/PGLite parity). */
 export function resolvableCanonicalProjectHintSqlPredicate(parentAlias: string, targetAlias: string): string {
   const p = checkedAlias(parentAlias);

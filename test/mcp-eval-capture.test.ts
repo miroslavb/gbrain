@@ -99,8 +99,7 @@ describe('op-layer capture — query', () => {
     expect(row.tool_name).toBe('query');
     expect(row.query).toBe('alice');
     expect(row.remote).toBe(true);
-    // Omitted means the config/mode resolution chain decided; capture keeps
-    // that distinct from an explicit per-call true/false override.
+    // The raw `expand` param: unset is null, so replay applies the mode default (GBRA-81 item 1b).
     expect(row.expand_enabled).toBeNull();
     expect(row.vector_enabled).toBe(false); // OPENAI_API_KEY deleted
     expect(row.job_id).toBeNull();

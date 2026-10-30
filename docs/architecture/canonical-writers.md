@@ -38,7 +38,7 @@ Managed Markdown sync runs on the registered filesystem owner with
 commit, source incarnation, owner epoch, topology generation and page
 identities/revisions. Attached repositories import committed Git content;
 `--working-tree` opts into uncommitted files and detached repositories include
-them automatically. Source-relative exclusions retain their existing meaning.
+them automatically. Source-relative exclusions apply as they do in classic sync.
 Each file's bytes and fingerprint are frozen before its journal request is
 admitted. Import leaves the original bytes intact unless canonical sanitization
 or retained tags require an explicit recoverable file publication.
@@ -52,8 +52,8 @@ after 25 foreground commits or one second of continuous foreground service, sync
 earns a bounded batch even while new interactive requests continue arriving. Interruption or a pending owner leaves the cursor and source
 checkpoint intact. A later invocation resumes the frozen target; a newer Git
 HEAD is a separate subsequent sync. A revision/file conflict blocks the cursor.
-After inspecting the conflict, `--retry-failed` can start a fresh discovery once
-all earlier admitted requests are terminal. `--skip-failed` cannot advance a
+After inspecting the conflict, the next plain sync can start a fresh discovery once
+all earlier admitted requests are terminal (`--retry-failed` is a deprecated alias of it). `--skip-failed` cannot advance a
 managed checkpoint past failed receipts.
 
 When PGLite already has a resident owner, the CLI authenticates before opening

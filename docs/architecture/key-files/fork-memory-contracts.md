@@ -5,6 +5,37 @@ deployed on this host. Upstream subsystem pages remain authoritative for
 everything else; read the matching upstream entry together with any fork delta
 listed here.
 
+## v0.60.502 preparation — 2026-10-30
+
+**Not accepted for deployment.** This branch integrates the pinned upstream
+`f48cc461965af08581be7cec7b66a1a67c4839af` with the installed fork
+`bc36c1633a98cd7861de9f01761eefd185a7cf79`. Production remains0.60.45.0/schema207.
+The first isolated canonical wrapper stopped in verify; its later unit/slow/E2E
+lanes did not run. Passing focused regressions and a restored database migration
+are preparation evidence, not release acceptance.
+
+Applied fork migrations through207 retain their original bytes. New upstream
+200–279 map to fork208–287. Never install raw upstream against the fork's stamp.
+Historical upstream schema fixtures retain their original provenance and numbers;
+they require a separate lineage lane or a reviewed adapter before fork replay.
+Pending generated golden conflicts are not accepted simply because they parse.
+
+The host leaves `pages.segmented_storage` off when unset. Segmented conversation
+fact extraction refuses before side effects until the whole-epoch contract has
+an implementation for segment inputs. Remote code operations keep upstream's
+trust-boundary suspension; local code reads remain available. Source grants,
+document ACLs, world-only fact writes, literal extraction ownership, bounded
+admission, atom grounding, fallback gates and quote-bound proposal acceptance
+remain required. Doctor counts current chunk generations; the deleted-page
+residue census deliberately includes all generations and is not a work selector.
+
+Deployment requires a committed candidate, fresh full verification with a real
+Git index, reviewed goldens and historical fork replay, real PostgreSQL E2E,
+paired retrieval and code-index gates. Preserve the original failed receipts.
+Take a new quiesced backup only after all acceptance gates pass and every old
+writer/client has drained. Recovery must pair matching code/runtime/schema and
+archive post-cutover writes; never start old workers on the new schema.
+
 ## Host visibility invariant
 
 This deployment is single-principal and world-only. Fact writers accept only
@@ -65,7 +96,7 @@ Fork delta — `src/core/ai/gateway.ts` `embed()` — `embedding_query_prefix` (
 
 Fork delta — stale-chunk selectors (`buildStaleChunkWhere` for `countStaleChunks`/`sumStaleChunkChars`, and every `listStaleChunks` variant in both engines) exclude soft-deleted pages: the embed path cannot load a deleted page, so counting its NULL-vector chunks kept `migrate embeddings` incomplete forever. A restored page is stale again and the next run embeds it. Upstream health now excludes deleted pages. `verifyMigrationComplete` reports their residue as `details.deleted_page_null_chunks` without subtracting it from the live missing count a second time; the live blocker remains intact. Tests: `test/fork-stale-excludes-deleted.test.ts`.
 
-## v0.60.31 port and verification
+## Historical v0.60.31 port and verification
 
 The pinned base is upstream `2d8801b4eb5e21125d53999799ca267b5a1e587d`,
 merged onto the prior reviewed fork candidate `e2cbb245`. Production remains

@@ -20,6 +20,7 @@
  * guard); the classification test in test/write-attribution.test.ts fails
  * until it is.
  */
+import { TRUST_ROW_COLUMNS } from '../trust/schema.ts';
 
 /** created_by and last_mutated_by on facts, takes and timeline_entries. */
 export const ROW_ATTRIBUTION_COLUMNS = [
@@ -40,17 +41,22 @@ export const WRITE_ATTRIBUTION_CONTENT_COLUMNS: Record<AttributedTable, readonly
   facts: ['id', 'source_id', 'entity_slug', 'fact', 'kind', 'visibility', 'notability', 'context', 'valid_from',
     'valid_until', 'expired_at', 'superseded_by', 'consolidated_at', 'consolidated_into', 'source', 'source_session',
     'confidence', 'created_at', 'row_num', 'source_markdown_slug', 'claim_metric', 'claim_value', 'claim_unit',
-    'claim_period', 'event_type', 'dimension', 'value', 'value_hash', 'dim_status'],
+    'claim_period', 'event_type', 'dimension', 'value', 'value_hash', 'dim_status', 'attributed_to'],
   takes: ['id', 'page_id', 'row_num', 'claim', 'kind', 'holder', 'weight', 'since_date', 'until_date', 'source',
     'superseded_by', 'active', 'resolved_at', 'resolved_outcome', 'resolved_value', 'resolved_unit', 'resolved_source',
     'resolved_by', 'created_at', 'resolved_quality'],
   timeline_entries: ['id', 'page_id', 'date', 'source', 'summary', 'detail', 'event_page_id', 'created_at'],
 };
-/** Physical projections (embeddings and their identity): changing them leaves attribution untouched. */
+/**
+ * Columns whose change leaves attribution untouched: physical projections
+ * (embeddings and their identity) and the trust tier and its origin record,
+ * which trust/schema.ts stamps and guards (a confirmation or backfill is not a
+ * content rewrite, so it does not move last_write_*).
+ */
 export const WRITE_ATTRIBUTION_PROJECTION_COLUMNS: Record<AttributedTable, readonly string[]> = {
-  facts: ['embedding', 'embedded_at', 'embedding_model', 'embedded_text_hash'],
-  takes: ['embedding', 'embedded_at', 'updated_at', 'embedding_model', 'embedded_text_hash'],
-  timeline_entries: [],
+  facts: ['embedding', 'embedded_at', 'embedding_model', 'embedded_text_hash', 'source_window', ...TRUST_ROW_COLUMNS],
+  takes: ['embedding', 'embedded_at', 'updated_at', 'embedding_model', 'embedded_text_hash', ...TRUST_ROW_COLUMNS],
+  timeline_entries: [...TRUST_ROW_COLUMNS],
 };
 
 const ATTRIBUTED_TABLES = Object.keys(WRITE_ATTRIBUTION_CONTENT_COLUMNS) as AttributedTable[];
@@ -68,13 +74,26 @@ const addColumns = (table: string, columns: readonly string[]) =>
   `ALTER TABLE ${table} ${columns.map(column => `ADD COLUMN IF NOT EXISTS ${column} ${typed(column)}`).join(', ')}`;
 
 /**
+ * Set transaction-locally by the facts insert guard (facts/insert-guard-schema.ts)
+ * around its withdrawal stamp, which runs as an UPDATE at the end of the
+ * inserting statement; the per-row guard it replaced stamped the row before
+ * insert, where attribution never saw a change.
+ */
+export const FACT_WITHDRAWAL_STAMP_SETTING = 'gbrain.fact_withdrawal_stamp';
+const FACT_CONTENT_WITHOUT_STAMP = WRITE_ATTRIBUTION_CONTENT_COLUMNS.facts.filter(column => column !== 'expired_at' && column !== 'valid_until');
+
+/**
  * INSERT: stamp created_by and last_mutated_by from the settings; without
  * settings keep supplied values (engine copy, backfill). UPDATE: created_by is
  * immutable once set; last_mutated_by moves only when a content column
  * changed (to NULL when no actor is set: an unattributed writer mutated it).
  * Either pair may be filled while it is still NULL (journal backfill).
+ * Under FACT_WITHDRAWAL_STAMP_SETTING a facts UPDATE that changes only
+ * expired_at and valid_until is not a content change, so last_mutated_by
+ * keeps the inserted (or supplied) values; any other content change still
+ * moves it.
  */
-const STAMP_ROW_FUNCTION = `CREATE OR REPLACE FUNCTION gbrain_stamp_write_attribution() RETURNS trigger LANGUAGE plpgsql AS $fn$
+export const STAMP_ROW_FUNCTION = `CREATE OR REPLACE FUNCTION gbrain_stamp_write_attribution() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $fn$
 DECLARE req uuid; principal_kind text; principal_id text; changed boolean;
 BEGIN${SETTINGS}
   IF TG_OP = 'INSERT' THEN
@@ -93,6 +112,9 @@ BEGIN${SETTINGS}
   ELSE
     RAISE EXCEPTION 'gbrain_stamp_write_attribution is not classified for table %', TG_TABLE_NAME;
   END IF;
+  IF changed AND TG_TABLE_NAME = 'facts' AND COALESCE(current_setting('${FACT_WITHDRAWAL_STAMP_SETTING}', true), '') = 'on' THEN
+    changed := ${tuple('NEW', FACT_CONTENT_WITHOUT_STAMP)} IS DISTINCT FROM ${tuple('OLD', FACT_CONTENT_WITHOUT_STAMP)};
+  END IF;
   IF changed THEN
     NEW.last_write_request_id := req; NEW.last_write_principal_kind := principal_kind; NEW.last_write_principal_id := principal_id;
     NEW.last_written_at := now();
@@ -109,7 +131,7 @@ END $fn$`;
  * writes bump the revision through an update of the page row, so they are
  * attributed too.
  */
-const STAMP_REVISION_FUNCTION = `CREATE OR REPLACE FUNCTION gbrain_stamp_revision_attribution() RETURNS trigger LANGUAGE plpgsql AS $fn$
+const STAMP_REVISION_FUNCTION = `CREATE OR REPLACE FUNCTION gbrain_stamp_revision_attribution() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $fn$
 DECLARE req uuid; principal_kind text; principal_id text;
 BEGIN${SETTINGS}
   IF TG_OP = 'INSERT' THEN
@@ -130,7 +152,7 @@ END $fn$`;
  * the same transaction, so the page row still carries the snapshotted
  * revision and its writer. The archiving actor comes from the settings.
  */
-const STAMP_VERSION_FUNCTION = `CREATE OR REPLACE FUNCTION gbrain_stamp_version_attribution() RETURNS trigger LANGUAGE plpgsql AS $fn$
+const STAMP_VERSION_FUNCTION = `CREATE OR REPLACE FUNCTION gbrain_stamp_version_attribution() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $fn$
 DECLARE req uuid; principal_kind text; principal_id text;
 BEGIN${SETTINGS}
   IF (NEW.write_request_id, NEW.write_principal_kind, NEW.write_principal_id) IS NOT DISTINCT FROM (NULL::uuid, NULL::text, NULL::text) THEN

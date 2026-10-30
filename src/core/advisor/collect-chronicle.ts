@@ -14,6 +14,7 @@
 // brain-global view.
 import type { AdvisorCollector, AdvisorContext, AdvisorFinding } from './types.ts';
 import { CHRONICLE_RESCUE_SLUG_PREFIXES, isChronicleEligible } from '../chronicle/eligibility.ts';
+import { boundedBodyPrefixSql } from '../page-window/bounded-lead.ts';
 
 /** SQL source filter mirroring postgres-engine's canonical pattern. The
  *  rescue-prefix array binds $1, so the scope param is $2. Empty arrays never
@@ -32,7 +33,8 @@ import {
   AUTO_CHRONICLE_KEEP_ARGV, AUTO_CHRONICLE_OPT_OUT_ARGV, autoChronicleNeedsAcknowledgement, autoChronicleSetting, chronicleSettings,
 } from '../chronicle/config.ts';
 import { describeChronicleActivity, readChronicleLedgerStats } from '../chronicle/ledger-stats.ts';
-import { CHRONICLE_REASONS, chronicleBackfillArgv, type ChronicleAction } from '../chronicle/reasons.ts';
+import { CHRONICLE_REASONS, chronicleBackfillArgv } from '../chronicle/reasons.ts';
+import type { Action } from '../agent-output.ts';
 
 const daysAgo = (now: Date, days: number) => new Date(now.getTime() - days * 86_400_000).toISOString().slice(0, 10);
 
@@ -95,7 +97,7 @@ async function collectAutoChronicle(ctx: AdvisorContext): Promise<AdvisorFinding
   if (stats.last7d.failed > 0 && failed) {
     const reasonCtx = { since: daysAgo(ctx.now ?? new Date(), 7), dailyLimit: settings.dailyLimit, recentDays: settings.recentDays };
     const entry = CHRONICLE_REASONS[failed[0] as keyof typeof CHRONICLE_REASONS];
-    const fix: ChronicleAction | undefined = 'fix' in entry ? entry.fix(reasonCtx) : undefined;
+    const fix: Action | undefined = 'fix' in entry ? entry.fix(reasonCtx) : undefined;
     findings.push({
       id: 'chronicle_extraction_failing',
       severity: 'warn',
@@ -145,8 +147,10 @@ export const collectChronicle: AdvisorCollector = {
     }
 
     // 2. Recent Chronicle-eligible pages not yet in the timeline. Enumerate
-    // only the small metadata projection, then apply the exact shared JS
-    // predicate so advisor, write backstop, and bulk backfill cannot drift.
+    // only metadata and the native bounded prefix, then apply the exact shared
+    // JS predicate. Its 80-character threshold uses UTF-16 string length, not
+    // SQL char_length (code points) or body_bytes (UTF-8 bytes). Up to 80 code
+    // points suffice to decide >=80 UTF-16 units, also for segmented truth_lead.
     try {
       const scope = sourceScopeSql(ctx);
       const params: unknown[] = [Array.from(CHRONICLE_RESCUE_SLUG_PREFIXES), ...scope.params];
@@ -154,10 +158,10 @@ export const collectChronicle: AdvisorCollector = {
         type: string;
         slug: string;
         frontmatter: Record<string, unknown> | null;
-        body_chars: number | string;
+        body_prefix: string | null;
       }>(
         `SELECT p.type, p.slug, p.frontmatter,
-                char_length(COALESCE(p.compiled_truth, ''))::int AS body_chars
+                left(${boundedBodyPrefixSql('p')}, 80) AS body_prefix
            FROM pages p
           WHERE (
               p.type IN ('meeting','conversation','calendar-event')
@@ -177,11 +181,10 @@ export const collectChronicle: AdvisorCollector = {
       );
       const gap = rows.reduce((count, row) => {
         const frontmatter = row.frontmatter ?? {};
-        const bodyChars = Number(row.body_chars) || 0;
         const eligible = isChronicleEligible({
           type: row.type,
           slug: row.slug,
-          body: bodyChars >= 80 ? 'x'.repeat(80) : '',
+          body: row.body_prefix ?? '',
           dreamGenerated: frontmatter.dream_generated === true,
           messageCount: frontmatter.message_count,
         });

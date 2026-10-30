@@ -113,14 +113,15 @@ describe('#5876 discovery and filters (D6/E10)', () => {
     expect((await run({ dry_run: true })).queued).toBe(2); // backfill is the history path: no recency by default
   });
 
-  test('a dry run estimates USD at the model price, or says unpriced', async () => {
+  test('a dry run estimates USD at the model price and refuses unknown pricing', async () => {
     await engine.putPage('meetings/m1', { type: 'meeting', title: 'm1', compiled_truth: LONG });
     const priced = await runChronicleBackfill(engine, { dryRun: true, model: 'anthropic:claude-sonnet-4-6' });
     expect(typeof priced.estimated_usd).toBe('number');
     expect(priced.estimated_usd as number).toBeGreaterThan(0);
     expect(priced.estimated_usd as number).toBeLessThanOrEqual(0.25);
     expect(priced.message).toContain('Ask the user before running');
-    expect((await runChronicleBackfill(engine, { dryRun: true, model: 'openai:gpt-unpriced-example' })).estimated_usd).toBe('unpriced');
+    await expect(runChronicleBackfill(engine, { dryRun: true, model: 'openai:gpt-unpriced-example' })).rejects.toMatchObject({ code: 'no_pricing' });
+    expect(await queued()).toEqual([]);
   });
 
   test('a future invite is skipped as not_yet_happened', async () => {

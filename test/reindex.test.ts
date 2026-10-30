@@ -84,6 +84,30 @@ describe('gbrain reindex --markdown (v0.32.7)', () => {
     await checkLiteralReindexPrefix(engine);
   });
 
+  // #5937 (absorbed in agent contract v1 D4)
+  test('rejects invalid --limit values before dispatching any reindex mode', () => {
+    for (const value of ['NaN', '0', '-1', '1.5', '1oops', '9007199254740992']) {
+      expect(validateReindexModeScope(['--multimodal', '--limit', value]), `multimodal ${value}`)
+        .toBe('invalid --limit: expected a positive integer');
+      expect(validateReindexModeScope(['--aliases', `--limit=${value}`]), `aliases ${value}`)
+        .toBe('invalid --limit: expected a positive integer');
+    }
+    expect(validateReindexModeScope(['--multimodal', '--limit', '3'])).toBeNull();
+    expect(validateReindexModeScope(['--aliases', '--limit=3'])).toBeNull();
+  });
+
+  test('retrieved-since and hot-first include retrievals written only to the new side table', async () => {
+    await seedLegacyPage('notes/recent', 'Recently retrieved body');
+    await seedLegacyPage('notes/cold', 'Cold body');
+    await engine.executeRaw("INSERT INTO page_retrievals(page_id,last_retrieved_at) SELECT id,now() FROM pages WHERE slug='notes/recent'");
+    const preview = await captureOutput(()=>runReindex(engine,['--markdown','--no-embed','--retrieved-since','2020-01-01','--dry-run']));
+    expect(preview.result.pending).toBe(1);
+    const run = await captureOutput(()=>runReindex(engine,['--markdown','--no-embed','--hot-first','--limit','1']));
+    expect(run.result.reindexed).toBe(1);
+    const rows=await engine.executeRaw<{slug:string;chunker_version:number}>("SELECT slug,chunker_version FROM pages ORDER BY slug");
+    expect(rows).toEqual([{slug:'notes/cold',chunker_version:1},{slug:'notes/recent',chunker_version:MARKDOWN_CHUNKER_VERSION}]);
+  });
+
   test('dry-run reports pending count and does not write', async () => {
     await seedLegacyPage('note-a', 'body a');
     await seedLegacyPage('note-b', 'body b');
@@ -576,7 +600,8 @@ describe('gbrain reindex --markdown (v0.32.7)', () => {
   test('source-file import errors are surfaced, counted, and fail the CLI', async () => {
     const repo = mkdtempSync(join(tmpdir(), 'gbrain-reindex-'));
     try {
-      writeFileSync(join(repo, 'bad.md'), '---\ntype: note\ntitle: Re: invalid yaml\n---\nbody\n');
+      // #5988: `title: Re: ...` now imports by quoting; a mis-indented list cannot be read.
+      writeFileSync(join(repo, 'bad.md'), '---\ntype: note\ntags:\n  - a\n - b\n---\nbody\n');
       await seedLegacyPage('bad', 'old body', 'bad.md');
 
       const { result, stderr } = await captureOutput(() =>

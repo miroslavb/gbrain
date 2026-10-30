@@ -102,9 +102,11 @@ export async function legacyGetHealth(engine: BrainEngine, opts?: { sourceId?: s
       SELECT p.slug,
              (SELECT count(*) FROM links l
                WHERE (l.from_page_id = p.id
+                      AND EXISTS (SELECT 1 FROM pages live WHERE live.id = l.to_page_id AND live.deleted_at IS NULL)
                       AND ($1::text[] IS NULL
                            OR EXISTS (SELECT 1 FROM pages fp WHERE fp.id = l.to_page_id AND fp.source_id = ANY($1))))
                   OR (l.to_page_id = p.id
+                      AND EXISTS (SELECT 1 FROM pages live WHERE live.id = l.from_page_id AND live.deleted_at IS NULL)
                       AND ($1::text[] IS NULL
                            OR EXISTS (SELECT 1 FROM pages fp WHERE fp.id = l.from_page_id AND fp.source_id = ANY($1))))
              )::int as link_count
@@ -213,6 +215,7 @@ export async function legacyGetHealth(engine: BrainEngine, opts?: { sourceId?: s
       missing_embeddings: Number(r.missing_embeddings),
       brain_score: brainScore,
       dead_links: deadLinks,
+      entity_types_status: 'resolved',
       entity_page_count: Number(r.entity_page_count),
       // gbrain#4147: below the small-N floor the ratio is statistically
       // meaningless (0/0 used to read as a hard 0%), so it reports null and

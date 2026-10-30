@@ -34,3 +34,13 @@ export async function resolveVisibilityParam(
 ): Promise<WritableFactVisibility> {
   return WORLD_VISIBILITY;
 }
+
+/** The host shares facts across agents; source grants and document ACLs remain separate. */
+export function tightenToPage(_visibility: FactVisibility, _page: { type?: string | null; frontmatter?: unknown } | null | undefined): WritableFactVisibility {
+  return WORLD_VISIBILITY;
+}
+
+/** Legacy defaults and page markers cannot create private facts on this host. */
+export async function resolveRememberVisibility(_engine: BrainEngine, _page: { type?: string | null; frontmatter?: unknown } | null | undefined): Promise<WritableFactVisibility> {
+  return WORLD_VISIBILITY;
+}

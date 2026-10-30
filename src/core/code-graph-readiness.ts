@@ -86,7 +86,7 @@ export async function resolveCodeReadiness(
     scope.requireSafeChunks ??= scope.excludePrivate;
     const projection = await probeProjectionReadiness(engine, { ...scope, pageKind: 'code' });
     if (!projection.ready) {
-      return { status: projection.status, ready: false, has_code: opts.count > 0, pending_edges: false };
+      return { status: projection.status === 'projection_pending' ? 'projection_pending' : 'unknown', ready: false, has_code: opts.count > 0, pending_edges: false };
     }
     if (opts.count > 0) {
       return { status: 'ready', ready: true, has_code: true, pending_edges: false };

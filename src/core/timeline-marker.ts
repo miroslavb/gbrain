@@ -67,3 +67,9 @@ export function isFenceJunkSummary(summary: string): boolean {
   const text = summary.trimStart();
   return text.startsWith('| # | claim |') || text.startsWith('<!--- gbrain:facts:') || text.startsWith('<!--- gbrain:takes:');
 }
+
+/** The `[start, end)` UTF-16 spans `stripMaterializedMarkers` removes from `text`, in order. */
+export function materializedMarkerSpans(text: string): Array<[number, number]> {
+  if (!text.includes('gbrain:materialized')) return [];
+  return [...text.matchAll(MARKER_LINES)].map(m => [m.index, m.index + m[0].length]);
+}

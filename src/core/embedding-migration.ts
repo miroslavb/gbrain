@@ -12,7 +12,7 @@ import {
   lockEmbeddingSources,
   splitEmbeddingSignature,
   currentSpaceChunkPredicate,
-  countRestampOnlyChunks,
+  measureRestampOnlyChunks,
 } from './embedding-invalidation.ts';
 import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defaults.ts';
 import { readPrimaryEmbeddingStores, readStoredEmbeddingIdentity } from './stored-embedding-identity.ts';
@@ -22,7 +22,9 @@ import { AUDIT_ROW_SOURCES } from './facts/audit-sources.ts';
 import { countStaleFactEmbeddings } from './facts/embedding-identity.ts';
 import { prepareEmbeddingProjections } from './embedding-readiness.ts';
 import { assertRetainedEmbeddingRebuildability } from './embedding-migration-retention.ts';
+import { withMigrationLeaseTransaction, type MigrationLeaseAssert } from './embedding-migration-budget.ts';
 import { annIndexValidity, canonicalChunkAnnIndex, mergeDeferredAnnIndexes, parseDeferredAnnIndexes, type DeferredAnnIndex } from './embedding-ann-build.ts';
+import { SMOKE_QUERY_CHUNK_UNITS, SMOKE_QUERY_TITLE_UNITS } from './embedding-migration-worst-case.ts';
 
 export interface EnvOverrideWarning {
   triggered: boolean;
@@ -83,6 +85,15 @@ export function formatEnvOverrideWarning(w: EnvOverrideWarning): string {
   return lines.join('\n');
 }
 
+/** #4252: every index the cascade of DROP COLUMN `table`.embedding takes (pg_depend edges, partial WHERE predicates included). */
+async function embeddingDependentIndexes(tx: { executeRaw: <T = unknown>(sql: string, params?: unknown[]) => Promise<T[]> }, table: string) {
+  return tx.executeRaw<{ name: string; def: string }>(
+    `SELECT DISTINCT c.relname AS name, pg_get_indexdef(d.objid) AS def FROM pg_depend d JOIN pg_class c ON c.oid = d.objid AND c.relkind = 'i'
+      WHERE d.classid = 'pg_class'::regclass AND d.refclassid = 'pg_class'::regclass AND d.deptype = 'a' AND d.refobjid = to_regclass($1)
+        AND d.refobjsubid = (SELECT attnum FROM pg_attribute WHERE attrelid = to_regclass($1) AND attname = 'embedding' AND NOT attisdropped)`, [table]);
+}
+const ifNotExists = (def: string) => def.replace(/^CREATE (UNIQUE )?INDEX /, 'CREATE $1INDEX IF NOT EXISTS ');
+
 /**
  * The atomic DROP + ALTER + CREATE INDEX sequence for content_chunks.
  * Both engines accept identical SQL (PGLite uses pgvector via WASM, same
@@ -121,19 +132,7 @@ export async function runSchemaTransition(engine: BrainEngine, targetDim: number
     // follows, so this also catches indexes that reference the column only
     // in a partial WHERE predicate (which a pg_indexes.indexdef text match
     // could not do without false-matching embedding_image/_multimodal).
-    const dependentIndexes = await tx.executeRaw<{ name: string; def: string }>(
-      `SELECT DISTINCT c.relname AS name, pg_get_indexdef(d.objid) AS def
-         FROM pg_depend d
-         JOIN pg_class c ON c.oid = d.objid AND c.relkind = 'i'
-        WHERE d.classid = 'pg_class'::regclass
-          AND d.refclassid = 'pg_class'::regclass
-          AND d.deptype = 'a'
-          AND d.refobjid = to_regclass('content_chunks')
-          AND d.refobjsubid = (
-            SELECT attnum FROM pg_attribute
-             WHERE attrelid = to_regclass('content_chunks')
-               AND attname = 'embedding' AND NOT attisdropped)`,
-    );
+    const dependentIndexes = await embeddingDependentIndexes(tx, 'content_chunks');
 
     // Text embedding column — transition to target dim.
     await tx.executeRaw(`DROP INDEX IF EXISTS idx_chunks_embedding`);
@@ -149,9 +148,7 @@ export async function runSchemaTransition(engine: BrainEngine, targetDim: number
         if (hnswIndexExpected('vector', targetDim)) ann.push(...parseDeferredAnnIndexes([idx], DEFERRED_ANN_TABLES));
         continue;
       }
-      await tx.executeRaw(
-        idx.def.replace(/^CREATE (UNIQUE )?INDEX /, 'CREATE $1INDEX IF NOT EXISTS '),
-      );
+      await tx.executeRaw(ifNotExists(idx.def));
     }
 
     // Image/multimodal embedding column — rebuild index but preserve
@@ -202,8 +199,8 @@ export async function runSchemaTransition(engine: BrainEngine, targetDim: number
   // embedding_is_null), so this clear is belt-and-braces, DELIBERATELY outside
   // the DDL transaction: a ~1M-row UPDATE inside the ACCESS EXCLUSIVE window
   // would hold the exclusive lock through row churn (the pooler-contention
-  // class pace-mode exists for), and a crash mid-batch leaves only
-  // redundant-lie rows that nothing reads. Batched with an event-loop yield
+  // class pace-mode exists for). It also stamps embedding_pending_since (kept when already
+  // pending) for doctor's backlog age; a row a crash skipped has none. Batched with an event-loop yield
   // between batches (setTimeout(0), NOT setImmediate — Bun starves the timers
   // phase under a tight setImmediate loop) so lock heartbeats keep firing.
   try {
@@ -217,10 +214,10 @@ export async function runSchemaTransition(engine: BrainEngine, targetDim: number
       const res = await engine.executeRaw<{ n: number; max_id: number | null }>(
         `WITH b AS (
            SELECT id FROM content_chunks
-            WHERE id > $1 AND embedded_at IS NOT NULL
+            WHERE id > $1 AND (embedded_at IS NOT NULL OR embedding_pending_since IS NULL)
             ORDER BY id LIMIT 50000
          ),
-         u AS (UPDATE content_chunks c SET embedded_at = NULL FROM b WHERE c.id = b.id RETURNING b.id)
+         u AS (UPDATE content_chunks c SET embedded_at = NULL, embedding_pending_since = COALESCE(c.embedding_pending_since, now()) FROM b WHERE c.id = b.id RETURNING b.id)
          SELECT count(*)::int AS n, max(id)::int AS max_id FROM u`,
         [cursor],
       );
@@ -309,9 +306,13 @@ async function transitionDimPinnedColumn(
   const columnType: 'vector' | 'halfvec' = udt.toLowerCase() === 'halfvec' ? 'halfvec' : 'vector';
   const opclass = columnType === 'halfvec' ? 'halfvec_cosine_ops' : 'vector_cosine_ops';
 
+  // #4252: the DROP COLUMN cascade also takes every btree/partial index that
+  // reads the column (facts' idx_facts_unembedded, v237); replayed after the rebuild.
+  const dependents = await embeddingDependentIndexes(tx, table);
   await tx.executeRaw(`DROP INDEX IF EXISTS ${indexName}`);
   await tx.executeRaw(`ALTER TABLE ${table} DROP COLUMN IF EXISTS embedding`);
   await tx.executeRaw(`ALTER TABLE ${table} ADD COLUMN embedding ${columnType}(${targetDim})`);
+  for (const idx of dependents) if (idx.name !== indexName && !/USING hnsw/i.test(idx.def)) await tx.executeRaw(ifNotExists(idx.def));
   // HNSW has a per-type dimension ceiling; above it pgvector refuses the
   // index and exact scans remain the (correct, slower) path. #5088: the index
   // is returned for the deferred build after the re-embed, not created here.
@@ -631,7 +632,9 @@ export async function planEmbeddingMigration(
     // counts what the stamp hides. No overlap — the stale predicates skip
     // exactly the target-stamped pages' EMBEDDED chunks counted here.
     falseStamped = await countFalseStampedChunks(engine, toModel, toDims);
-    if (!schemaRebuildNeeded(col.dims, toDims)) restamp = await countRestampOnlyChunks(engine, { signature: sig, includeNullSignature: true });
+    const kept = schemaRebuildNeeded(col.dims, toDims) ? { chunks: 0, chars: 0 } : await measureRestampOnlyChunks(engine, { signature: sig, includeNullSignature: true });
+    restamp = kept.chunks;
+    totalChars = Math.max(0, totalChars - kept.chars);
   } else {
     // Column ABSENT: the stale predicates reference cc.embedding and would
     // throw. Every chunk needs embedding once the column is (re)built.
@@ -892,6 +895,9 @@ export async function readMigrationStatus(engine: BrainEngine): Promise<Migratio
   };
 }
 
+const SMOKE_SAMPLE_BATCH = 25;
+const SMOKE_SAMPLE_SCAN_CHUNKS = 1000;
+
 export interface VerifySearchOutcome {
   status: 'pass' | 'warn' | 'skipped';
   /** Content-free per-sample record — safe to stamp into the completion marker. */
@@ -925,16 +931,28 @@ export async function verifySearchRoundTrip(
       AND p.text_projection_revision=p.knowledge_revision AND p.embedding_signature=$2
       AND NOT (COALESCE(p.frontmatter,'{}'::jsonb) ? 'embed_skip')
       AND (cc.modality IS NULL OR cc.modality='text') AND ${currentSpaceChunkPredicate('embedding', 3, 4)}`;
-    const rows = await engine.executeRaw<{ id: number; slug: string; page_id: number; source_id: string }>(
-      `SELECT cc.id, p.slug, cc.page_id, p.source_id
-         FROM content_chunks cc
-         JOIN pages p ON p.id = cc.page_id
-         JOIN sources s ON s.id=p.source_id
-        WHERE ${eligible}
-        ORDER BY cc.id DESC
-        LIMIT $1`,
-      [n, signature, queryModel, dims],
-    );
+    // One sample per page: walk the newest eligible chunks in small
+    // index-ordered batches (bounded) to pick distinct pages; the longest
+    // eligible chunk of each page is re-read under its page lock.
+    const rows: Array<{ slug: string; page_id: number; source_id: string }> = [];
+    for (let before = '9223372036854775807', scanned = 0; rows.length < n && scanned < SMOKE_SAMPLE_SCAN_CHUNKS;) {
+      const batch = await engine.executeRaw<{ id: number; slug: string; page_id: number; source_id: string }>(
+        `SELECT cc.id, p.slug, cc.page_id, p.source_id
+           FROM content_chunks cc
+           JOIN pages p ON p.id = cc.page_id
+           JOIN sources s ON s.id=p.source_id
+          WHERE ${eligible} AND cc.id < $5::bigint
+          ORDER BY cc.id DESC
+          LIMIT $1`,
+        [SMOKE_SAMPLE_BATCH, signature, queryModel, dims, before],
+      );
+      for (const row of batch) {
+        if (rows.length < n && !rows.some(r => Number(r.page_id) === Number(row.page_id))) rows.push(row);
+      }
+      if (batch.length < SMOKE_SAMPLE_BATCH) break;
+      scanned += batch.length;
+      before = String(batch[batch.length - 1].id);
+    }
     if (rows.length === 0) {
       return { status: 'skipped', samples: [], reason_code: 'no_embedded_chunks' };
     }
@@ -943,12 +961,14 @@ export async function verifySearchRoundTrip(
       try {
         const current = await engine.transaction(async tx => {
           await tx.lockPageKeys([{ sourceId: row.source_id, slug: row.slug }]);
-          return tx.executeRaw<{ chunk_text: string }>(`SELECT cc.chunk_text FROM content_chunks cc
+          return tx.executeRaw<{ title: string | null; chunk_text: string }>(`SELECT p.title, cc.chunk_text FROM content_chunks cc
             JOIN pages p ON p.id=cc.page_id JOIN sources s ON s.id=p.source_id
-            WHERE cc.id=$1 AND ${eligible}`, [row.id, signature, queryModel, dims]);
+            WHERE cc.page_id=$1 AND ${eligible}
+            ORDER BY length(cc.chunk_text) DESC, cc.id DESC LIMIT 1`, [row.page_id, signature, queryModel, dims]);
         });
         if (!current.length) continue;
-        const query = current[0].chunk_text.slice(0, 160);
+        const title = current[0].title?.trim().slice(0, SMOKE_QUERY_TITLE_UNITS);
+        const query = `${title ? `${title}\n` : ''}${current[0].chunk_text.slice(0, SMOKE_QUERY_CHUNK_UNITS)}`;
         const vec = await embedQuery(query);
         const results = await engine.searchVector(vec, {
           limit: 10,
@@ -1185,7 +1205,7 @@ export async function applyEmbeddingMigration(
     ignoreEnvOverride?: boolean;
     /** Persist target model+dims to the file plane + reconfigure the gateway. */
     persistConfig?: (toModel: string, toDims: number, tx: BrainEngine) => void | Promise<void>;
-    assertOwned?: (tx?: BrainEngine) => Promise<void>;
+    assertOwned?: MigrationLeaseAssert;
   } = {},
 ): Promise<MigrationApplyResult> {
   const envWarning = detectEnvOverride(plan.to_model, plan.to_dims);
@@ -1195,9 +1215,10 @@ export async function applyEmbeddingMigration(
 
   try {
     await opts.assertOwned?.();
-    await engine.transaction(async tx => { await opts.assertOwned?.(tx); await assertRetainedEmbeddingRebuildability(tx, plan.to_dims, plan.to_model, plan); });
+    await withMigrationLeaseTransaction(engine, opts.assertOwned,
+      tx => assertRetainedEmbeddingRebuildability(tx, plan.to_dims, plan.to_model, plan), { deadlockRetries: 3 });
     const readiness = await prepareEmbeddingProjections(engine, { repair: true, assertOwned: opts.assertOwned });
-    if (readiness.blocked) return { status: 'failed', reason: `projection_blocked: ${readiness.blocked} page(s) remain; no embedding invalidation performed. Canonical projection recovery may have made durable progress. Inspect blockers before retrying: archived sources require deliberate gbrain sources restore <id>; unsupported media requires its source importer. See docs/guides/embedding-migration.md#recovery.` };
+    if (readiness.blocked) return { status: 'failed', reason: `projection_blocked: ${readiness.blocked} page(s) remain; no embedding invalidation performed. Canonical projection recovery may have made durable progress. Inspect blockers before retrying: archived sources require deliberate gbrain sources restore <id>; image pages are counted by class in gbrain doctor --only text_projection_readiness --json (gbrain projections drain seals the sealable ones). See docs/guides/embedding-migration.md#recovery.` };
     await opts.assertOwned?.();
     // 1. State marker FIRST — a crash after any later step is resumable.
     //    Same-target re-apply PRESERVES the original started_at (set-if-
@@ -1239,8 +1260,7 @@ export async function applyEmbeddingMigration(
         { to_model: prior.state.to_model, to_dims: prior.state.to_dims, started_at: prior.state.started_at },
       ];
     }
-    await engine.transaction(async tx => {
-      await opts.assertOwned?.(tx);
+    await withMigrationLeaseTransaction(engine, opts.assertOwned, async tx => {
       await assertRetainedEmbeddingRebuildability(tx, plan.to_dims, plan.to_model, plan);
       await tx.setConfig(MIGRATION_STATE_KEY, JSON.stringify(state));
     });
@@ -1260,8 +1280,7 @@ export async function applyEmbeddingMigration(
       const pinned = await readDimPinnedWidths(engine);
       const stalePinned = pinned.filter((p) => schemaRebuildNeeded(p.dims, plan.to_dims));
       if (stalePinned.length > 0) {
-        await engine.transaction(async (tx) => {
-          await opts.assertOwned?.(tx);
+        await withMigrationLeaseTransaction(engine, opts.assertOwned, async (tx) => {
           await assertRetainedEmbeddingRebuildability(tx, plan.to_dims, plan.to_model, plan);
           const stalePinned = (await readDimPinnedWidths(tx)).filter(p => schemaRebuildNeeded(p.dims, plan.to_dims));
           const ann: DeferredAnnIndex[] = [];
@@ -1287,8 +1306,7 @@ export async function applyEmbeddingMigration(
     //    vectors are invisible to every stale selector, so NULLing them
     //    would be permanent loss.
     //
-    const invalidated = await engine.transaction(async tx => {
-      await opts.assertOwned?.(tx);
+    const invalidated = await withMigrationLeaseTransaction(engine, opts.assertOwned, async tx => {
       await assertRetainedEmbeddingRebuildability(tx, plan.to_dims, plan.to_model, plan);
       await clearFalseStampedSignatures(tx, plan.to_model, plan.to_dims);
       return invalidateStaleSignatureEmbeddingsGuarded(tx, {
@@ -1298,8 +1316,7 @@ export async function applyEmbeddingMigration(
     });
 
     let cacheCleared = 0;
-    await engine.transaction(async (tx) => {
-      await opts.assertOwned?.(tx);
+    await withMigrationLeaseTransaction(engine, opts.assertOwned, async (tx) => {
       const clearCompanions = await assertRetainedEmbeddingRebuildability(tx, plan.to_dims, plan.to_model, plan);
       const stores = await readPrimaryEmbeddingStores(tx);
       if (clearCompanions) {

@@ -4,10 +4,11 @@ import { PostgresEngine } from '../src/core/postgres-engine.ts';
 import { ATOM_PROCESSING_KEY, atomProcessingWriter, emptyAtomProcessing } from '../src/core/cycle/atom-processing.ts';
 import { runPhaseExtractAtoms } from '../src/core/cycle/extract-atoms.ts';
 import type { ChatResult } from '../src/core/ai/gateway.ts';
+import { contentHash } from '../src/core/utils.ts';
 
 let engine: PGLiteEngine | PostgresEngine;
 beforeAll(async () => {
-  const postgresUrl = process.env.GBRAIN_ATOM_TEST_POSTGRES;
+  const postgresUrl = process.env.GBRAIN_TEST_ATOM_POSTGRES;
   if (postgresUrl) {
     const uri = new URL(postgresUrl);
     if (uri.hostname !== '127.0.0.1' || !uri.pathname.startsWith('/gbrain_test')) throw Error('Disposable test DB required');
@@ -27,7 +28,10 @@ const page = { slug: 'notes/probe', content: 'Enterprise buyers require working 
 
 describe('actual page processing outcomes', () => {
   test('successful empty extraction is completed, not failed or stalled', async () => {
-    await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [page], _chat: chat('[]') });
+    await engine.putPage(page.slug, { type: 'note', title: 'Probe', compiled_truth: page.content, timeline: '' });
+    const pinned = { ...page, contentHash: (await engine.getPage(page.slug))!.content_hash! };
+    const result = await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [pinned], _chat: chat('[]') });
+    expect(result.details?.failures).toEqual([]);
     expect(await state()).toMatchObject({ eligible_dispatches: 1, attempted_scans: 1,
       completed_scans: 1, empty_scans: 1, failed_scans: 0, published_atoms: 0 });
   });
@@ -43,8 +47,14 @@ describe('actual page processing outcomes', () => {
     // hash, body); completion is only recorded against that identity.
     const pinned = { ...page, contentHash: (await engine.getPage(page.slug))!.content_hash! };
     const answer = JSON.stringify([{ title: 'Prototype requirement', atom_type: 'insight', body: page.content, source_quote: page.content }]);
-    await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [pinned], _chat: chat(answer) });
+    const result = await runPhaseExtractAtoms(engine, { _transcripts: [], _pages: [pinned], _chat: chat(answer) });
+    expect(result.details?.failures).toEqual([]);
     expect(await state()).toMatchObject({ completed_scans: 1, empty_scans: 0, published_atoms: 1 });
+    const [atomRef] = await engine.executeRaw<{ slug: string }>("SELECT slug FROM pages WHERE source_id='default' AND type='atom' AND deleted_at IS NULL");
+    const atom = await engine.getPage(atomRef!.slug, { sourceId: 'default' });
+    expect(atom!.frontmatter.source_hash).toBe(pinned.contentHash.slice(0, 16));
+    expect(atom!.content_hash).toBe(contentHash({ ...atom!, content_hash: undefined }));
+    expect(atom!.text_projection_revision).toBe(atom!.knowledge_revision);
     await runPhaseExtractAtoms(engine, { _pages: [], _transcripts: [{ filePath: '/fixture/transcript.txt',
       content: page.content, contentHash: '1234567890abcdef' }], _chat: chat('[]') });
     expect(await state()).toMatchObject({ attempted_scans: 1, completed_scans: 1, published_atoms: 1 });

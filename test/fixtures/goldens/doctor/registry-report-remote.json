@@ -138,6 +138,10 @@
         "name": "reranker_health"
       },
       {
+        "category": "ops",
+        "name": "chat_fallback_chain"
+      },
+      {
         "category": "brain",
         "name": "graph_signals_coverage"
       },
@@ -223,11 +227,23 @@
       },
       {
         "category": "brain",
+        "name": "fence_integrity"
+      },
+      {
+        "category": "brain",
         "name": "unbound_source"
       },
       {
         "category": "ops",
         "name": "persistence_capacity"
+      },
+      {
+        "category": "ops",
+        "name": "persistence_compaction"
+      },
+      {
+        "category": "ops",
+        "name": "persistence_counter_drift"
       },
       {
         "category": "brain",
@@ -242,6 +258,10 @@
         "name": "writer_version"
       },
       {
+        "category": "ops",
+        "name": "segmented_storage"
+      },
+      {
         "category": "brain",
         "name": "self_capture"
       },
@@ -251,7 +271,15 @@
       },
       {
         "category": "ops",
+        "name": "keyword_plan"
+      },
+      {
+        "category": "ops",
         "name": "stale_embedding_effects"
+      },
+      {
+        "category": "brain",
+        "name": "fact_bulk_dates"
       }
     ],
     "early_returns_after": [

@@ -1,5 +1,7 @@
 import { MARKDOWN_CHUNKER_VERSION } from '../core/chunkers/recursive.ts';
 
+export const REINDEX_LAST_RETRIEVED_SQL = "GREATEST(pages.last_retrieved_at, (SELECT pr.last_retrieved_at FROM page_retrievals pr WHERE pr.page_id = pages.id))";
+
 export interface ReindexScope {
   type: string | null;
   sourceId: string | null;
@@ -60,7 +62,7 @@ export function buildReindexScopeSql(scope: ReindexScope, noEmbed: boolean): Rei
     clauses.push(`(slug = ${p} OR slug LIKE ${descendants} ESCAPE '!')`);
   }
   if (scope.retrievedSince) {
-    clauses.push(`last_retrieved_at >= ${bind(`${scope.retrievedSince}T00:00:00.000Z`)}::timestamptz`);
+    clauses.push(`${REINDEX_LAST_RETRIEVED_SQL} >= ${bind(`${scope.retrievedSince}T00:00:00.000Z`)}::timestamptz`);
   }
   return { where: clauses.join('\n          AND '), params };
 }
