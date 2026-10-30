@@ -80,6 +80,9 @@ for (const backend of testBackends()) {
         const init = await cli(['init', '--pglite', '--no-embedding']);
         expect(init.code, init.stderr).toBe(0);
       }
+      // Only this disposable fixture opts into the segmented CLI write paths.
+      const segmented = await cli(['config', 'set', 'pages.segmented_storage', 'on']);
+      expect(segmented.code, segmented.stderr).toBe(0);
     }, 180_000);
     afterAll(async () => {
       await close?.();

@@ -12,7 +12,8 @@
  *    backfill counts segmented pages as eligible; a remote write's `links`
  *    effect on a segmented page commits its mention edges, read block by
  *    block; the facts backstop queues for a segmented page and a facts-absorb
- *    job extracts it from its segments (the head, then the appended tail); a
+ *    job extracts a new page from its segments; this fork explicitly refuses a
+ *    later segmented-snapshot delta before inference or publication; a
  *    trusted put_page (auto_link on) publishes a segmented page with its derived
  *    links and temporal evidence, edit_page edits one, and a put_page that
  *    shrinks one to inline versions the segmented body before demoting it;
@@ -196,7 +197,7 @@ describe('Life Chronicle on segmented pages', () => {
   test('backfill counts a segmented chronicle page as eligible', async () => {
     for (const engine of engines) {
       await importFromContent(engine, 'meetings/segmented-review', meeting('Review'), { sourceId: 'default', noEmbed: true });
-      const result = await runChronicleBackfill(engine, { dryRun: true, sourceId: 'default' });
+      const result = await runChronicleBackfill(engine, { dryRun: true, sourceId: 'default', model: 'anthropic:claude-sonnet-4-6' });
       expect(result.skipped).not.toHaveProperty('too_short');
       expect(result.eligible).toBe(1);
     }
@@ -229,7 +230,7 @@ describe('page-write effects on segmented pages', () => {
     }
   }, 300_000);
 
-  test('a facts-absorb job extracts a segmented page from its head, then from the text appended since', async () => {
+  test('a facts-absorb job extracts a new segmented page, then refuses a segmented prior snapshot without side effects', async () => {
     const prompts: string[] = [];
     __setChatTransportForTests(async (opts: ChatOpts): Promise<ChatResult> => {
       prompts.push(JSON.stringify(opts.messages));
@@ -250,9 +251,23 @@ describe('page-write effects on segmented pages', () => {
         prompts.length = 0;
         await importFromContent(engine, 'notes/segmented-absorb', `${note('Absorb')}\nAppended note: zebra-appended-marker reviewed the launch.\n`, { sourceId: 'default', noEmbed: true });
         expect((await storage(engine, 'notes/segmented-absorb')).body_storage).toBe('segmented');
-        await run();
-        expect(prompts.some(p => p.includes('zebra-appended-marker'))).toBe(true);
-        expect(prompts.some(p => p.includes('See [[people/alice-example]]'))).toBe(false);
+        await engine.executeRaw(`INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, source, source_markdown_slug, row_num, confidence)
+          VALUES ('default', 'notes/segmented-absorb', 'Existing reviewed fact must survive the refusal.', 'fact', 'world', 'medium',
+            'fixture:segmented-refusal', 'notes/segmented-absorb', 900001, 1)`);
+        const state = async () => {
+          const rows: Record<string, unknown> = {};
+          for (const table of ['facts', 'persistence_requests', 'persistence_effects', 'page_extraction_state', 'ingest_log', 'write_gate_receipts', 'chat_usage_log']) {
+            rows[table] = (await engine.executeRaw<{ row: unknown }>(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).map(row => row.row);
+          }
+          const page = await engine.executeRaw<{ knowledge_revision: string; content_hash: string }>(
+            "SELECT knowledge_revision, content_hash FROM pages WHERE source_id='default' AND slug='notes/segmented-absorb'");
+          return { page: page.map(row => ({ ...row })), rows };
+        };
+        const before = await state();
+        expect(before.rows.facts).toHaveLength(1);
+        await expect(run()).rejects.toMatchObject({ code: 'page_body_segmented' });
+        expect(prompts).toEqual([]);
+        expect(await state()).toEqual(before);
       }
     } finally {
       __setChatTransportForTests(null);

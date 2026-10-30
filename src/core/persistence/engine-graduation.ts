@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import type { BrainEngine } from '../engine.ts';
 import type { EngineConfig } from '../types.ts';
 import { configDir, loadConfigFileOnly, saveConfig, type GBrainConfig } from '../config.ts';
+import { FACTS_DEFAULT_VISIBILITY_KEY, WORLD_VISIBILITY } from '../facts/visibility.ts';
 import { liveServeOwner } from '../exclusive-fix.ts';
 import { opError, type OperationError } from '../ops/contract.ts';
 import { acquireKernelLockOnly, inspectLockHolder, PgliteBusyError, peekLock, releaseLock, type LockHandle } from '../pglite-lock.ts';
@@ -428,8 +429,10 @@ function probeTargetEmpty(probe: TargetProbe): boolean { return probe.empty; }
 const SEED_CONFIG_KEYS = new Set(['chunk_strategy', 'embedding_dimensions', 'embedding_model', 'engine', 'version', 'graduation.deferred_indexes',
   TRUST_BACKFILL_COMPLETED_KEY, WRITE_GATE_SCAN_BASELINE_KEY]);
 async function userConfigKeys(main: BrainEngine): Promise<string[]> {
-  const rows = await main.executeRaw<{ key: string }>('SELECT key FROM config ORDER BY key COLLATE "C"');
-  return rows.map(r => r.key).filter(key => !SEED_CONFIG_KEYS.has(key));
+  const rows = await main.executeRaw<{ key: string; fork_seed: boolean }>(
+    'SELECT key, key = $1 AND value = $2 AS fork_seed FROM config ORDER BY key COLLATE "C"', [FACTS_DEFAULT_VISIBILITY_KEY, WORLD_VISIBILITY]);
+  // Fork migrations v147/v152 seed this exact policy value; any other value remains target data.
+  return rows.filter(row => !SEED_CONFIG_KEYS.has(row.key) && row.fork_seed !== true).map(row => row.key);
 }
 
 function planArgvFor(input: Pick<PlanInputs, 'invokedAs' | 'routes'>): string[] {

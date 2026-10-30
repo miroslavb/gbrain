@@ -82,7 +82,7 @@ import {
 import { writeReceipt } from '../extract/receipt-writer.ts';
 import { fenceUnfencedFacts, planUnfencedFacts } from '../facts/unfenced-facts.ts';
 import { classifyRunStop, upsertExtractRollup } from '../extract/rollup-writer.ts';
-import { factsFenceView } from '../facts-fence.ts';
+import { factsFenceView, projectFactsFenceWorldOnly } from '../facts-fence.ts';
 import { fenceReadOf, publishFenceGeneration, readFenceBlocks, FACT_FENCE_KIND, type FenceRead } from '../generations/fence.ts';
 import type { BodyStorage } from '../page-body/types.ts';
 import { factFenceItems, factPreimages, factRetireItem } from '../generations/adapters/fact-rows.ts';
@@ -256,8 +256,9 @@ async function canonicalCacheState(
   try {
     if (isSegmentedPage(cached)) return await segmentedBodyMatchesFile(engine, cached, target.filePath);
     const canonical = parseMarkdown(readFileSync(target.filePath, 'utf-8'), target.filePath);
-    return canonical.compiled_truth === (cached.compiled_truth ?? '').trim()
-      && canonical.timeline === (cached.timeline ?? '').trim()
+    // Compare the same legacy-visibility view as rowToPage; withdrawals still differ and refuse cleanup.
+    return projectFactsFenceWorldOnly(canonical.compiled_truth) === (cached.compiled_truth ?? '').trim()
+      && projectFactsFenceWorldOnly(canonical.timeline) === (cached.timeline ?? '').trim()
       ? 'fresh'
       : 'stale';
   } catch {

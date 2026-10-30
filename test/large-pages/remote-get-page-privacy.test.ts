@@ -25,6 +25,8 @@ import { isolatedPersistencePostgres } from '../helpers/persistence-postgres.ts'
 import { testBackends } from '../helpers/test-backends.ts';
 import { mulberry32 } from '../helpers/seeded-random.ts';
 import { PRIVATE, PUBLIC, crossingFacts, importSegmented, pageContent, privacyText, privateTokensIn, seedLedger } from '../helpers/segmented-privacy-fixture.ts';
+import { materializeSegmentedBody } from '../../src/core/page-body/ingest.ts';
+import { FACTS_FENCE_BEGIN, FACTS_FENCE_END } from '../../src/core/facts-fence.ts';
 
 const getPage = operations.find(o => o.name === 'get_page')!;
 let engine: BrainEngine;
@@ -34,8 +36,13 @@ const ctx = (remote: boolean): OperationContext => ({ engine, config: {} as GBra
     scopes: ['read'], sourceId: 'default', allowedSources: ['default'] } } : {}) } as unknown as OperationContext);
 const get = async (params: Record<string, unknown>, remote = true) => await getPage.handler(ctx(remote), params) as Record<string, any>;
 
-/** Every remote get_page shape of `slug`: none may hold a private token, and the windows together show every public one. */
-async function expectNoLeak(slug: string, ledger = false): Promise<Record<string, any>> {
+// Fork policy: legacy fact visibility is world-only. The shared upstream fixture's
+// renderer already writes these two fact sentinels as world; they are not secrets
+// on this host. Takes, credentials, tail and all ledger exclusions remain protected.
+const HOST_SHARED_FACT_TOKENS = new Set<string>([PRIVATE.privateFact, PRIVATE.crossing]);
+
+/** Every remote shape preserves host privacy, and complete walks also prove shared facts are readable. */
+async function expectNoLeak(slug: string, ledger = false, sharedFacts: readonly string[] = [PRIVATE.privateFact]): Promise<Record<string, any>> {
   const responses: Array<Record<string, any>> = [];
   const windowTexts: string[] = [];
   const none = await get({ slug, body: 'none' });
@@ -67,8 +74,12 @@ async function expectNoLeak(slug: string, ledger = false): Promise<Record<string
       expect(Buffer.byteLength(whole)).toBe(total);
     }
   }
-  for (const [i, r] of responses.entries()) expect({ i, leaked: privateTokensIn(JSON.stringify(r), { ledger }) }).toEqual({ i, leaked: [] });
+  for (const [i, r] of responses.entries()) {
+    const leaked = privateTokensIn(JSON.stringify(r), { ledger }).filter(token => !HOST_SHARED_FACT_TOKENS.has(token));
+    expect({ i, leaked }).toEqual({ i, leaked: [] });
+  }
   for (const text of windowTexts) for (const token of Object.values(PUBLIC)) expect(text).toContain(token);
+  for (const text of windowTexts) for (const token of sharedFacts) expect(text).toContain(token);
   return none;
 }
 
@@ -111,6 +122,21 @@ for (const kind of testBackends()) {
       expect(refusal!.message).not.toContain(String(local.size.body_bytes));
       const localRefusal = await get({ slug, body: 'full' }, false).then(() => null, (e: { message: string }) => e);
       expect(localRefusal!.message).toContain(`its ${local.size.body_bytes}-byte body`);
+    }, 300_000);
+
+    test('raw legacy private facts are host-shared in both complete views, while source grants still refuse access', async () => {
+      const slug = 'notes/get-legacy-private';
+      const claim = 'zzlegacyrawfact launch checklist is ready';
+      // Do not use renderFactsTable here: it canonicalizes private to world.
+      const legacy = `${FACTS_FENCE_BEGIN}\n\n| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |\n`
+        + `|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|\n`
+        + `| 900001 | ${claim} | fact | 1 | private | medium | 2024-01-01 | | fixture | |\n${FACTS_FENCE_END}\n`;
+      const pageId = await importSegmented(engine, slug, pageContent(legacy + privacyText(mulberry32(211), 1_300_000)));
+      const raw = await materializeSegmentedBody(engine, pageId, 'default');
+      expect(raw.compiled_truth).toContain(`| ${claim} | fact | 1 | private |`);
+      await expectNoLeak(slug, false, [PRIVATE.privateFact, claim]);
+      await expect(get({ slug, source_id: 'outside-grant', body: 'window', view: 'markdown' }))
+        .rejects.toMatchObject({ code: 'permission_denied' });
     }, 300_000);
 
     test('withdrawn, purged and held rows stay hidden once the ledger records them', async () => {

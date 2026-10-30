@@ -105,6 +105,8 @@ for (const kind of testBackends()) {
     beforeAll(async () => {
       if (kind === 'postgres') ({ engine, close } = await isolatedPersistencePostgres(process.env.DATABASE_URL!));
       else { engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema(); close = () => engine.disconnect(); }
+      // This suite exercises the opt-in segmented writer; the fork default stays off.
+      await engine.setConfig('pages.segmented_storage', 'on');
       await engine.executeRaw(`INSERT INTO oauth_clients(client_id,client_secret_hash,client_name,scope,source_id)
         VALUES('upload-big','fixture-hash','upload-client','read write','default') ON CONFLICT (client_id) DO NOTHING`);
     }, 120_000);

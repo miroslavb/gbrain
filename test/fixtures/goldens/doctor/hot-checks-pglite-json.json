@@ -9,13 +9,13 @@
       ],
       "exit_code": 1,
       "report": {
-        "brain_checks_score": 45,
+        "brain_checks_score": 40,
         "budget_ms": "<volatile>",
         "capped_by": [
           "embeddings_disabled"
         ],
         "category_scores": {
-          "brain": 45,
+          "brain": 40,
           "meta": 95,
           "ops": 100,
           "skill": 95
@@ -198,7 +198,7 @@
               "audience_reasons": [
                 "no shared declaration; 0 non-automation client(s) active in 30d"
               ],
-              "backstop_visibility": "private",
+              "backstop_visibility": "world",
               "capture_lanes": {
                 "compact": "extract",
                 "session_end": "extract",
@@ -313,7 +313,7 @@
             "category": "brain",
             "details": {
               "kinds": [],
-              "schema_version": 1
+              "schema_version": 2
             },
             "elapsed_ms": "<volatile>",
             "message": "no extractions in last 7 days",
@@ -332,7 +332,7 @@
             "details": {
               "backlog": 0,
               "known_approximation": "page backlog only; transcript corpus not counted",
-              "pack_declares_phase": false
+              "pack_declares_phase": true
             },
             "elapsed_ms": "<volatile>",
             "message": "no pages awaiting atom extraction",
@@ -512,18 +512,18 @@
                     "days_to_exhaustion": null,
                     "exhaustion_date": null,
                     "limit": 68719476736,
-                    "max_day_7d": 197727,
+                    "max_day_7d": 197733,
                     "net_per_day_7d": 58864,
                     "pct": 0,
-                    "per_day_7d": 197727,
-                    "reclaimable_bytes": 138863,
+                    "per_day_7d": 197733,
+                    "reclaimable_bytes": 138869,
                     "recommended_limit": 137438953472,
                     "resource": "terminal_bytes",
                     "scope": "brain",
                     "spike_day": null,
                     "status": "ok",
                     "under_reserved_receipts": 0,
-                    "used": 197727,
+                    "used": 197733,
                     "window_days": 1
                   },
                   {
@@ -549,18 +549,18 @@
                     "days_to_exhaustion": null,
                     "exhaustion_date": null,
                     "limit": 17179869184,
-                    "max_day_7d": 197727,
+                    "max_day_7d": 197733,
                     "net_per_day_7d": 58864,
                     "pct": 0,
-                    "per_day_7d": 197727,
-                    "reclaimable_bytes": 138863,
+                    "per_day_7d": 197733,
+                    "reclaimable_bytes": 138869,
                     "recommended_limit": 34359738368,
                     "resource": "terminal_bytes",
                     "scope": "principal:local_cli:<uuid>",
                     "spike_day": null,
                     "status": "ok",
                     "under_reserved_receipts": 0,
-                    "used": 197727,
+                    "used": 197733,
                     "window_days": 1
                   }
                 ],
@@ -1123,7 +1123,7 @@
           {
             "category": "ops",
             "elapsed_ms": "<volatile>",
-            "message": "Every gbrain function that pins a search_path ends it with pg_temp",
+            "message": "No known gbrain function has a missing or legacy search_path",
             "name": "function_search_path",
             "status": "ok"
           },
@@ -1137,7 +1137,7 @@
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "1388 column(s) verified against live schema",
+            "message": "1403 column(s) verified against live schema",
             "name": "schema_columns",
             "status": "ok"
           },
@@ -1352,9 +1352,76 @@
               },
               "why": "The plan lists which steps raise each score component, what they cost and the reachable maximum; it changes nothing."
             },
-            "message": "Brain score 20/100 (embed 0/35, links 0/25, timeline density (entity and event pages) 10/15, orphans 0/15, dead-links 10/10)",
+            "message": "Brain score 25/100 (embed 0/35, curated links 0/25, curated timeline 15/15, curated non-islands 0/15, dead-links 10/10)",
             "name": "brain_score",
             "status": "warn"
+          },
+          {
+            "category": "brain",
+            "details": {
+              "curated_excluded_pages": 9,
+              "curated_islands": 2,
+              "curated_link_endpoints": 0,
+              "curated_no_inbound": 2,
+              "curated_pages": 2,
+              "curated_timeline_pages": 2,
+              "session_islands": 0,
+              "session_pages": 0,
+              "session_parents": 0,
+              "session_parents_entity_eligible": 0,
+              "session_parents_entity_hinted": 0,
+              "session_parents_entity_linked": 0,
+              "typed_curated_pages": 11
+            },
+            "elapsed_ms": "<volatile>",
+            "fix_unavailable_reason": "unstructured",
+            "message": "Canonical curated graph: 2/2 islands (100%), 2/2 without inbound links (100%); 9/11 typed generated/raw page(s) excluded.",
+            "name": "curated_graph_health",
+            "status": "warn"
+          },
+          {
+            "category": "brain",
+            "details": {
+              "curated_excluded_pages": 9,
+              "curated_islands": 2,
+              "curated_link_endpoints": 0,
+              "curated_no_inbound": 2,
+              "curated_pages": 2,
+              "curated_timeline_pages": 2,
+              "session_islands": 0,
+              "session_pages": 0,
+              "session_parents": 0,
+              "session_parents_entity_eligible": 0,
+              "session_parents_entity_hinted": 0,
+              "session_parents_entity_linked": 0,
+              "typed_curated_pages": 11
+            },
+            "elapsed_ms": "<volatile>",
+            "message": "Session archive: 0/0 islands (0%); excluded from brain-score graph denominators.",
+            "name": "session_archive_isolation",
+            "status": "ok"
+          },
+          {
+            "category": "brain",
+            "details": {
+              "curated_excluded_pages": 9,
+              "curated_islands": 2,
+              "curated_link_endpoints": 0,
+              "curated_no_inbound": 2,
+              "curated_pages": 2,
+              "curated_timeline_pages": 2,
+              "session_islands": 0,
+              "session_pages": 0,
+              "session_parents": 0,
+              "session_parents_entity_eligible": 0,
+              "session_parents_entity_hinted": 0,
+              "session_parents_entity_linked": 0,
+              "typed_curated_pages": 11
+            },
+            "elapsed_ms": "<volatile>",
+            "message": "Eligible parent-session curated links: 0/0 (0%); 0 raw parent session(s), 0 with independently resolvable project metadata.",
+            "name": "parent_session_entity_coverage",
+            "status": "ok"
           },
           {
             "category": "brain",
@@ -1794,15 +1861,46 @@
               "blockers": [],
               "configured": "unset",
               "docs": "docs/guides/memory-boundaries.md#segmented-page-storage",
-              "effective": "on",
+              "effective": "off",
               "floor": "<segmented-writer-floor>",
-              "max_bytes": 134217728,
+              "max_bytes": 25165824,
               "truncated": false,
               "window_days": 7
             },
             "elapsed_ms": "<volatile>",
-            "message": "Segmented page storage is on: pages over 1 MiB are stored in segments, up to 134217728 bytes on this PGLite brain.",
+            "fix": {
+              "actor": "user",
+              "argv": [
+                "gbrain",
+                "config",
+                "set",
+                "pages.segmented_storage",
+                "on",
+                "--brain",
+                "host"
+              ],
+              "command": "gbrain config set pages.segmented_storage on --brain host",
+              "consent": [],
+              "docs": "https://github.com/garrytan/gbrain/blob/master/docs/guides/memory-boundaries.md#segmented-page-storage",
+              "next": "tell_user_to_run",
+              "requires_exclusive": false,
+              "verify": {
+                "argv": [
+                  "gbrain",
+                  "doctor",
+                  "--only",
+                  "segmented_storage",
+                  "--json",
+                  "--brain",
+                  "host"
+                ]
+              },
+              "why": "Explicitly opts into segmented storage, subject to the writer compatibility gate."
+            },
+            "message": "Segmented page storage is off by default on this host fork (pages.segmented_storage is unset): pages over 1 MiB are stored inline up to 24 MiB; pages already stored in segments stay readable.",
             "name": "segmented_storage",
+            "readiness_state": "disabled_by_choice",
+            "severity": "info",
             "status": "ok"
           },
           {
@@ -2210,6 +2308,15 @@
           },
           {
             "category": "brain",
+            "details": {
+              "accepted": 0,
+              "accepted_by_reason": {},
+              "actionable": 0,
+              "active_embedding_column": "embedding",
+              "checked": 0,
+              "inventory": [],
+              "total": 0
+            },
             "elapsed_ms": "<volatile>",
             "message": "No flagged pages",
             "name": "flagged_pages",
@@ -2713,7 +2820,7 @@
           {
             "category": "brain",
             "elapsed_ms": "<volatile>",
-            "message": "All code-page chunks carry symbol metadata",
+            "message": "All active code-page chunks carry language metadata; verify known definitions separately",
             "name": "code_chunk_metadata",
             "status": "ok"
           },
@@ -3801,9 +3908,9 @@
                   "pages": 19,
                   "source_id": "notes",
                   "states": {
-                    "database_ahead": 4,
+                    "database_ahead": 5,
                     "declared_database_only": 0,
-                    "equal": 11,
+                    "equal": 10,
                     "git_ahead": 0,
                     "undeclared_database_only": 0,
                     "unparseable": 4,
@@ -3823,7 +3930,7 @@
               "timeout_ms": "<volatile>"
             },
             "elapsed_ms": "<volatile>",
-            "message": "Informational, nothing to do: the database compared with the commit at HEAD, per source with a Git checkout. notes: 11 equal, 4 database_ahead, 4 unparseable. Page detail: gbrain sources git-gap <source-id>.",
+            "message": "Informational, nothing to do: the database compared with the commit at HEAD, per source with a Git checkout. notes: 10 equal, 5 database_ahead, 4 unparseable. Page detail: gbrain sources git-gap <source-id>.",
             "name": "db_ahead_of_git",
             "status": "ok"
           },
@@ -4162,7 +4269,8 @@
               "prefixes": [
                 "test/",
                 "attachments/",
-                ".raw/"
+                ".raw/",
+                "docs/inbox/"
               ]
             },
             "elapsed_ms": "<volatile>",
@@ -4173,7 +4281,7 @@
           {
             "category": "brain",
             "elapsed_ms": "<volatile>",
-            "message": "No retrieval-affecting files changed in working tree.",
+            "message": "<working-tree-retrieval-drift>",
             "name": "eval_drift",
             "status": "ok"
           },
@@ -4449,7 +4557,7 @@
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "Active pack gbrain-base-v2@1.5.0+4604112a is current (no successor declared)",
+            "message": "Active pack gbrain-base-v2@1.5.1+6f6bd002 is current (no successor declared)",
             "name": "pack_upgrade_available",
             "status": "ok"
           },
@@ -4472,7 +4580,7 @@
         "db_url_source": null,
         "elapsed_ms": "<volatile>",
         "engine": "pglite",
-        "health_score": 35,
+        "health_score": 30,
         "schema_version": 2,
         "status": "unhealthy",
         "tier": "standard",
@@ -4540,8 +4648,14 @@
               },
               "why": "The plan lists which steps raise each score component, what they cost and the reachable maximum; it changes nothing."
             },
-            "fix": "Brain score 20/100 (embed 0/35, links 0/25, timeline density (entity and event pages) 10/15, orphans 0/15, dead-links 10/10)",
+            "fix": "Brain score 25/100 (embed 0/35, curated links 0/25, curated timeline 15/15, curated non-islands 0/15, dead-links 10/10)",
             "name": "brain_score",
+            "status": "warn",
+            "tier": "symptom"
+          },
+          {
+            "fix": "Canonical curated graph: 2/2 islands (100%), 2/2 without inbound links (100%); 9/11 typed generated/raw page(s) excluded.",
+            "name": "curated_graph_health",
             "status": "warn",
             "tier": "symptom"
           },
@@ -4790,13 +4904,13 @@
       ],
       "exit_code": 1,
       "report": {
-        "brain_checks_score": 45,
+        "brain_checks_score": 40,
         "budget_ms": "<volatile>",
         "capped_by": [
           "embeddings_disabled"
         ],
         "category_scores": {
-          "brain": 45,
+          "brain": 40,
           "meta": 95,
           "ops": 100,
           "skill": 95
@@ -4979,7 +5093,7 @@
               "audience_reasons": [
                 "no shared declaration; 0 non-automation client(s) active in 30d"
               ],
-              "backstop_visibility": "private",
+              "backstop_visibility": "world",
               "capture_lanes": {
                 "compact": "extract",
                 "session_end": "extract",
@@ -5094,7 +5208,7 @@
             "category": "brain",
             "details": {
               "kinds": [],
-              "schema_version": 1
+              "schema_version": 2
             },
             "elapsed_ms": "<volatile>",
             "message": "no extractions in last 7 days",
@@ -5113,7 +5227,7 @@
             "details": {
               "backlog": 0,
               "known_approximation": "page backlog only; transcript corpus not counted",
-              "pack_declares_phase": false
+              "pack_declares_phase": true
             },
             "elapsed_ms": "<volatile>",
             "message": "no pages awaiting atom extraction",
@@ -5293,18 +5407,18 @@
                     "days_to_exhaustion": null,
                     "exhaustion_date": null,
                     "limit": 68719476736,
-                    "max_day_7d": 197727,
+                    "max_day_7d": 197733,
                     "net_per_day_7d": 58864,
                     "pct": 0,
-                    "per_day_7d": 197727,
-                    "reclaimable_bytes": 138863,
+                    "per_day_7d": 197733,
+                    "reclaimable_bytes": 138869,
                     "recommended_limit": 137438953472,
                     "resource": "terminal_bytes",
                     "scope": "brain",
                     "spike_day": null,
                     "status": "ok",
                     "under_reserved_receipts": 0,
-                    "used": 197727,
+                    "used": 197733,
                     "window_days": 1
                   },
                   {
@@ -5330,18 +5444,18 @@
                     "days_to_exhaustion": null,
                     "exhaustion_date": null,
                     "limit": 17179869184,
-                    "max_day_7d": 197727,
+                    "max_day_7d": 197733,
                     "net_per_day_7d": 58864,
                     "pct": 0,
-                    "per_day_7d": 197727,
-                    "reclaimable_bytes": 138863,
+                    "per_day_7d": 197733,
+                    "reclaimable_bytes": 138869,
                     "recommended_limit": 34359738368,
                     "resource": "terminal_bytes",
                     "scope": "principal:local_cli:<uuid>",
                     "spike_day": null,
                     "status": "ok",
                     "under_reserved_receipts": 0,
-                    "used": 197727,
+                    "used": 197733,
                     "window_days": 1
                   }
                 ],
@@ -5904,7 +6018,7 @@
           {
             "category": "ops",
             "elapsed_ms": "<volatile>",
-            "message": "Every gbrain function that pins a search_path ends it with pg_temp",
+            "message": "No known gbrain function has a missing or legacy search_path",
             "name": "function_search_path",
             "status": "ok"
           },
@@ -5918,7 +6032,7 @@
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "1388 column(s) verified against live schema",
+            "message": "1403 column(s) verified against live schema",
             "name": "schema_columns",
             "status": "ok"
           },
@@ -6133,9 +6247,76 @@
               },
               "why": "The plan lists which steps raise each score component, what they cost and the reachable maximum; it changes nothing."
             },
-            "message": "Brain score 20/100 (embed 0/35, links 0/25, timeline density (entity and event pages) 10/15, orphans 0/15, dead-links 10/10)",
+            "message": "Brain score 25/100 (embed 0/35, curated links 0/25, curated timeline 15/15, curated non-islands 0/15, dead-links 10/10)",
             "name": "brain_score",
             "status": "warn"
+          },
+          {
+            "category": "brain",
+            "details": {
+              "curated_excluded_pages": 9,
+              "curated_islands": 2,
+              "curated_link_endpoints": 0,
+              "curated_no_inbound": 2,
+              "curated_pages": 2,
+              "curated_timeline_pages": 2,
+              "session_islands": 0,
+              "session_pages": 0,
+              "session_parents": 0,
+              "session_parents_entity_eligible": 0,
+              "session_parents_entity_hinted": 0,
+              "session_parents_entity_linked": 0,
+              "typed_curated_pages": 11
+            },
+            "elapsed_ms": "<volatile>",
+            "fix_unavailable_reason": "unstructured",
+            "message": "Canonical curated graph: 2/2 islands (100%), 2/2 without inbound links (100%); 9/11 typed generated/raw page(s) excluded.",
+            "name": "curated_graph_health",
+            "status": "warn"
+          },
+          {
+            "category": "brain",
+            "details": {
+              "curated_excluded_pages": 9,
+              "curated_islands": 2,
+              "curated_link_endpoints": 0,
+              "curated_no_inbound": 2,
+              "curated_pages": 2,
+              "curated_timeline_pages": 2,
+              "session_islands": 0,
+              "session_pages": 0,
+              "session_parents": 0,
+              "session_parents_entity_eligible": 0,
+              "session_parents_entity_hinted": 0,
+              "session_parents_entity_linked": 0,
+              "typed_curated_pages": 11
+            },
+            "elapsed_ms": "<volatile>",
+            "message": "Session archive: 0/0 islands (0%); excluded from brain-score graph denominators.",
+            "name": "session_archive_isolation",
+            "status": "ok"
+          },
+          {
+            "category": "brain",
+            "details": {
+              "curated_excluded_pages": 9,
+              "curated_islands": 2,
+              "curated_link_endpoints": 0,
+              "curated_no_inbound": 2,
+              "curated_pages": 2,
+              "curated_timeline_pages": 2,
+              "session_islands": 0,
+              "session_pages": 0,
+              "session_parents": 0,
+              "session_parents_entity_eligible": 0,
+              "session_parents_entity_hinted": 0,
+              "session_parents_entity_linked": 0,
+              "typed_curated_pages": 11
+            },
+            "elapsed_ms": "<volatile>",
+            "message": "Eligible parent-session curated links: 0/0 (0%); 0 raw parent session(s), 0 with independently resolvable project metadata.",
+            "name": "parent_session_entity_coverage",
+            "status": "ok"
           },
           {
             "category": "brain",
@@ -6575,15 +6756,46 @@
               "blockers": [],
               "configured": "unset",
               "docs": "docs/guides/memory-boundaries.md#segmented-page-storage",
-              "effective": "on",
+              "effective": "off",
               "floor": "<segmented-writer-floor>",
-              "max_bytes": 134217728,
+              "max_bytes": 25165824,
               "truncated": false,
               "window_days": 7
             },
             "elapsed_ms": "<volatile>",
-            "message": "Segmented page storage is on: pages over 1 MiB are stored in segments, up to 134217728 bytes on this PGLite brain.",
+            "fix": {
+              "actor": "user",
+              "argv": [
+                "gbrain",
+                "config",
+                "set",
+                "pages.segmented_storage",
+                "on",
+                "--brain",
+                "host"
+              ],
+              "command": "gbrain config set pages.segmented_storage on --brain host",
+              "consent": [],
+              "docs": "https://github.com/garrytan/gbrain/blob/master/docs/guides/memory-boundaries.md#segmented-page-storage",
+              "next": "tell_user_to_run",
+              "requires_exclusive": false,
+              "verify": {
+                "argv": [
+                  "gbrain",
+                  "doctor",
+                  "--only",
+                  "segmented_storage",
+                  "--json",
+                  "--brain",
+                  "host"
+                ]
+              },
+              "why": "Explicitly opts into segmented storage, subject to the writer compatibility gate."
+            },
+            "message": "Segmented page storage is off by default on this host fork (pages.segmented_storage is unset): pages over 1 MiB are stored inline up to 24 MiB; pages already stored in segments stay readable.",
             "name": "segmented_storage",
+            "readiness_state": "disabled_by_choice",
+            "severity": "info",
             "status": "ok"
           },
           {
@@ -6991,6 +7203,15 @@
           },
           {
             "category": "brain",
+            "details": {
+              "accepted": 0,
+              "accepted_by_reason": {},
+              "actionable": 0,
+              "active_embedding_column": "embedding",
+              "checked": 0,
+              "inventory": [],
+              "total": 0
+            },
             "elapsed_ms": "<volatile>",
             "message": "No flagged pages",
             "name": "flagged_pages",
@@ -7494,7 +7715,7 @@
           {
             "category": "brain",
             "elapsed_ms": "<volatile>",
-            "message": "All code-page chunks carry symbol metadata",
+            "message": "All active code-page chunks carry language metadata; verify known definitions separately",
             "name": "code_chunk_metadata",
             "status": "ok"
           },
@@ -8582,9 +8803,9 @@
                   "pages": 19,
                   "source_id": "notes",
                   "states": {
-                    "database_ahead": 4,
+                    "database_ahead": 5,
                     "declared_database_only": 0,
-                    "equal": 11,
+                    "equal": 10,
                     "git_ahead": 0,
                     "undeclared_database_only": 0,
                     "unparseable": 4,
@@ -8604,7 +8825,7 @@
               "timeout_ms": "<volatile>"
             },
             "elapsed_ms": "<volatile>",
-            "message": "Informational, nothing to do: the database compared with the commit at HEAD, per source with a Git checkout. notes: 11 equal, 4 database_ahead, 4 unparseable. Page detail: gbrain sources git-gap <source-id>.",
+            "message": "Informational, nothing to do: the database compared with the commit at HEAD, per source with a Git checkout. notes: 10 equal, 5 database_ahead, 4 unparseable. Page detail: gbrain sources git-gap <source-id>.",
             "name": "db_ahead_of_git",
             "status": "ok"
           },
@@ -8943,7 +9164,8 @@
               "prefixes": [
                 "test/",
                 "attachments/",
-                ".raw/"
+                ".raw/",
+                "docs/inbox/"
               ]
             },
             "elapsed_ms": "<volatile>",
@@ -8954,7 +9176,7 @@
           {
             "category": "brain",
             "elapsed_ms": "<volatile>",
-            "message": "No retrieval-affecting files changed in working tree.",
+            "message": "<working-tree-retrieval-drift>",
             "name": "eval_drift",
             "status": "ok"
           },
@@ -9230,7 +9452,7 @@
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "Active pack gbrain-base-v2@1.5.0+4604112a is current (no successor declared)",
+            "message": "Active pack gbrain-base-v2@1.5.1+6f6bd002 is current (no successor declared)",
             "name": "pack_upgrade_available",
             "status": "ok"
           },
@@ -9253,7 +9475,7 @@
         "db_url_source": null,
         "elapsed_ms": "<volatile>",
         "engine": "pglite",
-        "health_score": 35,
+        "health_score": 30,
         "schema_version": 2,
         "status": "unhealthy",
         "tier": "standard",
@@ -9321,8 +9543,14 @@
               },
               "why": "The plan lists which steps raise each score component, what they cost and the reachable maximum; it changes nothing."
             },
-            "fix": "Brain score 20/100 (embed 0/35, links 0/25, timeline density (entity and event pages) 10/15, orphans 0/15, dead-links 10/10)",
+            "fix": "Brain score 25/100 (embed 0/35, curated links 0/25, curated timeline 15/15, curated non-islands 0/15, dead-links 10/10)",
             "name": "brain_score",
+            "status": "warn",
+            "tier": "symptom"
+          },
+          {
+            "fix": "Canonical curated graph: 2/2 islands (100%), 2/2 without inbound links (100%); 9/11 typed generated/raw page(s) excluded.",
+            "name": "curated_graph_health",
             "status": "warn",
             "tier": "symptom"
           },
