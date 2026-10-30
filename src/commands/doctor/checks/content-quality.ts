@@ -343,42 +343,51 @@ async function runQuarantine(ctx: DoctorContext): Promise<Check[]> {
     const rows = await engine.executeRaw<{
       slug: string; source_id: string; page_kind: string; chunk_count: number;
       missing_active_embeddings: number; embed_skip: boolean;
-      content_flag_reason: string | null; has_managed_facts_fence: boolean;
+      content_flag_reason: string | null; has_managed_facts_fence: boolean | null;
+      body_storage: 'inline' | 'segmented';
     }>(
-      `SELECT p.slug, p.source_id, p.page_kind,
+      `SELECT p.slug, p.source_id, p.page_kind, p.body_storage,
               COUNT(cc.id)::int AS chunk_count,
               COUNT(cc.id) FILTER (WHERE cc.${col} IS NULL)::int AS missing_active_embeddings,
               (p.frontmatter ? 'embed_skip') AS embed_skip,
               p.frontmatter->'content_flag'->>'reason' AS content_flag_reason,
-              (POSITION('<!--- gbrain:facts:begin -->' IN p.compiled_truth) > 0) AS has_managed_facts_fence
+              CASE WHEN p.body_storage = 'inline'
+                THEN POSITION('<!--- gbrain:facts:begin -->' IN p.compiled_truth) > 0
+                ELSE NULL END AS has_managed_facts_fence
          FROM pages p
          LEFT JOIN content_chunks cc ON cc.page_id = p.id AND ${chunkGenerationFilter('p', 'cc')}
         WHERE p.deleted_at IS NULL AND p.frontmatter ? 'content_flag'
-        GROUP BY p.id, p.slug, p.source_id, p.page_kind, p.frontmatter, p.compiled_truth
+        GROUP BY p.id, p.slug, p.source_id, p.page_kind, p.frontmatter, p.body_storage
         ORDER BY p.slug`,
     );
-    const classified = rows.map(row => ({ row, classification: classifyFlaggedPage(row) }));
+    // The managed-fence category needs the complete body. A segmented NULL is
+    // unknown, not evidence that no fence exists; keep these pages explicit in
+    // the inventory until this check can inspect their segments.
+    const skipped = rows.filter(row => row.body_storage === 'segmented');
+    const classified = rows.filter(row => row.body_storage === 'inline')
+      .map(row => ({ row, classification: classifyFlaggedPage({ ...row, has_managed_facts_fence: row.has_managed_facts_fence === true }) }));
     const actionable = classified.filter(item => !item.classification.accepted);
     const acceptedByReason = Object.fromEntries(
       [...new Set(classified.filter(i => i.classification.accepted).map(i => i.classification.reason))]
         .map(reason => [reason, classified.filter(i => i.classification.reason === reason).length]),
     );
-    checks.push({
+    checks.push(withSkippedSegmented({
       name: 'flagged_pages',
-      status: actionable.length > 0 ? 'warn' : 'ok',
+      status: actionable.length > 0 || skipped.length > 0 ? 'warn' : 'ok',
       message: actionable.length > 0
-        ? `${actionable.length}/${rows.length} flagged page(s) remain unclassified/actionable. Review with 'gbrain quarantine list --include-flagged'.`
-        : rows.length > 0
-          ? `${rows.length} flag marker(s) retained as retrieval warnings; all accepted by explicit operational category, 0 actionable.`
+        ? `${actionable.length}/${classified.length} checked flagged page(s) remain unclassified/actionable. Review with 'gbrain quarantine list --include-flagged'.`
+        : classified.length > 0
+          ? `${classified.length} checked flag marker(s) retained as retrieval warnings; all accepted by explicit operational category, 0 actionable.`
+          : skipped.length > 0 ? 'No flagged page could be classified.'
           : 'No flagged pages',
-      details: { total: rows.length, accepted: rows.length - actionable.length,
+      details: { total: rows.length, checked: classified.length, accepted: classified.length - actionable.length,
         actionable: actionable.length, accepted_by_reason: acceptedByReason,
         active_embedding_column: active.name,
-        inventory: classified.map(({ row, classification }) => ({ ...row, ...classification })) },
-    });
+        inventory: [...classified.map(({ row, classification }) => ({ ...row, ...classification })),
+          ...skipped.map(row => ({ ...row, accepted: false, reason: 'segmented_body_unclassified', skipped: true }))] },
+    }, skipped.length));
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    checks.push({ name: 'flagged_pages', status: 'ok', message: `Skipped (${msg})` });
+    checks.push(checkError('flagged_pages', 'classify flagged pages', err));
   }
 
   // issue #160: extraction quarantine lane review nudge.

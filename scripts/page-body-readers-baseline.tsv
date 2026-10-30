@@ -22,6 +22,7 @@ src/commands/core.ts	suggestCandidates	sql	INLINE
 src/commands/doctor/checks/calibration.ts	checkLinkResolutionOpportunity	field	LEAD	
 src/commands/doctor/checks/calibration.ts	checkLinkResolutionOpportunity	sql	LEAD	
 src/commands/doctor/checks/content-quality.ts	runContentSanity	sql	META	
+src/commands/doctor/checks/content-quality.ts	runQuarantine	sql	INLINE	managed-fence classifier reads inline bodies only under SQL CASE; segmented pages are explicitly skipped with skipped_segmented count, inventory reason and warn status
 src/commands/doctor/checks/data-integrity.ts	runMarkdownBody	sql	META	
 src/commands/doctor/checks/derived-visibility.ts	derivedVisibilityCheck	sql	NONE	not the page body: p.* in a CTE, only metadata columns read
 src/commands/doctor/checks/graph-health.ts	runGraphCoverage	field	NONE	not the page body: timeline count alias
@@ -104,6 +105,8 @@ src/core/core-memory.ts	applyCoreSensitivity	field	INLINE
 src/core/core-memory.ts	listCorePages	field	INLINE	
 src/core/core-memory.ts	listCorePages	sql	INLINE	
 src/core/core-memory.ts	renderCorePage	field	INLINE	
+src/core/cycle/atom-completion-receipt.ts	finalizeAtomCompletionReceipt	call:contentHash	INLINE	assertInlineBody precedes canonical completion hash; segmented outputs refuse before completion CAS; content_hash cannot substitute a hash of the changed receipt
+src/core/cycle/atom-completion-receipt.ts	finalizeAtomCompletionReceipt	sql	SEGW	assertInlineBody on pinned origin and outputs before publication; final CAS requires inline storage for both, preserving exact body/revision/source receipt; segmented input refuses
 src/core/cycle/chronicle.ts	discover	sql	STREAM	
 src/core/cycle/concept-publication.ts	composeConceptRepublication	call:serializeMarkdown	INLINE	
 src/core/cycle/concept-publication.ts	composeConceptRepublication	field	INLINE	
@@ -222,6 +225,9 @@ src/core/facts-fence.ts	factsFenceView	field	INLINE	inline arm; a segmented page
 src/core/facts/backstop.ts	runFactsBackstop	field	STREAM	
 src/core/facts/backstop.ts	runPipeline	field	STREAM	
 src/core/facts/conversation-window-extract.ts	regularPageVersionToken	field	STREAM	
+src/core/facts/delta.ts	readLastSnapshotBody	field	INLINE	assertInlineBody rejects segmented versions and refusal propagates rather than starting full extraction
+src/core/facts/delta.ts	readLastSnapshotBody	sql	INLINE	latest source-exact version projects body_storage alongside nullable body; assertInlineBody rejects segmented version before body is used; no NULL-to-empty fallback
+src/core/facts/delta.ts	readPriorBody	field	INLINE	assertInlineBody on the source-exact page before reading; page_body_segmented propagates instead of falling back to full extraction
 src/core/facts/drain.ts	estimateBacklogUsd	sql	META	
 src/core/facts/eligibility.ts	isFactsBackstopEligible	field	LEAD	
 src/core/facts/fence-fact-append.ts	prepareFenceFactAppend	call:serializePageToMarkdown	SEGW	assertInlineBody first
@@ -237,6 +243,9 @@ src/core/facts/file-body-guard.ts	storedBodyUnchanged	field	SEGW	compares the in
 src/core/facts/forget.ts	forgetFactInFence	call:contentHash	META	inline pages only
 src/core/facts/forget.ts	forgetFactInFence	call:refreshPageBody	SEGW	assertInlineBody first
 src/core/facts/forget.ts	forgetFactInFence	field	SEGW	assertInlineBody before the DB strike/mirror (best-effort: the withdrawal record stays authoritative)
+src/core/facts/page-projection.ts	factPageProjection	field	INLINE	parses the caller-supplied Markdown string into ParsedPage; no stored page read; projectFactPageBody separately locks and rejects segmented targets
+src/core/facts/page-projection.ts	projectFactPageBody	field	SEGW	body fields come from parsed Markdown; native assertInlineBody on locked stored target precedes transactional projection and refuses segmented replacement
+src/core/facts/page-projection.ts	projectFactPageBody	sql	SEGW	native origin guard plus stored-row FOR UPDATE and assertInlineBody; UPSERT also excludes segmented targets; refuses without publishing facts or overwriting segments
 src/core/facts/proposal-supersede.ts	acceptUnmanaged	field	SEGW	mirrorBody refuses a segmented page before the file publish
 src/core/facts/proposal-supersede.ts	mirrorBody	call:contentHash	META	inline pages only
 src/core/facts/proposal-supersede.ts	mirrorBody	call:refreshPageBody	SEGW	assertInlineBody first
@@ -388,7 +397,6 @@ src/core/page-snapshot-batch.ts	readPageSnapshotsBatch	field	STREAM	same as read
 src/core/page-snapshot-batch.ts	readPageSnapshotsBatch	sql	STREAM	p.* feeds rowToPage; the byte budget counts a segmented row as 0 (no body shipped); fingerprint over a NULL body is empty
 src/core/page-state/credential-reseal.ts	PENDING	sql	STREAM	regex over NULL is false: segmented pages postdate the v189 unseal and are chunked by the credential-safe segment chunker; pem regions in PR 2
 src/core/page-state/import-guard.ts	canonicalFields	field	META	
-src/core/page-state/import-guard.ts	sameContentAnyKeyOrder	field	META	
 src/core/page-state/materialize.ts	materializePageSnapshot	call:contentHash	META	inline pages only
 src/core/page-state/materialize.ts	materializePageSnapshot	field	SEGW	assertInlineBody before the UPDATE
 src/core/page-state/materialize.ts	materializePageSnapshot	sql	SEGW	assertInlineBody before the UPDATE
@@ -437,6 +445,7 @@ src/core/persistence/facts-prepare.ts	prepareManagedFactsMutation	field	SEGW	ass
 src/core/persistence/file-repair.ts	canonicalRepairFields	field	META	
 src/core/persistence/file-wins-content.ts	appendedParts	field	INLINE	compares the parsed canonical file with the reconcile result (ParsedPage strings readReconcileState builds through wholeBodySnapshot: a segmented page up to 24 MiB is read whole, a larger one refuses first); no page row is read
 src/core/persistence/file-wins-content.ts	fileWinsContent	field	INLINE	compares the parsed canonical file with the reconcile result (ParsedPage strings readReconcileState builds through wholeBodySnapshot: a segmented page up to 24 MiB is read whole, a larger one refuses first); no page row is read
+src/core/persistence/finite-code-maintenance.ts	prepareFiniteCodeMutation	field	INLINE	assertTarget requires inline code page before preparation/publication; exact manifest admits at most 13 files, 128 KiB each and 1 MiB total; readback matches admitted bytes
 src/core/persistence/import-prepare.ts	prepareManagedImportMutation	call:serializePageToMarkdown	SEGW	
 src/core/persistence/large-page-guard.ts	assertLargePageAdmission	sql	META	stored size = body_bytes for a segmented page, octet_length of the columns for an inline page
 src/core/persistence/links-maintenance.ts	extractManagedStaleLinks	field	NONE	not the page body: result.timeline counter
@@ -486,7 +495,8 @@ src/core/persistence/reconcile-merge.ts	reconcileCanonical	field	INLINE
 src/core/persistence/reconcile-prepare.ts	prepareReconcileMutation	call:serializePageToMarkdown	INLINE	
 src/core/persistence/reconcile-prepare.ts	prepareReconcileResult	call:serializePageToMarkdown	INLINE	
 src/core/persistence/reconcile-prepare.ts	prepareReconcileResult	field	INLINE	
-src/core/persistence/reconcile-state.ts	readReconcileState	sql	INLINE	
+src/core/persistence/reconcile-state.ts	readReconcileState	field	INLINE	fork world-only fence overlay reads parsed canonical file bounded by journal limits; database side uses wholeBodySnapshot (segmented up to 24 MiB, larger refuses)
+src/core/persistence/reconcile-state.ts	readReconcileState	sql	INLINE	stored preimage only; native wholeBodySnapshot first materializes segmented bodies up to PAGE_MAX_BYTES (24 MiB) and refuses larger pages; canonical file is bounded by journal limits
 src/core/persistence/reconcile.ts	runReconcilePreview	call:serializePageToMarkdown	SEGW	
 src/core/persistence/segmented-apply.ts	demoteSegmentedPage	sql	INLINE	demotion: the row turns inline with an empty body that the inline write in the same transaction fills
 src/core/persistence/segmented-apply.ts	materializedSnapshot	field	INLINE	the body materializedPage read back within PAGE_MAX_BYTES (a page over the ceiling comes back unchanged and is never read), overlaid with the snapshot withdrawals as readPageSnapshot overlays an inline body
@@ -574,8 +584,8 @@ src/core/repair/visibility.ts	visibilityRepair	call:serializePageToMarkdown	SEGW
 src/core/schema-migrations/v091-pages-generation-trigger-and-bookmark.ts	v091	sql	NONE	not the page body: historical generation trigger
 src/core/schema-migrations/v123-configurable-fts-language.ts	v123	sql	NONE	not the page body: historical
 src/core/schema-migrations/v124-page-search-vector-drop-compiled-truth.ts	v124	sql	NONE	not the page body: historical search-vector trigger
-src/core/schema-migrations/v189-pages-credential-projection-pending.ts	v189	sql	NONE	not a live reader: historical migration over inline pages (segmented pages did not exist)
-src/core/schema-migrations/v248-segmented-page-storage.ts	COMMON_SQL	sql	NONE	not a live reader: migration DDL for the segmented body columns and their CHECK
+src/core/schema-migrations/v197-pages-credential-projection-pending.ts	v197	sql	NONE	not a live reader: historical migration over inline pages (segmented pages did not exist)
+src/core/schema-migrations/v256-segmented-page-storage.ts	COMMON_SQL	sql	NONE	not a live reader: migration DDL for the segmented body columns and their CHECK
 src/core/schema-pack/field-usage.ts	runFieldUsage	field	LEAD	
 src/core/schema-pack/field-usage.ts	runFieldUsage	sql	LEAD	
 src/core/schema-pack/page-to-alias.ts	resolveValue	field	LEAD	
@@ -602,7 +612,10 @@ src/core/shared-skills/migration-export.ts	exportInventory	call:serializeMarkdow
 src/core/shared-skills/migration-export.ts	exportInventory	field	INLINE	
 src/core/shared-skills/migration-projection.ts	assertExportProjectionRoundtrip	field	INLINE	
 src/core/sweep.ts	runLinksTimelinePass	field	INLINE	inline arm; a segmented page streams its links (segment-links.ts) and timeline (bodyBlocks)
+src/core/sweep.ts	runManagedLinksTimelinePass	field	NONE	not a page body: managed.timeline is the count of extracted timeline entries; helper extracted from runLinksTimelinePass without changing its bounded managed publication
 src/core/sweep.ts	runMaintenanceSweep	sql	STREAM	LIKE over NULL never matches a segmented page (skip)
+src/core/take-proposals.ts	assertProposalSnapshotCurrent	field	INLINE	source-exact snapshot and assertInlineBody precede body hash; acceptance checks before CAS and promotion rechecks revision; segmented proposals refuse
+src/core/take-proposals.ts	listPendingProposals	field	INLINE	source-exact native snapshot and assertInlineBody precede full evidence and body-only SHA256; segmented proposals refuse; a prefix or canonical hash cannot prove body identity
 src/core/think/gather.ts	renderPagesBlockDetailed	field	LEAD	segmented page: getter throws page_body_segmented
 src/core/think/gather.ts	runGather	field	LEAD	visibleLeads reads Page.compiled_truth from listPages/search: segmented page: getter throws page_body_segmented (lead source in PR 2)
 src/core/think/index.ts	composeExtractiveFallback	field	LEAD	

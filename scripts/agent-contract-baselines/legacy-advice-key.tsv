@@ -74,7 +74,7 @@ src/core/skillopt/cycle-phase.ts	2
 src/core/skillopt/lock.ts	1
 src/core/skillopt/models-plan.ts	1
 src/core/skillopt/orchestrator.ts	6
-src/core/skillpack/preconditions.ts	9
+src/core/skillpack/preconditions.ts	1
 src/core/skillpack/shared-brain-bridge.ts	7
 src/core/sync-cost-gate.ts	3
 src/core/verbs.ts	1

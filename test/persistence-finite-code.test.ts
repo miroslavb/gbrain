@@ -104,6 +104,18 @@ test('persisted mutation refuses remote and non-CLI principals before filesystem
  await expect(prepareFiniteCodeMutation(f.e,{...row,principal_kind:'oauth_client'} as WriteRequest)).rejects.toMatchObject({code:'permission_denied'});
 }),60000);
 
+test('finite refresh refuses a segmented target before journal admission and preserves its body storage',async()=>fixture(async f=>{
+ await f.publish(await f.input());
+ await disposePersistenceConsumer(f.e);await f.e.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+ try{await f.e.executeRaw("UPDATE pages SET body_storage='segmented',compiled_truth=NULL,timeline=NULL,body_bytes=42 WHERE source_id=$1 AND slug=$2",[f.sid,f.slug])}
+ finally{await f.e.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1')}
+ const [before]=await f.e.executeRaw('SELECT count(*)::int AS n FROM persistence_requests');
+ f.put(48);await expect(f.publish(await f.input())).rejects.toMatchObject({code:'page_body_segmented'});
+ expect(await f.e.executeRaw('SELECT count(*)::int AS n FROM persistence_requests')).toEqual([before]);
+ expect(await f.e.executeRaw('SELECT body_storage,compiled_truth,timeline FROM pages WHERE source_id=$1 AND slug=$2',[f.sid,f.slug]))
+  .toEqual([{body_storage:'segmented',compiled_truth:null,timeline:null}]);
+}),60000);
+
 test('runtime attestation and exact tombstone preimage are mandatory',async()=>fixture(async f=>{
  const p=await f.input();await expect(f.publish({...p,runtimeSourceHash:'0'.repeat(64)})).rejects.toMatchObject({code:'source_changed'});
  expect(await f.e.getPage(f.slug,{sourceId:f.sid})).toBeNull();await f.publish(p);

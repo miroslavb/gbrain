@@ -6,11 +6,12 @@
  */
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 
-const V277 = '../src/core/schema-migrations/v277-function-search-path-pg-temp.ts';
-const actual = await import(V277);
-const harden = actual.hardenFunctionSearchPaths;
-mock.module(V277, () => ({ ...actual, hardenFunctionSearchPaths: async (engine: unknown, label: string) => {
-  if (label === 'v277') return harden(engine as never, label);
+const REPAIR = '../src/core/function-search-path-repair.ts';
+const actual = await import(REPAIR);
+const { v288 } = await import('../src/core/schema-migrations/v288-fork-function-search-path-convergence.ts');
+const harden = actual.convergeFunctionSearchPaths;
+mock.module(REPAIR, () => ({ ...actual, convergeFunctionSearchPaths: async (engine: unknown, label: string) => {
+  if (label === 'v288') return harden(engine as never, label);
   throw new Error('canceling statement due to lock timeout');
 } }));
 const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
@@ -27,12 +28,12 @@ describe('the search_path step after a migration run is best-effort (#7632)', ()
 
   test('the migration run finishes the upgrade and names the failed step when it throws', async () => {
     await engine.executeRaw(`ALTER FUNCTION gbrain_try_jsonb(text) SET search_path = pg_catalog, public`);
-    await engine.executeRaw(`UPDATE config SET value = '${actual.v277.version - 1}' WHERE key = 'version'`);
+    await engine.executeRaw(`UPDATE config SET value = '${v288.version - 1}' WHERE key = 'version'`);
     const write = process.stderr.write.bind(process.stderr);
     let stderr = '';
     process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
     try {
-      expect((await runMigrations(engine)).applied).toBe(LATEST_VERSION - actual.v277.version + 1);
+      expect((await runMigrations(engine)).applied).toBe(LATEST_VERSION - v288.version + 1);
     } finally {
       process.stderr.write = write;
     }

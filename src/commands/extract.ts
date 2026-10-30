@@ -2134,29 +2134,31 @@ async function deferredMentions(engine: BrainEngine, sourceId?: string): Promise
     state: !preview.enabled ? 'disabled' : preview.due > 0 ? 'pending' : 'complete' };
 }
 
+export interface ExtractStaleFromDBOpts {
+  dryRun: boolean;
+  jsonMode: boolean;
+  /** Embedded callers (the cycle) own the report: emit nothing on stdout. */
+  quiet?: boolean;
+  /** Unset → the configured knob (resolveIncludeFrontmatter); explicit wins. */
+  includeFrontmatter?: boolean;
+  sourceIdFilter?: string;
+  catchUp: boolean;
+  /** Hard cross-batch page cap. Wins over catchUp. */
+  maxPages?: number;
+  /**
+   * Wall-clock cap for the sweep (checked between keyset batches).
+   * Defaults to STALE_TIME_BUDGET_MS (~30 min). Embedded callers (the
+   * cycle's in-line stale drain) pass a much smaller cap so one drain
+   * can't consume the whole cycle — the full budget stays with the
+   * explicit `gbrain extract --stale` command. Ignored when catchUp.
+   */
+  timeBudgetMs?: number;
+  /** GBRA-130 A-1 (managed brains): clear held link-extraction failures first. */ retryHeld?: boolean;
+}
+
 export async function extractStaleFromDB(
   engine: BrainEngine,
-  opts: {
-    dryRun: boolean;
-    jsonMode: boolean;
-    /** Embedded callers (the cycle) own the report: emit nothing on stdout. */
-    quiet?: boolean;
-    /** Unset → the configured knob (resolveIncludeFrontmatter); explicit wins. */
-    includeFrontmatter?: boolean;
-    sourceIdFilter?: string;
-    catchUp: boolean;
-    /** Hard cross-batch page cap. Wins over catchUp. */
-    maxPages?: number;
-    /**
-     * Wall-clock cap for the sweep (checked between keyset batches).
-     * Defaults to STALE_TIME_BUDGET_MS (~30 min). Embedded callers (the
-     * cycle's in-line stale drain) pass a much smaller cap so one drain
-     * can't consume the whole cycle — the full budget stays with the
-     * explicit `gbrain extract --stale` command. Ignored when catchUp.
-     */
-    timeBudgetMs?: number;
-    /** GBRA-130 A-1 (managed brains): clear held link-extraction failures first. */ retryHeld?: boolean;
-  },
+  opts: ExtractStaleFromDBOpts,
 ): Promise<{ linksCreated: number; timelineCreated: number; pagesProcessed: number; staleRemaining: number; pageCapHit?: boolean; pagesAdmitted?: number; mentionsDeferred?: boolean; skippedMissingTarget?: number; skippedCrossSource?: number; skippedAttendanceIncomplete?: number; skippedChanged?: number; skippedConcurrentWrite?: number; skippedUnknownSource?: number; mentions?: MentionPassResult;
   linkFailed?: number; linkFailures?: LinkExtractionFailure[]; linkSystemic?: LinkExtractionSystemic[] }> {
   const { dryRun, jsonMode, sourceIdFilter, catchUp, maxPages } = opts;

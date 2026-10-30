@@ -12,15 +12,12 @@ import type { BrainEngine } from '../../../core/engine.ts';
 import type { Check } from '../../doctor.ts';
 import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 import { checkError } from '../check-fix.ts';
-import { PINNED_FUNCTION_NAMES, LEGACY_SEARCH_PATH_SETTINGS } from '../../../core/function-search-path.ts';
+import { FUNCTION_SEARCH_PATH_PROBLEMS_SQL } from '../../../core/function-search-path.ts';
 
 /** The gbrain functions whose pinned search_path lacks a trailing pg_temp, and the ALTER that fixes each. */
 export async function functionSearchPathProblems(engine: BrainEngine): Promise<{ functions: string[]; fix: string[] }> {
   const rows = await engine.executeRaw<{ sig: string; path: string }>(
-    `SELECT p.oid::regprocedure::text AS sig, substr(c.setting, 13) AS path
-       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace CROSS JOIN LATERAL unnest(p.proconfig) AS c(setting)
-      WHERE n.nspname = 'public' AND p.prokind = 'f' AND c.setting = ANY($1::text[]) AND p.proname = ANY($2::text[]) ORDER BY 1`,
-    [[...LEGACY_SEARCH_PATH_SETTINGS], [...PINNED_FUNCTION_NAMES]]);
+    `${FUNCTION_SEARCH_PATH_PROBLEMS_SQL} ORDER BY 1`);
   return {
     functions: rows.map(r => r.sig),
     fix: rows.map(r => `ALTER FUNCTION ${r.sig} SET search_path = ${r.path}, pg_temp;`),
@@ -34,13 +31,13 @@ async function runFunctionSearchPath(ctx: DoctorContext): Promise<Check[]> {
   try {
     const { functions, fix } = await functionSearchPathProblems(engine);
     if (functions.length === 0) {
-      checks.push({ name: 'function_search_path', status: 'ok', message: 'Every gbrain function that pins a search_path ends it with pg_temp' });
+      checks.push({ name: 'function_search_path', status: 'ok', message: 'No known gbrain function has a missing or legacy search_path' });
     } else {
       checks.push({
         name: 'function_search_path',
         status: 'fail',
-        message: `${functions.length} function(s) pin search_path without pg_temp last (${functions.join(', ')}), so a temp table or view named like a purge or withdrawal ledger hides it from the guard that reads it. `
-          + `Fix (as the role that owns each function; migration v277 did the ones the migrating role owned): ${fix.join(' ')}`,
+        message: `${functions.length} function(s) have a missing or legacy search_path (${functions.join(', ')}), so a temp table or view named like a purge or withdrawal ledger hides it from the guard that reads it. `
+          + `Fix (as the role that owns each function; migration v288 repairs the ones the migrating role owned): ${fix.join(' ')}`,
       });
     }
   } catch (e) {

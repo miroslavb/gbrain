@@ -526,7 +526,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   // Eval-category wave lane C: coordinated database-only writes (manual links,
   // ontology observations) and the per-stint ontology dedup key.
   "src/core/persistence/database-write.ts": ["test/e2e/managed-ontology-propose-postgres.test.ts", "test/e2e/managed-writers-w3.test.ts"],
-  "src/core/schema-migrations/v188-facts-ontology-stint-dedup.ts": ["test/e2e/ontology-merge-parity.test.ts", "test/e2e/schema-drift.test.ts"],
+  "src/core/schema-migrations/v196-facts-ontology-stint-dedup.ts": ["test/e2e/ontology-merge-parity.test.ts", "test/e2e/schema-drift.test.ts"],
   "src/core/persistence/memory-mutations.ts": ["test/e2e/withdrawal-followup-writes-postgres.test.ts"],
   "src/core/persistence/coordinator.ts": ["test/e2e/withdrawal-followup-writes-postgres.test.ts"],
   "src/core/repair/failed-writes.ts": ["test/e2e/repair-failed-writes-5983-postgres.test.ts"],
@@ -537,7 +537,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   // Foundations 1 F4b: PGLite-only planner-stats accounting; Postgres must gain no object, doctor/repair read pg_stat_user_tables.
   "src/core/planner-stats.ts": ["test/e2e/planner-stats-postgres.test.ts"],
   "src/core/planner-stats-schema.ts": ["test/e2e/planner-stats-postgres.test.ts", "test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
-  "src/core/schema-migrations/v193-f4-planner-stats.ts": ["test/e2e/planner-stats-postgres.test.ts", "test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
+  "src/core/schema-migrations/v204-f4-planner-stats.ts": ["test/e2e/planner-stats-postgres.test.ts", "test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
   "src/commands/doctor/checks/planner-stats.ts": ["test/e2e/planner-stats-postgres.test.ts"],
   "src/core/repair/planner-stats.ts": ["test/e2e/planner-stats-postgres.test.ts"],
   // Schema source of truth: any change must pass the cross-engine drift gate.
@@ -694,11 +694,11 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/persistence/checkpoint-validation.ts": ["test/e2e/fix-wave-4-lane-a.test.ts", "test/e2e/persistence-request-indexes-postgres.test.ts"],
   "src/core/repair/request-indexes.ts": ["test/e2e/persistence-request-indexes-postgres.test.ts"],
   "src/commands/doctor/checks/persistence-requests.ts": ["test/e2e/persistence-request-indexes-postgres.test.ts"],
-  "src/core/schema-migrations/v179-persistence-request-sync-run-indexes.ts": ["test/e2e/persistence-request-indexes-postgres.test.ts"],
+  "src/core/schema-migrations/v187-persistence-request-sync-run-indexes.ts": ["test/e2e/persistence-request-indexes-postgres.test.ts"],
   // Security wave ENG-1/ENG-2: credential-safe projection and the existing-brain re-chunk.
   "src/core/credential-projection.ts": ["test/e2e/credential-projection-repair.test.ts"],
   "src/core/page-state/credential-reseal.ts": ["test/e2e/credential-projection-repair.test.ts"],
-  "src/core/schema-migrations/v189-pages-credential-projection-pending.ts": ["test/e2e/credential-projection-repair.test.ts"],
+  "src/core/schema-migrations/v197-pages-credential-projection-pending.ts": ["test/e2e/credential-projection-repair.test.ts"],
   "src/commands/migrations/v0_60_31.ts": ["test/e2e/credential-projection-repair.test.ts"],
   "src/commands/doctor/checks/credential-projection.ts": ["test/e2e/credential-projection-repair.test.ts"],
   "src/core/search/two-pass.ts": ["test/e2e/credential-projection-repair.test.ts"],

@@ -1,0 +1,12 @@
+# Fork golden review — v0.60.502.0 preparation
+
+Pinned upstream: `f48cc461965af08581be7cec7b66a1a67c4839af`. Old host source: `bc36c1633a98cd7861de9f01761eefd185a7cf79`. Upstream expected output was retained during the merge and then reviewed by subsystem; generation alone is not acceptance.
+
+- SQL: retain source/entity filters before nearest-neighbour LIMIT, literal ownership prefixes, document-inbox exclusion, active generations and reason-specific finite-code exclusion. Functional fork tests supplement the recorded SQL.
+- Catalog: eight historical host migrations supply proposal receipts, health state and world-only defaults. Original202 applied migration files and32 upstream historical gzip snapshots remain byte-identical. All16 adapted histories converge to a fresh catalog on PGLite and PostgreSQL, then apply zero migrations on repeat. See [fixture lineage](FORK_SCHEMA_HISTORY.md).
+- Migrations: eight host entries plus forward288/289 explain274→284 records and279→289 latest. Shared helper changes are reviewed separately from immutable historical module bytes. Forward289 and the guarded raw-schema block explicitly protect the two fork state tables without relying on an auto-RLS event trigger, preserving owner/BYPASS checks and exemptions. The ordinary upgrade already repairs the old atom trigger in219;288 protects subsequent missing-pin drift and exact native identities.
+- Doctor: preserve every prior check/status/warning count; add explicit graph census. Fork segmented storage defaults off and diagnostics must say so. Source-checkout captures require a complete Git index; installed-package output is a separate environment, not a new source golden.
+- CLI/public types: bounded extraction controls, source/document trust and optional fork features remain explicit. Existing calls retain their argument requirements. Provider registries contain each key once.
+- Replay: preserve the original brain archive, manifest, pre-boot catalog and repeat-OID baseline; only the post-upgrade catalog moves. Corpus fingerprints and repeat initialization remain independently asserted.
+
+Capture took place only in network-isolated disposable copies. Private evidence under `/root/ops/gbrain-upgrade-prep-20261030/continuation-1/` records old/new SHA256, diffs, reviewer findings and owner-suite logs. Every accepted output must pass a subsequent run without `GBRAIN_TEST_UPDATE_GOLDENS`. Full release acceptance also requires full regressions, paired retrieval and code canaries; these golden reviews do not authorize a production cutover.

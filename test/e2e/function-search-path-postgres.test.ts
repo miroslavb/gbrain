@@ -101,14 +101,15 @@ async function catalog(c: Sql) {
   const triggers = await c.unsafe<Array<{ trigger: string; timing: string }>>(
     `SELECT tgname AS trigger, CASE WHEN (tgtype & 2) <> 0 THEN 'BEFORE' ELSE 'AFTER' END AS timing FROM pg_trigger
       WHERE NOT tgisinternal AND tgname = ANY($1::text[]) ORDER BY 1`, [GUARD_TRIGGERS]);
-  const paths = await c.unsafe<Array<{ name: string; sig: string; setting: string }>>(
+  const paths = await c.unsafe<Array<{ name: string; sig: string; setting: string | null }>>(
     `SELECT p.proname AS name, p.oid::regprocedure::text AS sig, s.setting FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      CROSS JOIN LATERAL unnest(p.proconfig) AS s(setting) WHERE n.nspname = 'public' AND s.setting LIKE 'search_path=%' ORDER BY 1`);
+      LEFT JOIN LATERAL (SELECT setting FROM unnest(p.proconfig) AS x(setting) WHERE setting LIKE 'search_path=%') s ON true
+      WHERE n.nspname = 'public' AND (s.setting IS NOT NULL OR p.proname=ANY($1::text[])) ORDER BY 1`, [[...PINNED_FUNCTION_NAMES]]);
   return {
     definers: definers.map(d => d.fn),
     triggers: triggers.map(t => ({ trigger: t.trigger, timing: t.timing })),
     pinned: paths.length,
-    withoutTemp: paths.filter(p => !p.setting.endsWith(', pg_temp')).map(p => p.sig),
+    withoutTemp: paths.filter(p => !p.setting?.endsWith(', pg_temp')).map(p => p.sig),
     unlisted: paths.filter(p => !(PINNED_FUNCTION_NAMES as readonly string[]).includes(p.name)).map(p => p.sig),
   };
 }
@@ -361,4 +362,49 @@ describeE2E('a temp table or view named like a ledger hides nothing from the gua
       await brain.conn.end();
     }
   }, 300_000);
+  test('10. missing search_path is visible to non-owner repair and converges at v288 without changing owner/body', async () => {
+    const { functionSearchPathProblems } = await import('../../src/commands/doctor/checks/function-search-path.ts');
+    const { convergeFunctionSearchPaths } = await import('../../src/core/function-search-path-repair.ts');
+    const brain = await freshBrain();
+    const reader = `gbrain_test_missing_pin_${suffix}`;
+    await admin!.unsafe(`CREATE ROLE ${reader} LOGIN PASSWORD 'missing-pin' NOSUPERUSER NOBYPASSRLS`);
+    createdRoles.push(reader);
+    const ownerEngine = new PostgresEngine();
+    const readerEngine = new PostgresEngine();
+    try {
+      const definition = () => brain.conn.unsafe(`SELECT prosrc, proowner, prosecdef FROM pg_proc WHERE oid='public.gbrain_clear_atom_page_state()'::regprocedure`);
+      const original = await definition();
+      await brain.conn.unsafe(`GRANT USAGE ON SCHEMA public TO ${reader}; GRANT SELECT ON config TO ${reader};
+        ALTER FUNCTION public.gbrain_clear_atom_page_state() RESET search_path`);
+      const readerUrl = new URL(brain.url); readerUrl.username = reader; readerUrl.password = 'missing-pin';
+      await readerEngine.connect({ database_url: readerUrl.toString(), poolSize: 1 });
+      expect((await functionSearchPathProblems(readerEngine)).functions).toEqual(['gbrain_clear_atom_page_state()']);
+      const refused = await capturingStderr(() => convergeFunctionSearchPaths(readerEngine, 'non-owner'));
+      expect(refused.value).toEqual(['gbrain_clear_atom_page_state()']);
+      expect(refused.stderr).toContain('ALTER FUNCTION needs the owner');
+      expect(await definition()).toEqual(original);
+      await brain.conn.unsafe("UPDATE config SET value='287' WHERE key='version'");
+      await ownerEngine.connect({ database_url: brain.url, poolSize: 1 });
+      expect(await runMigrations(ownerEngine)).toEqual({ applied: LATEST_VERSION - 287, current: LATEST_VERSION });
+      expect(await functionSearchPathProblems(ownerEngine)).toEqual({ functions: [], fix: [] });
+      expect(await definition()).toEqual(original);
+      await brain.conn.unsafe(`ALTER FUNCTION public.gbrain_clear_atom_page_state() RESET search_path;
+        ALTER FUNCTION public.gbrain_clear_atom_page_state() SET statement_timeout='7s'`);
+      expect(await runMigrations(ownerEngine)).toEqual({ applied: 0, current: LATEST_VERSION });
+      const [{ proconfig }] = await brain.conn.unsafe(`SELECT proconfig FROM pg_proc WHERE oid='public.gbrain_clear_atom_page_state()'::regprocedure`);
+      expect(proconfig).toContain('statement_timeout=7s');
+      expect(proconfig).toContain('search_path=pg_catalog, public, pg_temp');
+      const [{ id }] = await brain.conn.unsafe(`INSERT INTO pages(slug,type,title,compiled_truth) VALUES('notes/fork-shadow','note','shadow','x') RETURNING id`);
+      await brain.conn.unsafe(`INSERT INTO extract_atoms_page_state(source_incarnation,page_id,content_hash)
+        SELECT incarnation,$1,'test' FROM sources WHERE id='default'`, [id]);
+      await brain.conn.unsafe(`CREATE TEMP TABLE extract_atoms_page_state(LIKE public.extract_atoms_page_state);
+        INSERT INTO pg_temp.extract_atoms_page_state SELECT * FROM public.extract_atoms_page_state`);
+      await brain.conn.unsafe('UPDATE pages SET deleted_at=now() WHERE id=$1', [id]);
+      expect(await brain.conn.unsafe('SELECT page_id FROM public.extract_atoms_page_state WHERE page_id=$1', [id])).toHaveLength(0);
+      expect(await brain.conn.unsafe('SELECT page_id FROM pg_temp.extract_atoms_page_state WHERE page_id=$1', [id])).toHaveLength(1);
+    } finally {
+      await readerEngine.disconnect(); await ownerEngine.disconnect(); await brain.conn.end();
+    }
+  }, 300_000);
+
 });

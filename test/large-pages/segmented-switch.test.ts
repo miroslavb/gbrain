@@ -2,8 +2,8 @@
  * Wave B PR 2 switch-on (spec 1.1 activation gate, 13 PR 2): `pages.segmented_storage` follows
  * SEGMENTED_STORAGE_DEFAULT when unset and is gated by the writer versions recorded on committed persistence requests.
  *
- * 1. Protects: with no configuration a page over 1 MiB is stored segmented and `pages.max_bytes` is the engine
- *    ceiling; a writer older than SEGMENTED_WRITER_FLOOR (or unstamped) seen in the last seven days keeps writes
+ * 1. Protects: this host fork's unset default remains off: a page over 1 MiB stays inline under the 24 MiB ceiling.
+ *    Explicit opt-in enables segmentation and the engine ceiling; a writer older than SEGMENTED_WRITER_FLOOR (or unstamped) seen in the last seven days keeps writes
  *    inline, even with an explicit `on`, and doctor `segmented_storage` names it with an upgrade fix; once that
  *    observation is gone the next write promotes; an explicit `off` keeps pages inline and reports it as a choice;
  *    (a stored segmented page over 32 MiB exporting while the switch is off is in segmented-real-size.slow.test.ts). Every write the gate sees must carry the
@@ -11,10 +11,10 @@
  *    run (ingest_log), its resident heartbeat and its uncommitted requests all block; this build's do not. An
  *    unreadable gate blocks, an unparsable stamp blocks, the 7-day window ends between day 6 and day 8, and the gate is
  *    read once per TTL (work counter) while doctor reads through. A failed read of the switch or `pages.max_bytes` keeps
- *    it off (never "unset", which is on). Doctor reports a hold left only by this host's pre-upgrade writes as
+ *    it off, including after explicit opt-in. Doctor reports a hold left only by this host's pre-upgrade writes as
  *    information once this build has made the same kind of write after them; an older gbrain still writing on this host
  *    (a cron import, an npx sync, an older managed admitter) keeps the upgrade warning. (The floor's derivation: segmented-writer-floor.test.ts.)
- * 2. Fails when: the default stays off, the gate ignores old or unstamped writers, an explicit `on` overrides the
+ * 2. Fails when: the unset default enables segmentation, doctor claims on while the policy is off, the gate ignores old or unstamped writers, an explicit `on` overrides the
  *    gate, a cleared gate keeps writes inline, export sizes stored segmented pages by the write limit, a writer without
  *    the mark passes on its version, a write path of this build stops marking, or the gate's error, window, parse or
  *    cache handling changes.
@@ -65,12 +65,25 @@ for (const kind of testBackends()) {
     });
     const inHome = <T>(fn: () => Promise<T>) => withEnv({ GBRAIN_HOME: home, DATABASE_URL: undefined, GBRAIN_DATABASE_URL: undefined }, fn);
 
-    test('default on: a page over 1 MiB is stored segmented and pages.max_bytes is the engine ceiling', async () => {
+    test('host default off: an unset switch keeps a page over 1 MiB inline and doctor reports the actual policy', async () => {
       expect(await engine.getConfig('pages.segmented_storage')).toBeNull();
+      expect(await readPageBodyPolicy(engine)).toMatchObject({ segmented: false, maxBytes: PAGE_MAX_BYTES });
+      expect((await importFromContent(engine, 'notes/default-off', content, { noEmbed: true })).status).toBe('imported');
+      expect(await storage(engine, 'notes/default-off')).toBe('inline');
+      const check = await segmentedStorageCheck(engine);
+      expect(check).toMatchObject({ status: 'ok', severity: 'info', readiness_state: 'disabled_by_choice',
+        details: { configured: 'unset', effective: 'off', blockers: [] },
+        fix: { actor: 'user', argv: ['gbrain', 'config', 'set', 'pages.segmented_storage', 'on'] } });
+      expect(check.message).toContain('off by default');
+      expect(check.message).not.toContain('storage is on');
+    }, 120_000);
+
+    test('explicit on: a compatible brain stores a page over 1 MiB in segments under the engine ceiling', async () => {
+      await engine.setConfig('pages.segmented_storage', 'on');
       expect(await readPageBodyPolicy(engine)).toMatchObject({ segmented: true, maxBytes: segmentedPageCeiling(engine.kind) });
-      expect((await importFromContent(engine, 'notes/default-on', content, { noEmbed: true })).status).toBe('imported');
-      expect(await storage(engine, 'notes/default-on')).toBe('segmented');
-      expect(await segmentedStorageCheck(engine)).toMatchObject({ status: 'ok', details: { configured: 'unset', effective: 'on', blockers: [] } });
+      expect((await importFromContent(engine, 'notes/explicit-on', content, { noEmbed: true })).status).toBe('imported');
+      expect(await storage(engine, 'notes/explicit-on')).toBe('segmented');
+      expect(await segmentedStorageCheck(engine)).toMatchObject({ status: 'ok', details: { configured: 'on', effective: 'on', blockers: [] } });
     }, 120_000);
 
     test('a recent writer below the floor keeps writes inline, even with an explicit on; once it is gone the next write promotes', async () => inHome(async () => {
@@ -84,6 +97,12 @@ for (const kind of testBackends()) {
         const slug = `notes/held-${setting ?? 'default'}`;
         expect((await importFromContent(engine, slug, content, { noEmbed: true })).status).toBe('imported');
         expect(await storage(engine, slug)).toBe('inline');
+        if (setting === null) {
+          const defaultCheck = await segmentedStorageCheck(engine);
+          expect(defaultCheck).toMatchObject({ status: 'ok', details: { configured: 'unset', effective: 'off' } });
+          expect(defaultCheck.message).toContain('off by default');
+          expect(defaultCheck.details!.blockers).not.toEqual([]);
+        }
       }
       const check = await segmentedStorageCheck(engine);
       expect(check).toMatchObject({ status: 'warn', details: { configured: 'on', effective: 'off' }, fix: { argv: ['gbrain', 'upgrade'], actor: 'host_admin' } });
@@ -263,18 +282,23 @@ for (const kind of testBackends()) {
       expect(await blockersNow()).toEqual([expect.objectContaining({ role: 'admitter', version: 'nightly-build', segment_reader: true })]);
     }), 120_000);
 
-    test('a failed read of pages.segmented_storage or pages.max_bytes keeps the switch off; it never reads as unset (on by default)', async () => {
+    test('unset and failed configuration reads keep the switch off; explicit on still requires readable limits', async () => {
       const failing = (key: string) => Object.create(engine, { getConfig: { value: (k: string) => k === key
         ? Promise.reject(Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' }))
         : engine.getConfig(k) } }) as BrainEngine;
       await engine.setConfig('pages.segmented_storage', 'off');
       expect(await readPageBodyPolicy(failing('pages.segmented_storage'))).toMatchObject({ segmented: false, maxBytes: PAGE_MAX_BYTES });
       await engine.executeRaw("DELETE FROM config WHERE key='pages.segmented_storage'");
-      expect(await segmentedNow()).toBe(true);
+      expect(await segmentedNow()).toBe(false);
       expect(await readPageBodyPolicy(failing('pages.segmented_storage'))).toMatchObject({ segmented: false, maxBytes: PAGE_MAX_BYTES });
       await engine.setConfig('pages.max_bytes', String(8 * 1024 * 1024));
+      expect(await readPageBodyPolicy(engine)).toMatchObject({ segmented: false, maxBytes: PAGE_MAX_BYTES });
+      await engine.setConfig('pages.segmented_storage', 'on');
       expect(await readPageBodyPolicy(engine)).toMatchObject({ segmented: true, maxBytes: 8 * 1024 * 1024 });
       expect(await readPageBodyPolicy(failing('pages.max_bytes'))).toMatchObject({ segmented: false, maxBytes: PAGE_MAX_BYTES });
+      const check = await segmentedStorageCheck(failing('pages.max_bytes'));
+      expect(check).toMatchObject({ status: 'warn', details: { configured: 'on', effective: 'off' } });
+      expect(check.message).not.toContain('storage is on');
     }, 120_000);
 
     test('doctor: a hold left only by this host\'s writes from before it upgraded is information with its clear time; another host or a live older process on this host keeps the upgrade warning', async () => inHome(async () => {

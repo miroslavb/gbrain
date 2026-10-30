@@ -1,25 +1,16 @@
 # Key files — per-file index (gbrain repo)
 
-Read a file's entry before editing it. This page routes to bounded subsystem
-references; **do not load the whole directory**.
-
-Find a path's entry:
+Read the relevant subsystem entry before editing; do not load the whole directory.
 
 ```bash
 rg -n -F 'src/core/ops/pages.ts' docs/architecture/key-files/
 ```
 
-Ranges use each entry's first path; an entry can document several
-files. Search when a path crosses subsystems.
-Edit the subsystem entry, not this page, when behavior changes.
-Keep entries current-state: history belongs in `CHANGELOG.md` and Git.
-Where a new storage method, migration, doctor check, command, route or sync
-phase goes: [CONTRIBUTING.md](../../CONTRIBUTING.md#where-does-my-change-go).
-A branch from before refactor wave 1 follows the generated
-[porting guide](wave-1-porting.md) ([JSON map](wave-1-moves.json)).
-`scripts/check-key-files-current-state.sh` guards each subsystem against
-history, duplicate entries and size growth. Split a growing subsystem and
-link it here rather than raising the cap.
+Ranges use each entry's first path. Update subsystem entries with current behavior;
+keep history in Git and `CHANGELOG.md`. Placement: [CONTRIBUTING.md](../../CONTRIBUTING.md#where-does-my-change-go).
+Older branches use the [porting guide](wave-1-porting.md) ([JSON map](wave-1-moves.json)).
+`scripts/check-key-files-current-state.sh` checks history, duplicates and size.
+Split growing references and link them here; keep the caps.
 
 | Subsystem | Entry range / scope |
 |---|---|
@@ -47,6 +38,7 @@ link it here rather than raising the cap.
 | [Core Minions (1/2)](key-files/core-minions-1.md) | `src/core/minions/` through `src/core/minions/protected-names.ts` |
 | [Core Minions (2/2)](key-files/core-minions-2.md) | `src/core/minions/queue.ts` through `src/core/minions/worker.ts` |
 | [Core Persistence](key-files/core-persistence.md) | `src/core/persistence/` journal, coordinator, effects, managed sync |
+| [Source topology](key-files/core-persistence-topology.md) | Source lifecycle, root locks and checkout recovery |
 | [Core Persistence (continued)](key-files/core-persistence-continued.md) | worktree-refresh*, connectors, holds, receipts; [fence repair](key-files/core-fence-repair.md) |
 | [Persistence capacity](key-files/core-persistence-capacity.md) | write caps, true-up |
 | [Core Persistence (seams)](key-files/core-persistence-request-indexes.md) | `checkpoint-validation`, `fault-points`, `native-file-target`, `admission-retry`, `unbound-source` |

@@ -942,3 +942,13 @@ Do not enable the new storage mode as part of an upgrade or mass repair.
 Separate qualification must prove canonical file, withdrawal and epoch parity.
 
 The 2026-10-30 v0.60.502 fork integration is a preparation checkpoint, not deployment acceptance. Read `docs/architecture/key-files/fork-memory-contracts.md` before running or promoting it; preserve recorded failed gates and historical fixture lineage.
+
+## Host fork upgrade preparation — 2026-10-30 continuation
+
+Candidate v0.60.502.0 remains isolated and is not production acceptance. Preserve every historical migration through v287; v288 adds forward/head convergence if a native function later loses its search_path. The ordinary207→287 path already repairs the retained atom-state function via v219; v288 is additional drift protection, not evidence of a production defect. Exact native signatures exclude application overloads. Head repair and doctor include missing GUCs, and rollback remains paired code/database.
+
+The reviewed full-body reader inventory is documented in [fork-body-reader-review](docs/architecture/fork-body-reader-review.md); segmented diagnostic skips must stay explicit. Production acceptance requirements are in [test/FORK_ACCEPTANCE.md](test/FORK_ACCEPTANCE.md). Narrow per-entry size ceilings require independent semantic review and full regression checks; a guard PASS alone is insufficient. Test-only historical upstream fixture adaptation must preserve raw fixtures and explicitly prove all eight host overlays before mapping versions.
+
+Historical fixtures: [test/FORK_SCHEMA_HISTORY.md](test/FORK_SCHEMA_HISTORY.md). Golden review: [test/FORK_GOLDENS.md](test/FORK_GOLDENS.md). Segmented default and explicit opt-in tests: [test/FORK_SEGMENTED_DEFAULT.md](test/FORK_SEGMENTED_DEFAULT.md).
+
+Forward migration289 and the guarded raw-schema proposal-table block preserve RLS on fork state tables without the auto-RLS event trigger. Keep exemptions, ownership/BYPASS checks and rows unchanged; see [test/FORK_RLS.md](test/FORK_RLS.md). The current target schema is289; dated288 receipts cover only their stated checkpoint.

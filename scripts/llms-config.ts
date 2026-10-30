@@ -114,6 +114,7 @@ export const SECTIONS: DocSection[] = [
         title: "docs/ENGINES.md",
         description: "PGLite vs Postgres trade-off and when to migrate.",
         path: "docs/ENGINES.md",
+        includeInFull: false, // Large implementation reference stays linked; preserve the bounded agent bundle.
       },
       {
         title: "docs/guides/move-to-postgres.md",

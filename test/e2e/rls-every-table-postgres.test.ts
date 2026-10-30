@@ -22,14 +22,16 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import postgres from '#postgres';
 import { assertSafeE2eDatabaseUrl } from '../helpers/db-guard.ts';
 import { collect, makeHome, spawnDriver } from '../helpers/apply-migrations-lock-driver.ts';
 import { writeSchemaDriver } from '../helpers/apply-migrations-schema-driver.ts';
 import { PostgresEngine } from '../../src/core/postgres-engine.ts';
-import { LATEST_VERSION } from '../../src/core/migrate.ts';
+import * as db from '../../src/core/db.ts';
+import { LATEST_VERSION, runMigrations } from '../../src/core/migrate.ts';
 import { v283 as v275 } from '../../src/core/schema-migrations/v283-rls-backfill-unguarded-tables.ts';
+import { v289 } from '../../src/core/schema-migrations/v289-fork-state-tables-rls.ts';
 import { recreateStep } from '../../src/core/schema-missing-tables.ts';
 import { resolveRepairScope, runRepair } from '../../src/core/repair/core.ts';
 import { missingTablesRepair } from '../../src/core/repair/missing-tables.ts';
@@ -40,6 +42,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const describeE2E = DATABASE_URL ? describe : describe.skip;
 
 const V273_TABLES = ['page_derivation_spend', 'page_segment_derivation_purge_pages', 'page_segment_derivation_purges', 'page_segment_derivations'];
+const FORK_STATE_TABLES = ['extract_health_state', 'proposal_page_runs'];
 
 const scratch: string[] = [];
 const homes: string[] = [];
@@ -89,6 +92,21 @@ async function presentTables(conn: ReturnType<typeof postgres>, names: string[])
     `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY($1::text[]) ORDER BY c.relname`, [names]);
   return rows.map(r => r.relname);
+}
+
+/** Exercise the exact standalone canonical block: replaying unrelated DDL as a nonowner would fail first. */
+async function runRawForkRlsAs(conn: ReturnType<typeof postgres>, setup: string): Promise<void> {
+  const schema = readFileSync(new URL('../../src/schema.sql', import.meta.url), 'utf8');
+  const blocks = schema.match(/^DO \$fork_proposal_rls\$[\s\S]+?^END \$fork_proposal_rls\$;/gm);
+  expect(blocks?.length).toBe(1);
+  const session = await conn.reserve();
+  try {
+    await session.unsafe(setup);
+    await session.unsafe(blocks![0]!);
+  } finally {
+    await session.unsafe('RESET ROLE; RESET search_path');
+    session.release();
+  }
 }
 
 describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', () => {
@@ -169,8 +187,8 @@ describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', (
     }
   }, 300_000);
 
-  /** Runs the v275 handler on one reserved session (role, search path) and returns what it wrote to stderr. */
-  async function runHandlerAs(conn: ReturnType<typeof postgres>, setup: string): Promise<string> {
+  /** Runs the selected handler on one reserved session (role, search path) and captures its diagnostics. */
+  async function runHandlerAs(conn: ReturnType<typeof postgres>, setup: string, migration = v275): Promise<string> {
     const session = await conn.reserve();
     const stderr: string[] = [];
     const write = process.stderr.write;
@@ -190,7 +208,7 @@ describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', (
       };
       const engine = { kind: 'postgres', executeRaw, transaction };
       process.stderr.write = ((chunk: string) => { stderr.push(String(chunk)); return true; }) as typeof process.stderr.write;
-      await v275.handler!(engine as never);
+      await migration.handler!(engine as never);
     } finally {
       process.stderr.write = write;
       await session.unsafe('RESET ROLE; RESET search_path');
@@ -198,6 +216,181 @@ describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', (
     }
     return stderr.join('');
   }
+
+  test('raw schema protects proposal receipts without migrations or an auto-RLS event trigger', async () => {
+    const { url, conn } = await scratchDatabase();
+    try {
+      await db.connect({ database_url: url });
+      try { await db.initSchema(); } finally { await db.disconnect(); }
+      const flags = await conn.unsafe<Array<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>>(
+        `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'public.proposal_page_runs'::regclass`);
+      expect(flags).toEqual([{ relrowsecurity: true, relforcerowsecurity: false }]);
+      expect(await presentTables(conn, ['extract_health_state'])).toEqual([]);
+    } finally {
+      await conn.end();
+    }
+  }, 300_000);
+
+  test('the canonical raw proposal RLS block preserves an explicit exemption on replay', async () => {
+    const { url, conn } = await scratchDatabase();
+    try {
+      await freshInit(url);
+      await conn.unsafe(`ALTER TABLE proposal_page_runs DISABLE ROW LEVEL SECURITY;
+        COMMENT ON TABLE proposal_page_runs IS 'GBRAIN:RLS_EXEMPT reason=explicit fixture external reader'`);
+      await runRawForkRlsAs(conn, 'SELECT 1');
+      const flags = () => conn.unsafe<Array<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>>(
+        `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'public.proposal_page_runs'::regclass`);
+      expect(await flags()).toEqual([{ relrowsecurity: false, relforcerowsecurity: false }]);
+      await conn.unsafe('COMMENT ON TABLE proposal_page_runs IS NULL');
+      await runRawForkRlsAs(conn, 'SELECT 1');
+      expect(await flags()).toEqual([{ relrowsecurity: true, relforcerowsecurity: false }]);
+    } finally {
+      await conn.end();
+    }
+  }, 300_000);
+
+  test('the canonical raw proposal RLS block requires both ownership and BYPASSRLS capability', async () => {
+    const { url, conn } = await scratchDatabase();
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+    const noBypassOwner = `gbrain_test_raw_rls_owner_${suffix}`;
+    const bypassNonowner = `gbrain_test_raw_rls_nonowner_${suffix}`;
+    try {
+      await freshInit(url);
+      await conn.unsafe(`ALTER TABLE proposal_page_runs DISABLE ROW LEVEL SECURITY;
+        CREATE ROLE ${noBypassOwner} NOLOGIN NOBYPASSRLS;
+        CREATE ROLE ${bypassNonowner} NOLOGIN BYPASSRLS`);
+      await runRawForkRlsAs(conn, `SET ROLE ${bypassNonowner}`);
+      expect(await tablesWithoutRls(conn)).toEqual(['proposal_page_runs']);
+      // Fixture ownership isolates the missing-BYPASS branch from the ownership branch above.
+      await conn.unsafe(`ALTER TABLE proposal_page_runs OWNER TO ${noBypassOwner}`);
+      await runRawForkRlsAs(conn, `SET ROLE ${noBypassOwner}`);
+      expect(await tablesWithoutRls(conn)).toEqual(['proposal_page_runs']);
+      const owner = await conn.unsafe<Array<{ owner: string }>>(
+        `SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid = 'public.proposal_page_runs'::regclass`);
+      expect(owner[0]?.owner).toBe(noBypassOwner);
+      await conn.unsafe('ALTER TABLE proposal_page_runs OWNER TO CURRENT_USER');
+      await runRawForkRlsAs(conn, 'SELECT 1');
+      expect(await tablesWithoutRls(conn)).toEqual([]);
+    } finally {
+      await conn.unsafe('ALTER TABLE IF EXISTS public.proposal_page_runs OWNER TO CURRENT_USER');
+      await conn.end();
+      for (const role of [noBypassOwner, bypassNonowner]) await admin!.unsafe(`DROP ROLE IF EXISTS ${role}`);
+    }
+  }, 300_000);
+
+  test('the canonical raw proposal RLS block protects public and search-path shadow relations', async () => {
+    const { url, conn } = await scratchDatabase();
+    try {
+      await freshInit(url);
+      await conn.unsafe(`CREATE SCHEMA shadow; CREATE TABLE shadow.proposal_page_runs (LIKE public.proposal_page_runs);
+        ALTER TABLE public.proposal_page_runs DISABLE ROW LEVEL SECURITY`);
+      await runRawForkRlsAs(conn, 'SET search_path = shadow, public');
+      const flags = await conn.unsafe<Array<{ name: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>>(
+        `SELECT n.nspname || '.' || c.relname AS name, c.relrowsecurity, c.relforcerowsecurity
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.relname = 'proposal_page_runs' ORDER BY 1`);
+      expect(flags).toEqual(['public.proposal_page_runs', 'shadow.proposal_page_runs'].map(name => ({
+        name, relrowsecurity: true, relforcerowsecurity: false,
+      })));
+    } finally {
+      await conn.end();
+    }
+  }, 300_000);
+
+  test('v288 migration-only upgrade protects both fork tables without changing rows, ownership, grants or unrelated tables', async () => {
+    const { url, conn } = await scratchDatabase();
+    const engine = new PostgresEngine();
+    try {
+      await freshInit(url);
+      await conn.unsafe(`ALTER TABLE proposal_page_runs DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE extract_health_state DISABLE ROW LEVEL SECURITY;
+        CREATE TABLE gbrain_test_rls_unrelated (id INTEGER);
+        UPDATE config SET value = '288' WHERE key = 'version';
+        INSERT INTO proposal_page_runs (source_id, page_slug, source_hash, prompt_version, proposal_run_id, model_id, status)
+          VALUES ('default', 'test/rls', 'fixture-hash', 'fixture-prompt', 'fixture-run', 'fixture-model', 'empty');
+        INSERT INTO extract_health_state (kind, source_id, last_outcome)
+          VALUES ('fixture', 'default', 'completed')`);
+      expect(await tablesWithoutRls(conn)).toEqual(['extract_health_state', 'gbrain_test_rls_unrelated', 'proposal_page_runs']);
+      const identity = () => conn.unsafe(`SELECT c.relname, c.relowner, c.relacl, c.relforcerowsecurity,
+          (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = ANY($1::text[]) ORDER BY c.relname`, [FORK_STATE_TABLES]);
+      const rows = () => conn.unsafe(`SELECT
+        (SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM proposal_page_runs r) AS proposals,
+        (SELECT jsonb_agg(to_jsonb(r) ORDER BY kind, source_id) FROM extract_health_state r) AS health`);
+      const beforeIdentity = await identity();
+      const beforeRows = await rows();
+      const home = makeHome({ engine: 'postgres', database_url: url });
+      homes.push(home);
+      const run = await collect(spawnDriver(home, writeSchemaDriver(home, {
+        migrations: [], args: ['--yes', '--non-interactive', '--no-autopilot-install', '--json'],
+      })));
+      expect(run.code, run.stderr + run.stdout).toBe(0);
+      expect(await tablesWithoutRls(conn)).toEqual(['gbrain_test_rls_unrelated']);
+      expect(await identity()).toEqual(beforeIdentity);
+      expect(beforeIdentity.every(row => row.relforcerowsecurity === false && row.policies === 0)).toBe(true);
+      expect(await rows()).toEqual(beforeRows);
+      await engine.connect({ database_url: url, poolSize: 1 });
+      expect(await runMigrations(engine)).toEqual({ applied: 0, current: LATEST_VERSION });
+      expect(await runHandlerAs(conn, 'SELECT 1', v289)).toBe('');
+      expect(await tablesWithoutRls(conn)).toEqual(['gbrain_test_rls_unrelated']);
+    } finally {
+      await engine.disconnect();
+      await conn.end();
+    }
+  }, 300_000);
+
+  test('v289 preserves explicit exemptions and reports tables a role cannot protect', async () => {
+    const { url, conn } = await scratchDatabase();
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+    const roles = [`gbrain_test_fork_rls_nobypass_${suffix}`, `gbrain_test_fork_rls_notowner_${suffix}`];
+    try {
+      await freshInit(url);
+      await conn.unsafe(`ALTER TABLE proposal_page_runs DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE extract_health_state DISABLE ROW LEVEL SECURITY;
+        COMMENT ON TABLE proposal_page_runs IS 'GBRAIN:RLS_EXEMPT reason=explicit fixture external reader';
+        CREATE ROLE ${roles[0]} NOLOGIN NOBYPASSRLS; CREATE ROLE ${roles[1]} NOLOGIN BYPASSRLS`);
+      for (const role of roles) {
+        const stderr = await runHandlerAs(conn, `SET ROLE ${role}`, v289);
+        expect(stderr).toContain('v289: row-level security is still off on 1 table(s) (extract_health_state)');
+        expect(await tablesWithoutRls(conn)).toEqual(['extract_health_state']);
+      }
+      expect(await runHandlerAs(conn, 'SELECT 1', v289)).toBe('');
+      expect(await tablesWithoutRls(conn)).toEqual([]);
+      const exempt = await conn.unsafe<Array<{ relrowsecurity: boolean }>>(
+        `SELECT relrowsecurity FROM pg_class WHERE oid = 'public.proposal_page_runs'::regclass`);
+      expect(exempt[0]?.relrowsecurity).toBe(false);
+      await conn.unsafe('COMMENT ON TABLE proposal_page_runs IS NULL');
+      expect(await runHandlerAs(conn, 'SELECT 1', v289)).toBe('');
+      expect(await tablesWithoutRls(conn)).toEqual([]);
+    } finally {
+      await conn.end();
+      for (const role of roles) await admin!.unsafe(`DROP ROLE IF EXISTS ${role}`).catch(() => {});
+    }
+  }, 300_000);
+
+  test('v289 protects public and search-path fork tables when the names are shadowed', async () => {
+    const { url, conn } = await scratchDatabase();
+    try {
+      await freshInit(url);
+      await conn.unsafe(`CREATE SCHEMA shadow;
+        CREATE TABLE shadow.proposal_page_runs (LIKE public.proposal_page_runs);
+        CREATE TABLE shadow.extract_health_state (LIKE public.extract_health_state);
+        ALTER TABLE public.proposal_page_runs DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE public.extract_health_state DISABLE ROW LEVEL SECURITY`);
+      expect(await runHandlerAs(conn, 'SET search_path = shadow, public', v289)).toBe('');
+      const flags = await conn.unsafe<Array<{ name: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>>(
+        `SELECT n.nspname || '.' || c.relname AS name, c.relrowsecurity, c.relforcerowsecurity
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.relname = ANY($1::text[]) ORDER BY 1`, [FORK_STATE_TABLES]);
+      expect(flags).toEqual(['public.extract_health_state', 'public.proposal_page_runs',
+        'shadow.extract_health_state', 'shadow.proposal_page_runs'].map(name => ({
+          name, relrowsecurity: true, relforcerowsecurity: false,
+        })));
+    } finally {
+      await conn.end();
+    }
+  }, 300_000);
 
   test('v275 skips an exempt table and a table the role cannot protect, and names what is left', async () => {
     const { url, conn } = await scratchDatabase();

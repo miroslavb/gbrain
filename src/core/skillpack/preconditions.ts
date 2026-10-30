@@ -126,140 +126,84 @@ export async function checkPreconditions(
   return out;
 }
 
+/** Single legacy serialization boundary: CLI and installed harnesses still consume
+ * `hint`. Keep that wire key here while checkers express remediation as a value;
+ * do not multiply legacy advice fields when extending the vocabulary. */
+function result(req: Precondition, met: boolean, detail: string, advice: string): PreconditionResult {
+  return { req, met, detail, hint: advice };
+}
+
 async function checkOne(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
   switch (req.kind) {
-    case 'source':
-      return req.arg ? checkSpecificSource(req, ctx) : checkAnySource(req, ctx);
-    case 'dir':
-      return checkDir(req, ctx);
-    case 'type':
-      return checkType(req, ctx);
-    case 'config':
-      return checkConfig(req, ctx);
-    case 'pages':
-      return checkPages(req, ctx);
-    case 'unknown':
-    default:
-      return {
-        req,
-        met: false,
-        detail: `unrecognized precondition kind`,
-        hint: `unrecognized precondition '${req.raw}' — see skillpack/preconditions.ts vocabulary`,
-      };
+    case 'source': return req.arg ? checkSpecificSource(req, ctx) : checkAnySource(req, ctx);
+    case 'dir': return checkDir(req, ctx);
+    case 'type': return checkType(req, ctx);
+    case 'config': return checkConfig(req, ctx);
+    case 'pages': return checkPages(req, ctx);
+    default: return result(req, false, 'unrecognized precondition kind',
+      `unrecognized precondition '${req.raw}' — see skillpack/preconditions.ts vocabulary`);
   }
 }
 
 async function checkType(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
   const pageType = req.arg;
   if (!pageType || !/^[a-z0-9][a-z0-9._-]*$/i.test(pageType)) {
-    return {
-      req,
-      met: false,
-      detail: `type: requires a page-type argument (e.g. type:conversation)`,
-      hint: `specify a page type: type:<page_type> — see skillpack/preconditions.ts vocabulary`,
-    };
+    return result(req, false, 'type: requires a page-type argument (e.g. type:conversation)',
+      'specify a page type: type:<page_type> — see skillpack/preconditions.ts vocabulary');
   }
   const count = await ctx.countPagesByType(pageType);
   const met = count > 0;
-  return {
-    req,
-    met,
-    detail: met ? `${count} live page(s) with type=${pageType}` : `no live pages with type=${pageType}`,
-    hint: met
-      ? `type=${pageType} populated (${count} live page(s))`
-      : `ingest at least one type=${pageType} page, then re-run`,
-  };
+  return result(req, met,
+    met ? `${count} live page(s) with type=${pageType}` : `no live pages with type=${pageType}`,
+    met ? `type=${pageType} populated (${count} live page(s))` : `ingest at least one type=${pageType} page, then re-run`);
 }
 
 async function checkAnySource(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
   const ids = await ctx.listPopulatedSourceIds();
   const met = ids.length > 0;
-  return {
-    req,
-    met,
-    detail: met
-      ? `found ${ids.length} source(s) with content: ${ids.join(', ')}`
-      : `no source holds any pages`,
-    hint: met
-      ? `corpus present (${ids.length} source(s))`
-      : `ingest a corpus first (gbrain sync / gbrain import), then re-run`,
-  };
+  return result(req, met,
+    met ? `found ${ids.length} source(s) with content: ${ids.join(', ')}` : 'no source holds any pages',
+    met ? `corpus present (${ids.length} source(s))` : 'ingest a corpus first (gbrain sync / gbrain import), then re-run');
 }
 
 async function checkSpecificSource(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
   const id = req.arg as string;
   const ids = await ctx.listSourceIds();
   const met = ids.includes(id);
-  return {
-    req,
-    met,
-    detail: met ? `source '${id}' exists` : `source '${id}' not found (have: ${ids.join(', ') || 'none'})`,
-    hint: met
-      ? `source '${id}' present`
-      : `add or ingest source '${id}' first (gbrain sources add ${id} / gbrain sync --source ${id}), then re-run`,
-  };
+  return result(req, met,
+    met ? `source '${id}' exists` : `source '${id}' not found (have: ${ids.join(', ') || 'none'})`,
+    met ? `source '${id}' present` : `add or ingest source '${id}' first (gbrain sources add ${id} / gbrain sync --source ${id}), then re-run`);
 }
 
 async function checkDir(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
   const dir = req.arg;
-  if (!dir) {
-    return {
-      req,
-      met: false,
-      detail: `dir: requires a path argument (e.g. dir:conversations/)`,
-      hint: `specify a directory: dir:<path> — see skillpack/preconditions.ts vocabulary`,
-    };
-  }
+  if (!dir) return result(req, false, 'dir: requires a path argument (e.g. dir:conversations/)',
+    'specify a directory: dir:<path> — see skillpack/preconditions.ts vocabulary');
   const count = await ctx.countPagesInDir(dir);
   const met = count > 0;
-  return {
-    req,
-    met,
-    detail: met ? `${count} page(s) under ${dir}` : `no pages under ${dir}`,
-    hint: met
-      ? `${dir} populated (${count} page(s))`
-      : `populate ${dir} (see the conversation-archive skill), then re-run`,
-  };
+  return result(req, met,
+    met ? `${count} page(s) under ${dir}` : `no pages under ${dir}`,
+    met ? `${dir} populated (${count} page(s))` : `populate ${dir} (see the conversation-archive skill), then re-run`);
 }
 
 async function checkConfig(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
   const key = req.arg;
-  if (!key) {
-    return {
-      req,
-      met: false,
-      detail: `config: requires a key argument (e.g. config:embedding.model)`,
-      hint: `specify a config key: config:<key> — see skillpack/preconditions.ts vocabulary`,
-    };
-  }
+  if (!key) return result(req, false, 'config: requires a key argument (e.g. config:embedding.model)',
+    'specify a config key: config:<key> — see skillpack/preconditions.ts vocabulary');
   const val = await ctx.getConfig(key);
   const met = typeof val === 'string' && val.trim().length > 0;
-  return {
-    req,
-    met,
-    detail: met ? `${key} is set` : `${key} is not set (empty or missing)`,
-    hint: met ? `${key} is set` : `set it: gbrain config set ${key} <value>`,
-  };
+  return result(req, met, met ? `${key} is set` : `${key} is not set (empty or missing)`,
+    met ? `${key} is set` : `set it: gbrain config set ${key} <value>`);
 }
 
 async function checkPages(req: Precondition, ctx: PreconditionContext): Promise<PreconditionResult> {
   const n = Number(req.arg);
-  if (!req.arg || !Number.isFinite(n) || n < 0) {
-    return {
-      req,
-      met: false,
-      detail: `pages: requires a non-negative integer argument (e.g. pages:50)`,
-      hint: `specify a page count: pages:<n> — see skillpack/preconditions.ts vocabulary`,
-    };
-  }
+  if (!req.arg || !Number.isFinite(n) || n < 0) return result(req, false,
+    'pages: requires a non-negative integer argument (e.g. pages:50)',
+    'specify a page count: pages:<n> — see skillpack/preconditions.ts vocabulary');
   const total = await ctx.countPages();
   const met = total >= n;
-  return {
-    req,
-    met,
-    detail: met ? `${total} page(s) present (>= ${n})` : `${total} page(s) present (< ${n})`,
-    hint: met
-      ? `brain has ${total} page(s) (>= ${n})`
-      : `the brain needs >=${n} pages; ingest more first`,
-  };
+  return result(req, met,
+    met ? `${total} page(s) present (>= ${n})` : `${total} page(s) present (< ${n})`,
+    met ? `brain has ${total} page(s) (>= ${n})` : `the brain needs >=${n} pages; ingest more first`);
 }

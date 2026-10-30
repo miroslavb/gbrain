@@ -126,8 +126,8 @@
               "array<string>",
               "number"
             ],
-            "sql": "SELECT * FROM facts WHERE source_id = $1 AND entity_slug = $2 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND embedding IS NOT NULL AND embedding_model=$3 AND embedded_text_hash=md5(fact) AND vector_dims(embedding)=$4 AND source != ALL($5::text[]) ORDER BY embedding <=> '[0.10000000149011612,0.20000000298023224,0.30000001192092896]'::vector LIMIT $6",
-            "textSha256": "71fc68c3afb198e4398f9b82ed2fef9ae7aec1d80e22224ff71df9962731ceda"
+            "sql": "WITH scoped AS MATERIALIZED ( SELECT id, embedding FROM facts WHERE source_id = $1 AND entity_slug = $2 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND embedding IS NOT NULL AND embedding_model=$3 AND embedded_text_hash=md5(fact) AND vector_dims(embedding)=$4 AND source != ALL($5::text[]) ), nearest AS ( SELECT id, embedding <=> '[0.10000000149011612,0.20000000298023224,0.30000001192092896]'::vector AS distance FROM scoped ORDER BY distance, id LIMIT $6 ) SELECT f.* FROM nearest n JOIN facts f ON f.id=n.id ORDER BY n.distance,n.id",
+            "textSha256": "e4abfcf4c8a4b63d86b4e2d6bd247d871a796cb31bd0eee11018a8a42eb73c6c"
           }
         ]
       },
@@ -202,18 +202,20 @@
           {
             "lane": "pool",
             "params": [
-              "string"
+              "string",
+              "array<string>"
             ],
-            "sql": "SELECT COUNT(*) FILTER (WHERE expired_at IS NULL AND (valid_until IS NULL OR valid_until > now())) AS total_active, COUNT(*) FILTER (WHERE expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND created_at > now() - interval '24 hours') AS total_today, COUNT(*) FILTER (WHERE expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND created_at > now() - interval '7 days') AS total_week, COUNT(*) FILTER (WHERE expired_at IS NOT NULL OR (valid_until IS NOT NULL AND valid_until <= now())) AS total_expired, COUNT(*) FILTER (WHERE consolidated_at IS NOT NULL) AS total_consolidated FROM facts WHERE source_id = $1",
-            "textSha256": "fac568056aeac15f4effb7bd1179d1badeffdf99ad80ee9fb4ad2e31a045672a"
+            "sql": "SELECT COUNT(*) FILTER (WHERE expired_at IS NULL AND (valid_until IS NULL OR valid_until > now())) AS total_active, COUNT(*) FILTER (WHERE expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND created_at > now() - interval '24 hours') AS total_today, COUNT(*) FILTER (WHERE expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND created_at > now() - interval '7 days') AS total_week, COUNT(*) FILTER (WHERE expired_at IS NOT NULL OR (valid_until IS NOT NULL AND valid_until <= now())) AS total_expired, COUNT(*) FILTER (WHERE consolidated_at IS NOT NULL) AS total_consolidated FROM facts WHERE source_id = $1 AND source != ALL($2::text[])",
+            "textSha256": "7cb3cbc46722338ba9f5a9886ae378f41f3fb96ea41cf076b78c43041567066a"
           },
           {
             "lane": "pool",
             "params": [
-              "string"
+              "string",
+              "array<string>"
             ],
-            "sql": "SELECT entity_slug, COUNT(*) AS count FROM facts WHERE source_id = $1 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND entity_slug IS NOT NULL GROUP BY entity_slug ORDER BY count DESC, entity_slug ASC LIMIT 5",
-            "textSha256": "56ace3adda95f31651b31273eada0bfb579bc1f3e21bfbf5488f69e3cac9d6e6"
+            "sql": "SELECT entity_slug, COUNT(*) AS count FROM facts WHERE source_id = $1 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND entity_slug IS NOT NULL AND source != ALL($2::text[]) GROUP BY entity_slug ORDER BY count DESC, entity_slug ASC LIMIT 5",
+            "textSha256": "1695a4665413112338267e6e5b10eea40b9c7fcc9125bb0850d7c49ec29b8fac"
           }
         ]
       },
@@ -473,8 +475,8 @@
               "string",
               "array<string>"
             ],
-            "sql": "DELETE FROM facts WHERE source_id = $1 AND source_markdown_slug = $2 AND NOT (COALESCE(source, '') LIKE ANY($3)) AND NOT (row_num IS NULL AND expired_at IS NOT NULL)",
-            "textSha256": "d8bac29d63d7b45be173318debf41fc45c13781f6d72c027a277eb494c004021"
+            "sql": "DELETE FROM facts WHERE source_id = $1 AND source_markdown_slug = $2 AND NOT EXISTS ( SELECT 1 FROM unnest($3::text[]) AS preserved(prefix) WHERE starts_with(COALESCE(source, ''), preserved.prefix) ) AND NOT (row_num IS NULL AND expired_at IS NOT NULL)",
+            "textSha256": "ecc6ebf7dac47dc77b23b065f69c9b6c735dd2f8f0267ddaaa52ae7b360bb172"
           },
           {
             "lane": "tx",

@@ -1,15 +1,17 @@
 /**
  * #7645 class closure, Postgres half (the PGLite half and the rationale are in
- * test/schema-history-upgrade.slow.test.ts): a Postgres brain created by any release
- * since v260 upgrades to the latest schema through initSchema and ends with the
+ * test/schema-history-upgrade.slow.test.ts): a pinned upstream Postgres fixture
+ * since v260 plus explicit fork overlays upgrades through initSchema and ends with the
  * catalog a fresh install has. Each fixture loads into its own throwaway
- * database. Skips without DATABASE_URL.
+ * database. Skips without DATABASE_URL. This does not represent a past fork
+ * release or authorize adapting a nonempty brain (test/FORK_SCHEMA_HISTORY.md).
  */
 import { describe, expect, test } from 'bun:test';
 import postgres from '#postgres';
 import { randomUUID } from 'node:crypto';
 import { PostgresEngine } from '../../src/core/postgres-engine.ts';
-import { LATEST_VERSION } from '../../src/core/migrate.ts';
+import { LATEST_VERSION, MIGRATIONS, runMigrations } from '../../src/core/migrate.ts';
+import { adaptUpstreamSchemaHistoryFixture, expectedHistoryPendingMigrations } from '../helpers/schema-history-fork-adapter.ts';
 import { assertSafeE2eDatabaseUrl } from '../helpers/db-guard.ts';
 import { CATALOG_CONFIGS, FUNCTION_BODIES_SQL, postgresCatalogQuery, withCatalogConfig } from '../helpers/schema-catalog.ts';
 import { snapshotCatalog } from '../helpers/schema-diff.ts';
@@ -51,7 +53,7 @@ async function installedSchema(engine: PostgresEngine): Promise<InstalledSchema>
 describe.skipIf(skip)('Postgres brains created by older releases upgrade to the latest schema (#7645, E2E)', () => {
   let fresh: InstalledSchema | undefined;
   for (const version of skip ? [] : schemaHistoryVersions('postgres')) {
-    test(`v${version} brain reaches v${LATEST_VERSION} through initSchema`, async () => {
+    test(`upstream v${version} plus explicit fork overlays reaches v${LATEST_VERSION} through initSchema`, async () => {
       await withCatalogConfig(CATALOG_CONFIGS[0], async () => {
         fresh ??= await withFreshDatabase(async (url) => {
           const engine = new PostgresEngine();
@@ -74,8 +76,14 @@ describe.skipIf(skip)('Postgres brains created by older releases upgrade to the 
           try {
             await engine.connect({ database_url: url, poolSize: 2 });
             expect(await engine.getConfig('version')).toBe(String(version));
+            const forkVersion = await adaptUpstreamSchemaHistoryFixture(engine, version);
+            const pending = MIGRATIONS.filter(m => m.version > forkVersion).map(({ version, name }) => ({ version, name }));
+            expect(pending).toEqual(expectedHistoryPendingMigrations(version));
+            expect(pending).toHaveLength(281 - version);
             await engine.initSchema();
             expect(await engine.getConfig('version')).toBe(String(LATEST_VERSION));
+            expect(schemaHistoryDrift(fresh!, await installedSchema(engine))).toBe('');
+            expect(await runMigrations(engine)).toEqual({ applied: 0, current: LATEST_VERSION });
             expect(schemaHistoryDrift(fresh!, await installedSchema(engine))).toBe('');
           } finally {
             await engine.disconnect();

@@ -831,9 +831,6 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
     // stored its rows after that many empty slots: a one-row read came back as [empty, row], so a reader that requires
     // exactly one row refused and `const [row] = rows` read nothing.
     query = results = errorResponse = null
-    // Errors/cancellation can arrive after DataRow without CommandComplete.
-    // A new result must start at index zero, even on that partial-row path.
-    rows = 0
     result = new Result()
     rows = 0
     connectTimer.cancel()

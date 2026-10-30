@@ -50,18 +50,7 @@ import { addPageTags } from './page-state/tags.ts';
 import { computeEffectiveDate, fallbackCreatedAt, isValidTimeZone } from './effective-date.ts';
 import { MARKDOWN_CHUNKER_VERSION } from './chunkers/recursive.ts';
 import { logSlugFallback } from './audit-slug-fallback.ts';
-import { assessContentSanity, ContentSanityBlockError } from './content-sanity.ts';
-import { loadOperatorLiterals } from './content-sanity-literals.ts';
-import { logContentSanityAssessment } from './audit/content-sanity-audit.ts';
-import { buildEmbedSkipMarker, EMBED_SKIP_KEY } from './embed-skip.ts';
-import {
-  QUARANTINE_KEY,
-  CONTENT_FLAG_KEY,
-  dropOversizedGateMarkers,
-  buildQuarantineMarker,
-  buildContentFlagMarker,
-} from './quarantine.ts';
-import { loadConfig, loadConfigWithEngine } from './config.ts';
+import { dropOversizedGateMarkers } from './quarantine.ts';
 import { isEmbedSkipped } from './embed-skip.ts';
 import {
   buildContextualPrefix,

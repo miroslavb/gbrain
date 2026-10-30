@@ -1727,6 +1727,26 @@ CREATE INDEX IF NOT EXISTS proposal_page_runs_cache_idx
 CREATE INDEX IF NOT EXISTS proposal_page_runs_run_idx
   ON proposal_page_runs (proposal_run_id, completed_at);
 
+-- Fork receipt table: preserve explicit exemptions and protect both public and
+-- search-path relations only when the current role owns and can bypass RLS.
+DO $fork_proposal_rls$
+DECLARE rel RECORD;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    FOR rel IN
+      SELECT c.oid::regclass AS identity
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE c.relkind = 'r' AND c.relname = 'proposal_page_runs'
+         AND (n.nspname = 'public' OR c.oid = to_regclass('proposal_page_runs'))
+         AND NOT c.relrowsecurity AND pg_has_role(current_user, c.relowner, 'USAGE')
+         AND COALESCE(obj_description(c.oid, 'pg_class'), '') !~ '^GBRAIN:RLS_EXEMPT\s+reason=\S.{3,}'
+       ORDER BY c.oid
+    LOOP
+      EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', rel.identity);
+    END LOOP;
+  END IF;
+END $fork_proposal_rls$;
+
 -- take_grade_cache: grade_takes verdict cache. Composite PK on
 -- (take_id, prompt_version, judge_model_id, evidence_signature) means
 -- prompt edits OR evidence changes cleanly invalidate prior verdicts.
@@ -3682,11 +3702,14 @@ CREATE TABLE IF NOT EXISTS sync_notifier_sources (
 DO $harden$
 DECLARE f RECORD;
 BEGIN
-  FOR f IN SELECT p.oid::regprocedure AS sig, substr(c.setting, 13) AS path
-    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace CROSS JOIN LATERAL unnest(p.proconfig) AS c(setting)
-    WHERE n.nspname = 'public' AND p.prokind = 'f' AND c.setting IN ('search_path=pg_catalog, public', 'search_path=pg_catalog')
-      AND p.proname IN ('auto_enable_rls', 'bump_page_generation_clock_fn', 'bump_page_generation_fn', 'enforce_minion_queue_protocol', 'gbrain_advance_page_revision', 'gbrain_advance_tag_revision', 'gbrain_bump_trust_generation', 'gbrain_clear_atom_page_state', 'gbrain_count_git_canonical_sources', 'gbrain_count_modifications', 'gbrain_forget_page_retrievals', 'gbrain_fts_input', 'gbrain_graduation_fence', 'gbrain_guard_effect_protocol', 'gbrain_guard_inserted_facts', 'gbrain_guard_protocol_activation', 'gbrain_guard_request_protocol', 'gbrain_guard_skill_publication', 'gbrain_lease_shared_skill_delivery', 'gbrain_mark_derivation_scope_entry', 'gbrain_preserve_fact_withdrawal', 'gbrain_queue_page_projection', 'gbrain_refuse_purged_fact', 'gbrain_refuse_purged_page', 'gbrain_refuse_purged_take', 'gbrain_refuse_purging_derivation', 'gbrain_require_managed_writer', 'gbrain_require_persistence_protocol', 'gbrain_snapshot_version_trust', 'gbrain_stamp_revision_attribution', 'gbrain_stamp_trust_tier', 'gbrain_stamp_version_attribution', 'gbrain_stamp_write_attribution', 'gbrain_try_jsonb', 'notify_minion_job_change', 'update_chunk_search_vector', 'update_page_search_vector')
-      AND pg_has_role(current_user, p.proowner, 'USAGE')
+  FOR f IN SELECT p.oid::regprocedure::text AS sig,
+       COALESCE(substr(c.setting, 13), CASE WHEN p.proname = 'gbrain_fts_input' THEN 'pg_catalog' ELSE 'pg_catalog, public' END) AS path
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  LEFT JOIN LATERAL (SELECT setting FROM unnest(p.proconfig) AS s(setting) WHERE setting LIKE 'search_path=%') c ON true
+ WHERE n.nspname = 'public' AND p.prokind = 'f'
+   AND p.oid = ANY(ARRAY[to_regprocedure('public.auto_enable_rls()'), to_regprocedure('public.bump_page_generation_clock_fn()'), to_regprocedure('public.bump_page_generation_fn()'), to_regprocedure('public.enforce_minion_queue_protocol()'), to_regprocedure('public.gbrain_advance_page_revision()'), to_regprocedure('public.gbrain_advance_tag_revision()'), to_regprocedure('public.gbrain_bump_trust_generation()'), to_regprocedure('public.gbrain_clear_atom_page_state()'), to_regprocedure('public.gbrain_count_git_canonical_sources()'), to_regprocedure('public.gbrain_count_modifications()'), to_regprocedure('public.gbrain_forget_page_retrievals()'), to_regprocedure('public.gbrain_fts_input(text)'), to_regprocedure('public.gbrain_graduation_fence()'), to_regprocedure('public.gbrain_guard_effect_protocol()'), to_regprocedure('public.gbrain_guard_inserted_facts()'), to_regprocedure('public.gbrain_guard_protocol_activation()'), to_regprocedure('public.gbrain_guard_request_protocol()'), to_regprocedure('public.gbrain_guard_skill_publication()'), to_regprocedure('public.gbrain_lease_shared_skill_delivery()'), to_regprocedure('public.gbrain_mark_derivation_scope_entry()'), to_regprocedure('public.gbrain_preserve_fact_withdrawal()'), to_regprocedure('public.gbrain_queue_page_projection()'), to_regprocedure('public.gbrain_refuse_purged_fact()'), to_regprocedure('public.gbrain_refuse_purged_page()'), to_regprocedure('public.gbrain_refuse_purged_take()'), to_regprocedure('public.gbrain_refuse_purging_derivation()'), to_regprocedure('public.gbrain_require_managed_writer()'), to_regprocedure('public.gbrain_require_persistence_protocol(integer)'), to_regprocedure('public.gbrain_snapshot_version_trust()'), to_regprocedure('public.gbrain_stamp_revision_attribution()'), to_regprocedure('public.gbrain_stamp_trust_tier()'), to_regprocedure('public.gbrain_stamp_version_attribution()'), to_regprocedure('public.gbrain_stamp_write_attribution()'), to_regprocedure('public.gbrain_try_jsonb(text)'), to_regprocedure('public.notify_minion_job_change()'), to_regprocedure('public.update_chunk_search_vector()'), to_regprocedure('public.update_page_search_vector()')]::oid[])
+   AND (c.setting IS NULL OR c.setting IN ('search_path=pg_catalog, public', 'search_path=pg_catalog'))
+    AND pg_has_role(current_user, p.proowner, 'USAGE')
     ORDER BY 1
   LOOP
     EXECUTE format('ALTER FUNCTION %s SET search_path = %s, pg_temp', f.sig, f.path);

@@ -35,25 +35,35 @@ export const PINNED_FUNCTION_NAMES = [
   'notify_minion_job_change', 'update_chunk_search_vector', 'update_page_search_vector',
 ] as const;
 
+/** Exact native identities: a same-name application overload is not a gbrain function. */
+export const PINNED_FUNCTION_SIGNATURES = PINNED_FUNCTION_NAMES.map(name => {
+  const args = name === 'gbrain_fts_input' || name === 'gbrain_try_jsonb' ? 'text'
+    : name === 'gbrain_require_persistence_protocol' ? 'integer' : '';
+  return `public.${name}(${args})`;
+});
+
+/** Includes NULL/empty proconfig and functions carrying only unrelated GUCs. */
+export const FUNCTION_SEARCH_PATH_PROBLEMS_SQL = `SELECT p.oid::regprocedure::text AS sig,
+       COALESCE(substr(c.setting, 13), CASE WHEN p.proname = 'gbrain_fts_input' THEN 'pg_catalog' ELSE 'pg_catalog, public' END) AS path
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  LEFT JOIN LATERAL (SELECT setting FROM unnest(p.proconfig) AS s(setting) WHERE setting LIKE 'search_path=%') c ON true
+ WHERE n.nspname = 'public' AND p.prokind = 'f'
+   AND p.oid = ANY(ARRAY[${PINNED_FUNCTION_SIGNATURES.map(sig => `to_regprocedure('${sig}')`).join(', ')}]::oid[])
+   AND (c.setting IS NULL OR c.setting IN (${LEGACY_SEARCH_PATH_SETTINGS.map(v => `'${v}'`).join(', ')}))`;
+
 /**
- * Appends pg_temp to the pinned search_path of every gbrain function (PINNED_FUNCTION_NAMES) in public the current
- * role may alter that still pins `pg_catalog, public` or `pg_catalog`. A function the role does not own is
- * left as it was, and so is a procedure (ALTER FUNCTION refuses one, and gbrain installs none). Shared by the schema blob (its last statement, so a replay's CREATE OR REPLACE never leaves a function
- * without it), the migration, the end of every migration run (src/core/migrate.ts: a migration that re-creates a
- * function resets its path, and the run may stop before v277) and `gbrain reindex-search-vector`, which rewrites the
- * search_vector trigger functions.
+ * Repairs known native signatures with missing or legacy settings, only when the current role may ALTER them.
+ * Appends pg_temp after the original schemas; a missing setting gets the native catalog/public path (catalog only
+ * for gbrain_fts_input). Does not rewrite bodies, owners, security modes, unrelated GUCs or application overloads.
+ * Shared by fresh schemas, forward convergence, head repair and reindex-search-vector.
  */
 export const FUNCTION_SEARCH_PATH_HARDENING_SQL = `DO $harden$
 DECLARE f RECORD;
 BEGIN
-  FOR f IN SELECT p.oid::regprocedure AS sig, substr(c.setting, 13) AS path
-    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace CROSS JOIN LATERAL unnest(p.proconfig) AS c(setting)
-    WHERE n.nspname = 'public' AND p.prokind = 'f' AND c.setting IN (${LEGACY_SEARCH_PATH_SETTINGS.map(v => `'${v}'`).join(', ')})
-      AND p.proname IN (${PINNED_FUNCTION_NAMES.map(name => `'${name}'`).join(', ')})
-      AND pg_has_role(current_user, p.proowner, 'USAGE')
+  FOR f IN ${FUNCTION_SEARCH_PATH_PROBLEMS_SQL}
+    AND pg_has_role(current_user, p.proowner, 'USAGE')
     ORDER BY 1
   LOOP
     EXECUTE format('ALTER FUNCTION %s SET search_path = %s, pg_temp', f.sig, f.path);
   END LOOP;
 END $harden$;`;
-

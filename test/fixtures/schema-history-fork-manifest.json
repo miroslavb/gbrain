@@ -1,0 +1,684 @@
+{
+  "formatVersion": 1,
+  "upstreamCommit": "f48cc461965af08581be7cec7b66a1a67c4839af",
+  "fixtureDescription": "Unmodified upstream fresh empty brains plus explicit fork overlays; not historical fork releases",
+  "fixtures": [
+    {
+      "engine": "pglite",
+      "upstreamVersion": 260,
+      "forkVersion": 268,
+      "sha256": "9918e17556fa92abccac62407a183460de6eff0fec5ffdbed51a28f2c5535d7f",
+      "tableCount": 149,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 261,
+      "forkVersion": 269,
+      "sha256": "91ab89a0ebcef115a6146dcd536f6245054a45e1f68c0c63463ed94bed0f8b3d",
+      "tableCount": 149,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 262,
+      "forkVersion": 270,
+      "sha256": "0fe9bd157d43f9972022ea7e42d65a118d42c611da1a3bd37dd8f1d5509a4908",
+      "tableCount": 152,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 263,
+      "forkVersion": 271,
+      "sha256": "a6a2042061f3d3e5258c8f7ae6b40f1775fed34b01f6f47cbcaa46465689c516",
+      "tableCount": 152,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 264,
+      "forkVersion": 272,
+      "sha256": "75fbd88a07177accca37efd1e7f54737a658f002b284c785e23f229df85061be",
+      "tableCount": 152,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 265,
+      "forkVersion": 273,
+      "sha256": "ad0b41d9e6bc004de3ab9cd438ddcf26181e6bae1c0f23668c785d0be06fe7f7",
+      "tableCount": 156,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 266,
+      "forkVersion": 274,
+      "sha256": "54a5d700da40ad6dc82a70d646999e9c108a59e6351779750c6b1b2fd57c199e",
+      "tableCount": 157,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 267,
+      "forkVersion": 275,
+      "sha256": "ab73d65f02a7700a1476a092d1089b8cf4986084a990ca04477ac915cc883da9",
+      "tableCount": 157,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 268,
+      "forkVersion": 276,
+      "sha256": "958fda7fb7d4636cb980c49e2507ae377db8a8c96797bb129ce4d8595dcda786",
+      "tableCount": 157,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 269,
+      "forkVersion": 277,
+      "sha256": "5ff5998931b09db2e50c0bf1f975da5b5b204584dd7c7338a0a9f78ffaf0fde3",
+      "tableCount": 157,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 270,
+      "forkVersion": 278,
+      "sha256": "d523b48741636f781456bd5abbb7022d36856a7f7f8d5f961548226c67b79983",
+      "tableCount": 157,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 271,
+      "forkVersion": 279,
+      "sha256": "c80f4b16216a9c05026b064f7c65fc013f5357a8ec801bc5c900cc2f02f206d4",
+      "tableCount": 157,
+      "seedCounts": {
+        "config": 7,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 272,
+      "forkVersion": 280,
+      "sha256": "c48ae6eb8e6a843ac796d8a85d0f8bba04ba539fe9d75e3422c084b37c9cb4f8",
+      "tableCount": 158,
+      "seedCounts": {
+        "config": 7,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 273,
+      "forkVersion": 281,
+      "sha256": "d01eff7511a937f322ba1cdcabc54c8e7d2a93aa5a19836c120a3f6842708d65",
+      "tableCount": 162,
+      "seedCounts": {
+        "config": 7,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 274,
+      "forkVersion": 282,
+      "sha256": "758c7890f54a32fa17e535792cf9f7b5f8a749576da4ee52d5968fee8b7522f9",
+      "tableCount": 162,
+      "seedCounts": {
+        "config": 7,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "pglite",
+      "upstreamVersion": 275,
+      "forkVersion": 283,
+      "sha256": "ac3deff3e78f86c3b4a5a18513501fedc0af93df0f2ca104722a6fbbb994eb2d",
+      "tableCount": 162,
+      "seedCounts": {
+        "config": 7,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 260,
+      "forkVersion": 268,
+      "sha256": "42ec37d69a51843cbe3189596612dd1cef19b683a85c50de522b6fb7008caecb",
+      "tableCount": 148,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 261,
+      "forkVersion": 269,
+      "sha256": "f9b9929a861624a3b28613f345f9fa4cc2afb3fb532264713f8a2d36b9a72db6",
+      "tableCount": 148,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 262,
+      "forkVersion": 270,
+      "sha256": "cfa64227cff47626166a09d136e2257389b6107f993e6890a6c071e6b4f9d5be",
+      "tableCount": 151,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 263,
+      "forkVersion": 271,
+      "sha256": "afc7042eecfe7aecabf764ddcfa5810e02c42c0e2e14165cc3a0e4aa85a8752e",
+      "tableCount": 151,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 264,
+      "forkVersion": 272,
+      "sha256": "68fddceed437f68e98f510e7c9b68800dcf92df35ade67d873663a6dd62a5651",
+      "tableCount": 151,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 265,
+      "forkVersion": 273,
+      "sha256": "c1dbe11e9b778afb376ae9ca711bf7f664db0c8fbfc5ae070112ced5524d82fd",
+      "tableCount": 155,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 266,
+      "forkVersion": 274,
+      "sha256": "4662130d1a879c1b0fc22eb6e79c9b64e744c206912c5430455b21c1f827707d",
+      "tableCount": 156,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 267,
+      "forkVersion": 275,
+      "sha256": "6afd0b51b806e166bf5f8a48ab119b411ee9cfd98eb13ac2bf313e4ae5328693",
+      "tableCount": 156,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 268,
+      "forkVersion": 276,
+      "sha256": "2ed5e7b65fd98deeafc76f06513d27c88a26e121fb688a45ec79942b52be0fe2",
+      "tableCount": 156,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 269,
+      "forkVersion": 277,
+      "sha256": "e11c87cdf53a12c6093d6d9fb4b2ad4245d12c55f69b8cc5b72317551361165c",
+      "tableCount": 156,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 270,
+      "forkVersion": 278,
+      "sha256": "0783365313df5e47005a31c2aa8ee7338a624f9d458f096cc4953ab6f286a129",
+      "tableCount": 156,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 271,
+      "forkVersion": 279,
+      "sha256": "951f87dc36de6b3f3a787ec18971958d363452274f75fd70e1355f412e02aad9",
+      "tableCount": 156,
+      "seedCounts": {
+        "config": 6,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 272,
+      "forkVersion": 280,
+      "sha256": "84a86e29fd0e54e225149f17fd8bed2cabece136b8ac950d5506a3df31f2b0eb",
+      "tableCount": 157,
+      "seedCounts": {
+        "config": 6,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 273,
+      "forkVersion": 281,
+      "sha256": "c97f5903b6b6245d2948edd095c50b130bdf83ceeb99078859a4b271d86844fb",
+      "tableCount": 161,
+      "seedCounts": {
+        "config": 6,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 274,
+      "forkVersion": 282,
+      "sha256": "4a5bdfbf2bbd10b8e17a02a7321520ee7310563d2ffd3935ad3009205d4bca09",
+      "tableCount": 161,
+      "seedCounts": {
+        "config": 6,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "upstreamVersion": 275,
+      "forkVersion": 283,
+      "sha256": "1631cdcecb74da97e49f7e0006873cbd788fe960189d78dd93c849c3672fb620",
+      "tableCount": 161,
+      "seedCounts": {
+        "config": 6,
+        "git_canonical_brain": 1,
+        "op_checkpoints": 1,
+        "page_generation_clock": 1,
+        "persistence_brain": 1,
+        "shared_skill_state": 1,
+        "sources": 1,
+        "trust_policy_state": 1
+      }
+    }
+  ],
+  "forkOverlays": [
+    {
+      "version": 141,
+      "name": "links_identity_nulls_not_distinct_repair",
+      "path": "src/core/schema-migrations/v141-links-identity-nulls-not-distinct-repair.ts",
+      "sha256": "2b1684d97e2c962716978e11f0a136bf08627e83085a36a0871264f0a2701f80"
+    },
+    {
+      "version": 142,
+      "name": "grounded_take_proposal_receipts",
+      "path": "src/core/schema-migrations/v142-grounded-take-proposal-receipts.ts",
+      "sha256": "49f4e57bece9480698989830f421723bc61227ccaaff4d2538f1af188fc5c6d6"
+    },
+    {
+      "version": 143,
+      "name": "take_proposal_rejection_reason_receipts",
+      "path": "src/core/schema-migrations/v143-take-proposal-rejection-reason-receipts.ts",
+      "sha256": "c0e181b9f44112a1a6bccebff0c08a669478b00d41fb43b722e230f202e8c107"
+    },
+    {
+      "version": 144,
+      "name": "take_proposal_rejection_reason_jsonb_object",
+      "path": "src/core/schema-migrations/v144-take-proposal-rejection-reason-jsonb-object.ts",
+      "sha256": "b9e2ba725fd604957f996cd5e12cc074bf7226356b841149b1737755a81c173b"
+    },
+    {
+      "version": 145,
+      "name": "legacy_extract_receipt_raw_trace_exemptions",
+      "path": "src/core/schema-migrations/v145-legacy-extract-receipt-raw-trace-exemptions.ts",
+      "sha256": "bd584b68402f67a807c053458aa34f6fea3146db6720425ff0add589746296ee"
+    },
+    {
+      "version": 146,
+      "name": "extract_health_current_state",
+      "path": "src/core/schema-migrations/v146-extract-health-current-state.ts",
+      "sha256": "99ee68ce7c0d953ac51f123db8b61e2ffdda28769b4f323ff9429697efe39a60"
+    },
+    {
+      "version": 147,
+      "name": "world_only_host_visibility",
+      "path": "src/core/schema-migrations/v147-world-only-host-visibility.ts",
+      "sha256": "abca091ebc012536dfc9e0770f5b5e2fd41d28d063a64de2e2c05565bae1cd59"
+    },
+    {
+      "version": 152,
+      "name": "world_only_host_visibility_convergence_guard",
+      "path": "src/core/schema-migrations/v152-world-only-host-visibility-convergence-guard.ts",
+      "sha256": "11f1828ae9589b423a54bda0d86dad86b2c8e2b84bf06099152542858629ee83"
+    }
+  ],
+  "sharedPendingMigrations": [
+    {
+      "upstreamVersion": 261,
+      "forkVersion": 269,
+      "name": "persistence_request_transient_retries"
+    },
+    {
+      "upstreamVersion": 262,
+      "forkVersion": 270,
+      "name": "commit_notifier"
+    },
+    {
+      "upstreamVersion": 263,
+      "forkVersion": 271,
+      "name": "try_jsonb_function"
+    },
+    {
+      "upstreamVersion": 264,
+      "forkVersion": 272,
+      "name": "set_based_fact_insert_guards"
+    },
+    {
+      "upstreamVersion": 265,
+      "forkVersion": 273,
+      "name": "derived_generations"
+    },
+    {
+      "upstreamVersion": 266,
+      "forkVersion": 274,
+      "name": "derived_generation_activations"
+    },
+    {
+      "upstreamVersion": 267,
+      "forkVersion": 275,
+      "name": "pages_title_search_index"
+    },
+    {
+      "upstreamVersion": 268,
+      "forkVersion": 276,
+      "name": "effect_claim_owner"
+    },
+    {
+      "upstreamVersion": 269,
+      "forkVersion": 277,
+      "name": "links_supersedes_index"
+    },
+    {
+      "upstreamVersion": 270,
+      "forkVersion": 278,
+      "name": "pages_source_created_index"
+    },
+    {
+      "upstreamVersion": 271,
+      "forkVersion": 279,
+      "name": "facts_superseded_by_index"
+    },
+    {
+      "upstreamVersion": 272,
+      "forkVersion": 280,
+      "name": "git_canonical_declared"
+    },
+    {
+      "upstreamVersion": 273,
+      "forkVersion": 281,
+      "name": "segment_derivations"
+    },
+    {
+      "upstreamVersion": 274,
+      "forkVersion": 282,
+      "name": "pages_withheld_source_path"
+    },
+    {
+      "upstreamVersion": 275,
+      "forkVersion": 283,
+      "name": "rls_backfill_unguarded_tables"
+    },
+    {
+      "upstreamVersion": 276,
+      "forkVersion": 284,
+      "name": "persistence_foreground_committed_index"
+    },
+    {
+      "upstreamVersion": 277,
+      "forkVersion": 285,
+      "name": "function_search_path_pg_temp"
+    },
+    {
+      "upstreamVersion": 278,
+      "forkVersion": 286,
+      "name": "writer_fence_fail_closed"
+    },
+    {
+      "upstreamVersion": 279,
+      "forkVersion": 287,
+      "name": "outcome_markers_skip_purge_guard"
+    }
+  ],
+  "forwardForkMigrations": [
+    {
+      "version": 288,
+      "name": "fork_function_search_path_convergence"
+    },
+    {
+      "version": 289,
+      "name": "fork_state_tables_rls"
+    }
+  ]
+}

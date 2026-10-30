@@ -4,11 +4,12 @@
  * release's own engine and stored as gzipped SQL under
  * test/fixtures/schema-history/<engine>/v<N>.sql.gz.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { diffCatalogSnapshots, formatCatalogDiffForFailure, type CatalogSnapshot } from './schema-diff.ts';
 
-export type SchemaHistoryEngine = 'pglite' | 'postgres';
+import { verifiedSchemaHistoryFixture, type SchemaHistoryEngine } from './schema-history-fixture.ts';
+export type { SchemaHistoryEngine } from './schema-history-fixture.ts';
 
 /** The first schema version with a fixture; the fixtures run contiguously from here to the newest one captured. */
 export const FIRST_SCHEMA_HISTORY_VERSION = 260;
@@ -24,7 +25,7 @@ export function schemaHistoryVersions(engine: SchemaHistoryEngine): number[] {
 }
 
 export function schemaHistorySql(engine: SchemaHistoryEngine, version: number): string {
-  return Buffer.from(Bun.gunzipSync(readFileSync(join(SCHEMA_HISTORY_DIR, engine, `v${version}.sql.gz`)))).toString('utf8');
+  return verifiedSchemaHistoryFixture(engine, version).sql;
 }
 
 export interface InstalledSchema {

@@ -138,7 +138,7 @@
           "getVersions: <B extends boolean = true>(slug: string, opts?: GetVersionsOpts<B>) => Promise<PageVersionRows<B>>",
           "initSchema: () => Promise<void>",
           "insertFact: (input: NewFact, ctx: { source_id: string; supersedeId?: number; }) => Promise<{ id: number; status: FactInsertStatus; }>",
-          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; }>, ctx: { source_id: string; }, opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean; }; }) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
+          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; supersedes_fact_id?: number; }>, ctx: { source_id: string; }, opts?: FactBatchInsertOpts) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
           "invalidateContentDriftEmbeddings: (opts?: { sourceId?: string; }) => Promise<number>",
           "invalidateStaleSignatureEmbeddings: (opts: { signature: string; sourceId?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "keywordBoundedRead: <T>(read: (db: Pick<BrainEngine, \"executeRaw\">) => Promise<T>) => Promise<T>",
@@ -261,6 +261,7 @@
           "embed_coverage_score: number",
           "entity_page_count: number",
           "entity_types_status: \"resolved\" | \"pack_unavailable\"",
+          "graph_scope?: GraphScopeStats | undefined",
           "link_coverage: number | null",
           "link_density_score: number",
           "linkable_page_count: number",
@@ -1148,7 +1149,7 @@
           "getVersions: <B extends boolean = true>(slug: string, opts?: GetVersionsOpts<B>) => Promise<PageVersionRows<B>>",
           "initSchema: (opts?: { embedding?: { dimensions: number; model: string; }; }) => Promise<void>",
           "insertFact: (input: NewFact, ctx: { source_id: string; supersedeId?: number; }) => Promise<{ id: number; status: FactInsertStatus; }>",
-          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; }>, ctx: { source_id: string; }, opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean; }; }) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
+          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; supersedes_fact_id?: number; }>, ctx: { source_id: string; }, opts?: FactBatchInsertOpts) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
           "invalidateContentDriftEmbeddings: (opts?: { sourceId?: string; }) => Promise<number>",
           "invalidateStaleSignatureEmbeddings: (opts: { signature: string; sourceId?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "keywordBoundedRead: <T>(read: (db: Pick<BrainEngine, \"executeRaw\">) => Promise<T>) => Promise<T>",
@@ -1745,6 +1746,7 @@
           "abortSignal?: AbortSignal | undefined",
           "allowFallback?: boolean | undefined",
           "cacheSystem?: boolean | undefined",
+          "fallbackChain?: readonly string[] | undefined",
           "maxTokens?: number | undefined",
           "messages: ChatMessage[]",
           "model?: string | undefined",
@@ -2778,6 +2780,7 @@
           "embedding_model?: string | undefined",
           "embedding_multimodal?: boolean | undefined",
           "embedding_multimodal_model?: string | undefined",
+          "embedding_query_prefix?: string | undefined",
           "engine: \"postgres\" | \"pglite\"",
           "eval?: { capture?: boolean; scrub_pii?: boolean; } | undefined",
           "expansion_model?: string | undefined",
@@ -3474,7 +3477,7 @@
           "getVersions: <B extends boolean = true>(slug: string, opts?: GetVersionsOpts<B>) => Promise<PageVersionRows<B>>",
           "initSchema: () => Promise<void>",
           "insertFact: (input: NewFact, ctx: { source_id: string; supersedeId?: number; }) => Promise<{ id: number; status: FactInsertStatus; }>",
-          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; }>, ctx: { source_id: string; }, opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean; }; }) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
+          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; supersedes_fact_id?: number; }>, ctx: { source_id: string; }, opts?: FactBatchInsertOpts) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
           "invalidateContentDriftEmbeddings: (opts?: { sourceId?: string; }) => Promise<number>",
           "invalidateStaleSignatureEmbeddings: (opts: { signature: string; sourceId?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "keywordBoundedRead: <T>(read: (db: Pick<BrainEngine, \"executeRaw\">) => Promise<T>) => Promise<T>",
@@ -4405,6 +4408,21 @@
       {
         "kind": "interface",
         "members": [
+          "catchUp: boolean",
+          "dryRun: boolean",
+          "includeFrontmatter?: boolean | undefined",
+          "jsonMode: boolean",
+          "maxPages?: number | undefined",
+          "quiet?: boolean | undefined",
+          "retryHeld?: boolean | undefined",
+          "sourceIdFilter?: string | undefined",
+          "timeBudgetMs?: number | undefined"
+        ],
+        "name": "ExtractStaleFromDBOpts"
+      },
+      {
+        "kind": "interface",
+        "members": [
           "context: string",
           "from_slug: string",
           "link_source?: string | undefined",
@@ -4500,7 +4518,7 @@
         "kind": "function",
         "name": "extractStaleFromDB",
         "signature": [
-          "(engine: BrainEngine, opts: { dryRun: boolean; jsonMode: boolean; quiet?: boolean; includeFrontmatter?: boolean; sourceIdFilter?: string; catchUp: boolean; timeBudgetMs?: number; retryHeld?: boolean; }) => Promise<{ linksCreated: number; timelineCreated: number; pagesProcessed: number; staleRemaining: number; skippedMissingTarget?: number; skippedCrossSource?: number; skippedAttendanceIncomplete?: number; skippedChanged?: number; skippedConcurrentWrite?: number; skippedUnknownSource?: number; mentions?: MentionPassResult; linkFailed?: number; linkFailures?: LinkExtractionFailure[]; linkSystemic?: LinkExtractionSystemic[]; }>"
+          "(engine: BrainEngine, opts: ExtractStaleFromDBOpts) => Promise<{ linksCreated: number; timelineCreated: number; pagesProcessed: number; staleRemaining: number; pageCapHit?: boolean; pagesAdmitted?: number; mentionsDeferred?: boolean; skippedMissingTarget?: number; skippedCrossSource?: number; skippedAttendanceIncomplete?: number; skippedChanged?: number; skippedConcurrentWrite?: number; skippedUnknownSource?: number; mentions?: MentionPassResult; linkFailed?: number; linkFailures?: LinkExtractionFailure[]; linkSystemic?: LinkExtractionSystemic[]; }>"
         ]
       },
       {
@@ -5837,7 +5855,7 @@
         "kind": "function",
         "name": "parseMarkdownHead",
         "signature": [
-          "(content: string, opts?: ParseOpts) => ParsedMarkdownHead"
+          "(content: string, opts?: ParseOpts, filePath?: string) => ParsedMarkdownHead"
         ]
       },
       {
@@ -6780,7 +6798,7 @@
           "getVersions: <B extends boolean = true>(slug: string, opts?: GetVersionsOpts<B>) => Promise<PageVersionRows<B>>",
           "initSchema: () => Promise<void>",
           "insertFact: (input: NewFact, ctx: { source_id: string; supersedeId?: number; }) => Promise<{ id: number; status: FactInsertStatus; }>",
-          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; }>, ctx: { source_id: string; }, opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean; }; }) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
+          "insertFacts: (rows: Array<NewFact & { row_num: number; source_markdown_slug: string; superseded_by_row?: number; }>, ctx: { source_id: string; }, opts?: FactBatchInsertOpts) => Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number; }>",
           "invalidateContentDriftEmbeddings: (opts?: { sourceId?: string; }) => Promise<number>",
           "invalidateStaleSignatureEmbeddings: (opts: { signature: string; sourceId?: string; includeNullSignature?: boolean; }) => Promise<number>",
           "keywordBoundedRead: <T>(read: (db: Pick<BrainEngine, \"executeRaw\">) => Promise<T>) => Promise<T>",
@@ -8607,6 +8625,7 @@
           "embed_coverage_score: number",
           "entity_page_count: number",
           "entity_types_status: \"resolved\" | \"pack_unavailable\"",
+          "graph_scope?: GraphScopeStats | undefined",
           "link_coverage: number | null",
           "link_density_score: number",
           "linkable_page_count: number",

@@ -1,7 +1,7 @@
 import type { BrainEngine } from '../../../core/engine.ts';
 import type { Check } from '../../doctor.ts';
 import { agentFix, checkError, doctorVerify, infoCheck } from '../check-fix.ts';
-import { PAGE_BODY_CONFIG_KEYS, parseSegmentedStorage, readPageBodyPolicy, segmentedWriterBlockers, SEGMENTED_WRITER_WINDOW_DAYS } from '../../../core/page-body/limits.ts';
+import { PAGE_BODY_CONFIG_KEYS, parseSegmentedStorage, readPageBodyPolicy, segmentedStorageRequested, segmentedWriterBlockers, SEGMENTED_WRITER_WINDOW_DAYS } from '../../../core/page-body/limits.ts';
 import { SEGMENTED_WRITER_FLOOR } from '../../../core/page-body/writer-floor.ts';
 import { existingLocalHostId } from '../../../core/persistence/identity.ts';
 import { liveSegmentedBlockers } from '../../../core/persistence/segmented-gate-hold.ts';
@@ -32,6 +32,9 @@ export async function segmentedStorageCheck(engine: BrainEngine): Promise<Check>
       window_days: SEGMENTED_WRITER_WINDOW_DAYS, blockers: listed, truncated: blockers.length > SAMPLE, docs: DOCS };
     if (configured === 'off') return infoCheck(name, 'Segmented page storage is off by choice (pages.segmented_storage=off): pages over 1 MiB are stored inline up to 24 MiB; pages already stored in segments stay readable.',
       'disabled_by_choice', enableFix('Turns segmented storage back on: pages over 1 MiB are stored in segments, up to the engine ceiling.'), details);
+    if (configured === 'unset' && !segmentedStorageRequested(configured)) return infoCheck(name,
+      'Segmented page storage is off by default on this host fork (pages.segmented_storage is unset): pages over 1 MiB are stored inline up to 24 MiB; pages already stored in segments stay readable.',
+      'disabled_by_choice', enableFix('Explicitly opts into segmented storage, subject to the writer compatibility gate.'), details);
     if (configured === 'invalid') return { name, status: 'warn', details, fix: enableFix('Replaces the unrecognized value with on.'),
       message: 'pages.segmented_storage holds an unrecognized value, so segmented page storage is off. Set it to on or off.' };
     const hosts = listed.map(row => `host ${row.host_id ?? 'unknown (not recorded)'} (principal ${row.principal}) ${row.role} ${row.version}, last seen ${row.last_seen}`);
@@ -51,6 +54,8 @@ export async function segmentedStorageCheck(engine: BrainEngine): Promise<Check>
         fix: { argv: ['gbrain', 'upgrade'], consent: [], actor: 'host_admin', requires_exclusive: false, verify: doctorVerify(name), docs: DOCS,
           why: 'Run on each host doctor names (by host UUID), then restart its gbrain processes; the hold clears once no older writer has written for seven days.' } };
     }
+    if (!policy.segmented) return checkError(name, 'confirm segmented storage is enabled',
+      new Error('The configured switch requests segmented storage, but the effective write policy is off; recheck configuration and writer-gate reads.'), { details });
     return { name, status: 'ok', details,
       message: `Segmented page storage is on: pages over 1 MiB are stored in segments, up to ${policy.maxBytes} bytes on this ${engine.kind === 'pglite' ? 'PGLite' : 'Postgres'} brain.` };
   } catch (error) {

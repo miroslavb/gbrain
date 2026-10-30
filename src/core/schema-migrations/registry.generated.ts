@@ -288,6 +288,8 @@ import { v284 } from './v284-persistence-foreground-committed-index.ts';
 import { v285 } from './v285-function-search-path-pg-temp.ts';
 import { v286 } from './v286-writer-fence-fail-closed.ts';
 import { v287 } from './v287-outcome-markers-skip-purge-guard.ts';
+import { v288 } from './v288-fork-function-search-path-convergence.ts';
+import { v289 } from './v289-fork-state-tables-rls.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -574,4 +576,6 @@ export const MIGRATIONS: Migration[] = [
   v285,
   v286,
   v287,
+  v288,
+  v289,
 ];

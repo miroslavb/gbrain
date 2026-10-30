@@ -152,7 +152,7 @@
         "audience_reasons": [
           "no shared declaration; 0 non-automation client(s) active in 30d"
         ],
-        "backstop_visibility": "private",
+        "backstop_visibility": "world",
         "capture_lanes": {
           "compact": "extract",
           "session_end": "extract",
@@ -219,7 +219,7 @@
     {
       "details": {
         "kinds": [],
-        "schema_version": 1
+        "schema_version": 2
       },
       "elapsed_ms": "<volatile>",
       "message": "no extractions in last 7 days",

@@ -335,6 +335,41 @@ export function _resetDeferredSegmentedPagesForTests(): void {
   deferredSegmentedPages.clear();
 }
 
+/** Run the coordinator-owned bounded pass when this brain is managed. */
+async function runManagedLinksTimelinePass(
+  engine: BrainEngine, ctx: PassCtx & FreshBudget & { deadline: number },
+  recent: ReadonlyArray<{ slug: string }>, linksEnabled: boolean, timelineEnabled: boolean,
+): Promise<boolean> {
+  const { sourceId, deadline, skip, report } = ctx;
+  // Managed brains: the raw timeline batch and watermark stamp below are
+  // refused by the writer guard (writer_coordinator_required), which aborted
+  // this pass on every sweep and left recently written pages stale. Publish
+  // these pages' links, missing canonical timeline rows and watermark on the
+  // one managed path sync and `extract --stale` run. It stamps both kinds at
+  // once, so it needs both kill switches on, like the stamp at the end.
+  const { managedPersistenceEnabled } = await import('./persistence/ownership.ts');
+  if (await managedPersistenceEnabled(engine)) {
+    if (!linksEnabled || !timelineEnabled) {
+      skip('managed_extraction_needs_links_and_timeline');
+      return true;
+    }
+    const { extractManagedStaleLinks } = await import('./persistence/links-maintenance.ts');
+    const managed = await extractManagedStaleLinks(engine, {
+      sourceId,
+      slugs: recent.map(r => r.slug),
+      maxPages: recent.length,
+      timeBudgetMs: Math.max(0, deadline - Date.now()),
+    });
+    report.linksExtracted += managed.created;
+    report.linksRemoved += managed.removed;
+    report.timelineExtracted += managed.timeline;
+    skip('managed_extraction_page_skipped', managed.skipped);
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Pass 2 body. Calls the SAME per-page cores as `gbrain extract
  * links|timeline --source db` (extract.ts:extractLinksFromDB /
@@ -394,31 +429,7 @@ async function runLinksTimelinePass(
   );
   if (recent.length === 0) return;
 
-  // Managed brains: the raw timeline batch and watermark stamp below are
-  // refused by the writer guard (writer_coordinator_required), which aborted
-  // this pass on every sweep and left recently written pages stale. Publish
-  // these pages' links, missing canonical timeline rows and watermark on the
-  // one managed path sync and `extract --stale` run. It stamps both kinds at
-  // once, so it needs both kill switches on, like the stamp at the end.
-  const { managedPersistenceEnabled } = await import('./persistence/ownership.ts');
-  if (await managedPersistenceEnabled(engine)) {
-    if (!linksEnabled || !timelineEnabled) {
-      skip('managed_extraction_needs_links_and_timeline');
-      return;
-    }
-    const { extractManagedStaleLinks } = await import('./persistence/links-maintenance.ts');
-    const managed = await extractManagedStaleLinks(engine, {
-      sourceId,
-      slugs: recent.map(r => r.slug),
-      maxPages: recent.length,
-      timeBudgetMs: Math.max(0, deadline - Date.now()),
-    });
-    report.linksExtracted += managed.created;
-    report.linksRemoved += managed.removed;
-    report.timelineExtracted += managed.timeline;
-    skip('managed_extraction_page_skipped', managed.skipped);
-    return;
-  }
+  if (await runManagedLinksTimelinePass(engine, ctx, recent, linksEnabled, timelineEnabled)) return;
 
   // resolveCandidateSources + stampExtracted are the shared helpers the
   // extract command exports precisely so sibling walkers can't drift from

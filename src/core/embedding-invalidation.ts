@@ -111,8 +111,8 @@ export async function countDeletedPageNullChunks(
   engine: Pick<BrainEngine, 'executeRaw'>,
 ): Promise<number> {
   const colId = await activeColId(engine);
-  // chunk-visibility-ok: residue census deliberately counts every generation on deleted pages; this is not a retrieval or embedding selector.
   const rows = await engine.executeRaw<{ n: number }>(
+    // chunk-visibility-ok: residue census deliberately counts every generation on deleted pages; this is not a retrieval or embedding selector.
     `SELECT count(*)::int AS n FROM content_chunks c
        JOIN pages p ON p.id = c.page_id
       WHERE c.${colId} IS NULL

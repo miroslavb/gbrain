@@ -14,7 +14,7 @@ import {
   isRetryableConnError,
 } from './retry-matcher.ts';
 import { repairTimelineDedupIndex } from './timeline-dedup-repair.ts';
-import { hardenFunctionSearchPaths } from './schema-migrations/v285-function-search-path-pg-temp.ts';
+import { convergeFunctionSearchPaths } from './function-search-path-repair.ts';
 import { resumePageRevisionBackfill } from './page-state/revision-backfill-schema.ts';
 import { repairPagesUpsertArbiter } from './pages-upsert-arbiter.ts';
 import { repairLinkSourceCheck, LINK_SOURCE_GATE_MIGRATION_VERSION } from './link-source-check-repair.ts';
@@ -437,7 +437,7 @@ export async function runMigrations(engine: BrainEngine): Promise<{ applied: num
   // #7632: a migration that re-creates a gbrain function resets its search_path, a failing migration can stop the run
   // before v277, and a failed earlier attempt leaves one behind; put pg_temp back on every run, at head too.
   // Best-effort: doctor's function_search_path names what it left.
-  const harden = () => hardenFunctionSearchPaths(engine, 'search_path').catch((e: unknown) => process.stderr.write(
+  const harden = () => convergeFunctionSearchPaths(engine, 'search_path').catch((e: unknown) => process.stderr.write(
     `  search_path: pg_temp not restored on gbrain functions (${e instanceof Error ? e.message : String(e)}); gbrain doctor (function_search_path) names them\n`));
   if (pending.length === 0) {
     await harden();
