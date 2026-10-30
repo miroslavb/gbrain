@@ -39,10 +39,36 @@ logs after append. The guard must not be removed or turned into a full-page
 fallback merely to satisfy an upstream append-extraction test. Append extraction
 requires a separately reviewed implementation; this test does not claim it works.
 
-The upload replacement suite also contains upstream assumptions about creating
-and hiding private facts. A `remember` request for private visibility is refused
-by this host. An upload opt-in alone does not reconcile that separate test-policy
-conflict; retain its failed receipt until the intended host behavior is reviewed.
+## Upload replacement policy cases
+
+The earlier upload receipt with eight passes and one failure remains historical
+evidence: its combined protection test tried to create a private fact, which the
+host rejects before any upload. The reconciled suite makes each policy explicit:
+
+- A private `remember` request returns `invalid_params`, without changing the
+  page, its facts, write receipts or upload reservations.
+- Raw legacy `private` cells are stored and read back in both inline and
+  segmented fixtures. Native remote reads expose the shared claim, and a large
+  explicit replacement still carries the same fact as `world`. Its facts fence
+  triggers the existing `request_too_large` whole-body normalization/withdrawal
+  guard in `page-body/streamed-import.ts`; this is independent of visibility.
+  Both layouts require an unpublished terminal failed receipt, exact original
+  page revision/hash/raw bytes/facts and released reservations. No fact is omitted
+  from the replacement to manufacture success. Positive large uploads without
+  protected fences remain covered by the original exact-body/hash tests.
+- Takes and timeline rows still refuse `upload_protected_content`. Malformed
+  facts fences exercise the facts refusal in both storage layouts. Each refusal
+  preserves the page revision, hash and raw body, and releases reserved bytes.
+- An out-of-grant large upload refuses before staging or reserving anything.
+
+These are test-only changes; the runtime policy and shared privacy fixtures are
+unchanged. The separate remote read tests retain takes, credential, truncated
+tail, withdrawal, purge, hold and source-denial oracles. Cross-segment omission
+and the segmented prior-snapshot extraction limitation above still apply. The
+first continuation-2 run (13 passes, two failures) preserved the incorrect
+assumption that a world facts fence could bypass the whole-body limit; its
+receipt remains negative evidence. The revised oracle preserves that limit,
+and does not qualify arbitrary large fenced writes or enable segmentation.
 
 An `ENOSPC` in the interrupted combined run is resource evidence, not proof of a
 segmented storage defect. Re-run the file in an isolated scratch environment

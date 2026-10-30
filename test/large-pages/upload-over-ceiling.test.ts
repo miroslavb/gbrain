@@ -43,6 +43,14 @@ function conversation(bytes: number, tag: string): string {
   return `${turns.join('')}End of conversation ${tag}.`;
 }
 
+const LEGACY_CLAIM = 'Legacy launch budget is forty thousand.';
+/** Raw cells are deliberate: the canonical renderer would normalize private to world. */
+const factFence = (visibility: 'private' | 'world', confidence = '1.0') => `${FACTS_FENCE_BEGIN}
+| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |
+|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|
+| 1 | ${LEGACY_CLAIM} | fact | ${confidence} | ${visibility} | high | 2026-01-01 | | upload-test | |
+${FACTS_FENCE_END}`;
+
 for (const kind of testBackends()) {
   describe(`uploads over the single-string ceiling (${kind})`, () => {
     let engine: BrainEngine;
@@ -92,13 +100,29 @@ for (const kind of testBackends()) {
       .map(row => [row.key, [Number(row.intent_bytes), Number(row.outstanding_count)]]));
     const setConfig = async (key: string, value: string) =>
       engine.executeRaw('INSERT INTO config (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', [key, value]);
-    const privateFactRows = async (slug: string) => {
+    const factFenceViews = async (slug: string) => {
       const [row] = await engine.executeRaw<{ id: number; storage: string; truth: string | null; timeline: string | null }>(
         'SELECT id, body_storage AS storage, compiled_truth AS truth, timeline FROM pages WHERE source_id = $1 AND slug = $2', ['default', slug]);
-      const fences = row!.storage === 'segmented'
+      return row!.storage === 'segmented'
         ? await segmentedFactsFenceView(engine, { id: Number(row!.id), slug, source_id: 'default' }).then(view => [view.body, view.timeline])
         : [parseFactsFence(row!.truth ?? ''), parseFactsFence(row!.timeline ?? '')];
-      return fences.flatMap(fence => fence.facts).filter(fact => fact.visibility !== 'world').map(fact => fact.claim);
+    };
+    const rawBody = async (slug: string) => {
+      const [row] = await engine.executeRaw<{ id: number; body_storage: string | null; compiled_truth: string | null; timeline: string | null }>(
+        'SELECT id, body_storage, compiled_truth, timeline FROM pages WHERE source_id=$1 AND slug=$2', ['default', slug]);
+      return row!.body_storage === 'segmented'
+        ? await materializeSegmentedBody(engine, Number(row!.id), 'default')
+        : { compiled_truth: row!.compiled_truth ?? '', timeline: row!.timeline ?? '' };
+    };
+    const pageState = async (slug: string) => ({
+      revision: await revisionOf(slug), page: await stored(slug), body: await rawBody(slug),
+      facts: (await engine.executeRaw<{ fact: unknown }>('SELECT to_jsonb(f) AS fact FROM facts f WHERE source_id=$1 AND (entity_slug=$2 OR source_markdown_slug=$2) ORDER BY id', ['default', slug])).map(row => row.fact),
+    });
+    const expectReleased = async (prior: Awaited<ReturnType<typeof counters>>) => {
+      const after = await counters();
+      for (const key of new Set([...Object.keys(prior), ...Object.keys(after)])) {
+        expect([key, after[key] ?? [0, 0]]).toEqual([key, prior[key] ?? [0, 0]]);
+      }
     };
     const revisionOf = async (slug: string) => (await engine.readPageSnapshot(slug, { sourceId: 'default' }))!.revision;
 
@@ -182,31 +206,100 @@ for (const kind of testBackends()) {
       await expectStoredBody(slug, smaller);
     }, 900_000);
 
-    test('a remote replace over 24 MiB of a page with a hidden takes fence, private facts rows or timeline rows refuses upload_protected_content and releases its bytes', async () => {
-      const cases: Array<['takes' | 'facts' | 'timeline', string, () => Promise<unknown>]> = [
+    test('a remote replace over 24 MiB preserves hidden takes and timeline rows, refuses upload_protected_content and releases its bytes', async () => {
+      const cases: Array<['takes' | 'timeline', string, () => Promise<unknown>]> = [
         ['takes', 'notes/huge-with-takes', () => call('takes_add', { slug: 'notes/huge-with-takes', claim: 'Launch slips to Q3.', kind: 'take', holder: 'world', request_id: randomUUID() })],
-        ['facts', 'notes/huge-with-facts', () => call('remember', { fact: 'Private launch budget is forty thousand.', provenance: 'upload-test', entity: 'notes/huge-with-facts', visibility: 'private', request_id: randomUUID() })],
-        ['facts', 'notes/segmented-with-facts', async () => {
-          await importFromContent(engine, 'notes/segmented-with-facts', `---\ntitle: Segmented facts\ntype: note\n---\n\n${conversation(2 * MiB, 'segmented-facts')}\n\n## Facts\n\n${FACTS_FENCE_BEGIN}\n| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |\n|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|\n| 1 | Private launch budget is forty thousand. | fact | 1.0 | private | high | 2026-01-01 |  | s |  |\n${FACTS_FENCE_END}\n`, { sourceId: 'default', noEmbed: true });
-          expect((await stored('notes/segmented-with-facts')).body_storage).toBe('segmented');
-        }],
         ['timeline', 'notes/huge-with-timeline', () => call('add_timeline_entry', { slug: 'notes/huge-with-timeline', date: '2026-01-02', summary: 'Kickoff held', request_id: randomUUID() })],
       ];
       await setConfig('write_gate.agent_mode', 'off');
       for (const [reason, slug, protect] of cases) {
-        if (slug !== 'notes/segmented-with-facts') await call('put_page', { slug, content: `---\ntitle: Protected ${reason}\ntype: note\n---\n\n# Protected ${reason}\n\nShort page.\n`, request_id: randomUUID(), wait_ms: 30_000 });
+        await call('put_page', { slug, content: `---\ntitle: Protected ${reason}\ntype: note\n---\n\n# Protected ${reason}\n\nShort page.\n`, request_id: randomUUID(), wait_ms: 30_000 });
         await protect();
-        if (reason === 'facts') expect(await privateFactRows(slug)).toEqual(['Private launch budget is forty thousand.']);
         const prior = await counters();
-        const before = await engine.readPageSnapshot(slug, { sourceId: 'default' });
-        const id = await staged(conversation(25 * MiB, `protected-${reason}`), slug, { mode: 'replace', expected_revision: before!.revision });
+        const before = await pageState(slug);
+        const id = await staged(conversation(25 * MiB, `protected-${reason}`), slug, { mode: 'replace', expected_revision: before.revision });
         const refused = await commitRefusal({ upload_id: id });
-        expect({ reason, code: refused.code, names: refused.message.includes(({ takes: 'takes fence', facts: 'facts rows', timeline: 'timeline rows' })[reason]) }).toEqual({ reason, code: 'upload_protected_content', names: true });
-        expect((await engine.readPageSnapshot(slug, { sourceId: 'default' }))!.revision).toBe(before!.revision);
-        if (reason === 'facts') expect(await privateFactRows(slug)).toEqual(['Private launch budget is forty thousand.']);
-        const after = await counters();
-        for (const [key, value] of Object.entries(after)) expect([reason, key, value]).toEqual([reason, key, prior[key] ?? [0, 0]]);
+        expect({ reason, code: refused.code, names: refused.message.includes(({ takes: 'takes fence', timeline: 'timeline rows' })[reason]) }).toEqual({ reason, code: 'upload_protected_content', names: true });
+        expect(await pageState(slug)).toEqual(before);
+        await expectReleased(prior);
       }
     }, 900_000);
+
+    test('a private remember request is rejected before changing its page, facts, receipts or upload counters', async () => {
+      const slug = 'notes/huge-with-facts';
+      await call('put_page', { slug, content: '# Shared page\n\nOriginal page body.', request_id: randomUUID(), wait_ms: 30_000 });
+      const before = await pageState(slug);
+      const facts = () => engine.executeRaw('SELECT * FROM facts WHERE source_id=$1 AND entity_slug=$2 ORDER BY id', ['default', slug]);
+      const priorFacts = [...await facts()];
+      const prior = await counters();
+      const requestId = randomUUID();
+      const refused = await refusal('remember', { fact: LEGACY_CLAIM, provenance: 'upload-test', entity: slug, visibility: 'private', request_id: requestId });
+      expect(refused.code).toBe('invalid_params');
+      expect(refused.suggestion).toContain('only visibility supported');
+      expect(await pageState(slug)).toEqual(before);
+      expect([...await facts()]).toEqual(priorFacts);
+      expect([...await engine.executeRaw('SELECT id FROM persistence_requests WHERE request_id=$1', [requestId])]).toEqual([]);
+      await expectReleased(prior);
+    }, 120_000);
+
+    for (const storage of ['inline', 'segmented'] as const) {
+      test(`a raw legacy private fact in a page stored as ${storage} is shared but a large fenced replacement retains the whole-body refusal`, async () => {
+        await setConfig('write_gate.agent_mode', 'off');
+        const slug = `notes/legacy-facts-${storage}`;
+        const legacy = `${factFence('private')}\n\n${conversation(storage === 'segmented' ? 2 * MiB : 1024, `legacy-${storage}`)}`;
+        expect((await importFromContent(engine, slug, `---\ntitle: Legacy facts\ntype: note\n---\n\n${legacy}`, { sourceId: 'default', noEmbed: true })).status).toBe('imported');
+        expect((await stored(slug)).body_storage ?? 'inline').toBe(storage);
+        expect((await rawBody(slug)).compiled_truth).toContain(`| ${LEGACY_CLAIM} | fact | 1.0 | private |`);
+        expect((await factFenceViews(slug)).flatMap(fence => fence.facts).map(fact => ({ claim: fact.claim, visibility: fact.visibility })))
+          .toEqual([{ claim: LEGACY_CLAIM, visibility: 'world' }]);
+        const read = await call('get_page', { slug, body: 'window', view: 'markdown', max_bytes: 10_000 });
+        expect(read.window.text).toContain(LEGACY_CLAIM);
+        expect(read.window.text).toContain('| world |');
+        const prior = await counters();
+        const before = await pageState(slug);
+        const replacement = `${factFence('world')}\n\n${conversation(25 * MiB, `shared-${storage}`)}`;
+        const id = await staged(replacement, slug, { mode: 'replace', expected_revision: before.revision });
+        const refused = await commitRefusal({ upload_id: id });
+        // Visibility does not reject this shared row. The independent streamed-import
+        // guard still requires whole-body fence normalization/withdrawal checks.
+        expect(refused.code).toBe('request_too_large');
+        expect(refused.message).toContain('facts and takes fences are normalized and checked against withdrawals over the whole body');
+        expect(refused.writeRequest).toMatchObject({ state: 'failed', write_error: 'request_too_large' });
+        expect([...await engine.executeRaw('SELECT state, error_code, published_at, publication_started FROM persistence_requests WHERE request_id=$1 AND principal_id=$2',
+          [refused.writeRequest!.request_id, 'upload-big'])]).toEqual([{ state: 'failed', error_code: 'request_too_large', published_at: null, publication_started: false }]);
+        expect(await pageState(slug)).toEqual(before);
+        expect((await factFenceViews(slug)).flatMap(fence => fence.facts).map(fact => ({ claim: fact.claim, visibility: fact.visibility })))
+          .toEqual([{ claim: LEGACY_CLAIM, visibility: 'world' }]);
+        await expectReleased(prior);
+      }, 600_000);
+
+      test(`a malformed facts fence in a page stored as ${storage} still refuses a large replacement and preserves its bytes`, async () => {
+        await setConfig('write_gate.agent_mode', 'off');
+        const slug = `notes/malformed-facts-${storage}`;
+        const malformed = `${factFence('world', 'not-a-number')}\n\n${conversation(storage === 'segmented' ? 2 * MiB : 1024, `malformed-${storage}`)}`;
+        expect((await importFromContent(engine, slug, `---\ntitle: Malformed facts\ntype: note\n---\n\n${malformed}`, { sourceId: 'default', noEmbed: true })).status).toBe('imported');
+        expect((await stored(slug)).body_storage ?? 'inline').toBe(storage);
+        expect((await factFenceViews(slug)).flatMap(fence => fence.warnings).join('\n')).toContain('FACTS_TABLE_MALFORMED');
+        const before = await pageState(slug);
+        const prior = await counters();
+        const id = await staged(conversation(25 * MiB, `malformed-replace-${storage}`), slug, { mode: 'replace', expected_revision: before.revision });
+        const refused = await commitRefusal({ upload_id: id });
+        expect(refused.code).toBe('upload_protected_content');
+        expect(refused.message).toContain('facts rows');
+        expect(await pageState(slug)).toEqual(before);
+        await expectReleased(prior);
+      }, 600_000);
+    }
+
+    test('a large upload outside the source grant is rejected before any staging or reservation', async () => {
+      const prior = await counters();
+      const stagedCount = () => engine.executeRaw<{ n: number }>("SELECT count(*)::int AS n FROM page_body_stagings WHERE kind='upload'");
+      const before = [...await stagedCount()];
+      const refused = await refusal('begin_page_upload', { slug: 'notes/outside-grant', source_id: 'other-source', mode: 'create',
+        total_bytes: 25 * MiB, sha256: 'a'.repeat(64), request_id: randomUUID() });
+      expect(refused.code).toBe('permission_denied');
+      expect([...await stagedCount()]).toEqual(before);
+      await expectReleased(prior);
+    }, 60_000);
   });
 }

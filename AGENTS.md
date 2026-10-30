@@ -961,3 +961,9 @@ Forward288/289, historical fixture adapters and reviewed goldens are preparation
 Graduation treats only the exact native `facts.default_visibility=world` seed as an empty target; non-world values, unrelated config and data remain blockers ([test/FORK_GRADUATION.md](test/FORK_GRADUATION.md)). Inline canonical-cache comparison uses the same pure world-only fact visibility projection as `rowToPage`, without the withdrawal overlay; real claim/provenance/timeline changes and withdrawal mismatches must remain stale. Keep segmented hash comparison unchanged.
 
 Segmented test fixtures opt in only in their disposable databases. Host legacy fact visibility remains world-only while source grants, document ACLs, takes/credential hiding and withdrawal/purge/hold ledgers remain separate boundaries. Cross-segment facts may still be conservatively omitted; no complete-retention claim follows the focused tests. Explicit capability and test-policy limits remain in [test/FORK_SEGMENTED_PREPARATION.md](test/FORK_SEGMENTED_PREPARATION.md). Never enable production segmentation, remove a fail-closed guard, drop a failed case or auto-refresh retrieval labels to make the release gate green.
+
+Large-upload fixtures must distinguish rejected private fact writes from readable
+legacy private cells. Carry legacy claims explicitly as world in replacement
+fixtures; retain hidden takes/timeline and malformed-fence refusal, byte/hash/
+revision preservation, released reservations and pre-staging source-grant denial.
+These synthetic segmented fixtures never enable the production storage switch.
