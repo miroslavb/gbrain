@@ -224,7 +224,7 @@ describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', (
       try { await db.initSchema(); } finally { await db.disconnect(); }
       const flags = await conn.unsafe<Array<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>>(
         `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'public.proposal_page_runs'::regclass`);
-      expect(flags).toEqual([{ relrowsecurity: true, relforcerowsecurity: false }]);
+      expect([...flags]).toEqual([{ relrowsecurity: true, relforcerowsecurity: false }]);
       expect(await presentTables(conn, ['extract_health_state'])).toEqual([]);
     } finally {
       await conn.end();
@@ -240,10 +240,10 @@ describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', (
       await runRawForkRlsAs(conn, 'SELECT 1');
       const flags = () => conn.unsafe<Array<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>>(
         `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'public.proposal_page_runs'::regclass`);
-      expect(await flags()).toEqual([{ relrowsecurity: false, relforcerowsecurity: false }]);
+      expect([...(await flags())]).toEqual([{ relrowsecurity: false, relforcerowsecurity: false }]);
       await conn.unsafe('COMMENT ON TABLE proposal_page_runs IS NULL');
       await runRawForkRlsAs(conn, 'SELECT 1');
-      expect(await flags()).toEqual([{ relrowsecurity: true, relforcerowsecurity: false }]);
+      expect([...(await flags())]).toEqual([{ relrowsecurity: true, relforcerowsecurity: false }]);
     } finally {
       await conn.end();
     }
@@ -289,7 +289,7 @@ describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', (
         `SELECT n.nspname || '.' || c.relname AS name, c.relrowsecurity, c.relforcerowsecurity
           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE c.relname = 'proposal_page_runs' ORDER BY 1`);
-      expect(flags).toEqual(['public.proposal_page_runs', 'shadow.proposal_page_runs'].map(name => ({
+      expect([...flags]).toEqual(['public.proposal_page_runs', 'shadow.proposal_page_runs'].map(name => ({
         name, relrowsecurity: true, relforcerowsecurity: false,
       })));
     } finally {
@@ -383,7 +383,7 @@ describeE2E('RLS on every public table (Postgres, no auto-RLS event trigger)', (
         `SELECT n.nspname || '.' || c.relname AS name, c.relrowsecurity, c.relforcerowsecurity
           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE c.relname = ANY($1::text[]) ORDER BY 1`, [FORK_STATE_TABLES]);
-      expect(flags).toEqual(['public.extract_health_state', 'public.proposal_page_runs',
+      expect([...flags]).toEqual(['public.extract_health_state', 'public.proposal_page_runs',
         'shadow.extract_health_state', 'shadow.proposal_page_runs'].map(name => ({
           name, relrowsecurity: true, relforcerowsecurity: false,
         })));
