@@ -1,3 +1,5 @@
+import { HEADING } from '../page-window/window.ts';
+
 export interface TemporalWindow {
   startMs: number | null;
   endMs: number | null;
@@ -78,11 +80,48 @@ export function resolvePageDateMs(page: DatedPage): number | null {
     ? ms : null;
 }
 
-export function filterPagesToWindow<T extends DatedPage>(pages: T[], window: TemporalWindow) {
+/** Work only with the retrieved, already projected chunk. A date in prose or code
+ * is not a section date. Keep the heading with its evidence for the model. */
+export function datedSectionExcerpt(text: string, window: TemporalWindow): string | undefined {
+  const lines = text.split('\n');
+  let fence = '';
+  let start = -1;
+  let depth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
+      if (close?.startsWith(fence)) fence = '';
+      continue;
+    }
+    fence = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1] ?? '';
+    const heading = !fence && HEADING.exec(line);
+    if (!heading) continue;
+    const dates = Array.from(heading[2].matchAll(/\b\d{4}-\d{2}(?:-\d{2})?\b/g), m => m[0]);
+    if (start >= 0) {
+      if (heading[1].length <= depth || dates.length) return lines.slice(start, i).join('\n').trimEnd();
+      continue;
+    }
+    if (dates.some(date => {
+      try {
+        const span = parseTemporalWindow(date, date)!;
+        return (window.startMs === null || span.startMs! >= window.startMs)
+          && (window.endMs === null || span.endMs! <= window.endMs);
+      } catch { return false; }
+    })) {
+      start = i;
+      depth = heading[1].length;
+    }
+  }
+  return start >= 0 ? lines.slice(start).join('\n').trimEnd() : undefined;
+}
+
+export function filterPagesToWindow<T extends DatedPage>(pages: T[], window: TemporalWindow, matchesSection?: (page: T) => boolean) {
   const kept: T[] = [];
   let droppedOutOfWindow = 0;
   let undatedKept = 0;
   for (const page of pages) {
+    if (matchesSection?.(page)) { kept.push(page); continue; }
     const ms = resolvePageDateMs(page);
     if (ms === null) { undatedKept++; kept.push(page); continue; }
     if ((window.startMs !== null && ms < window.startMs) || (window.endMs !== null && ms > window.endMs)) {

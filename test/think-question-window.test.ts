@@ -12,10 +12,18 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { importFromContent } from '../src/core/import-file.ts';
 import { runThink } from '../src/core/think/index.ts';
-import { parseQuestionWindow, parseTemporalWindow, resolveThinkWindow } from '../src/core/think/temporal-window.ts';
+import { datedSectionExcerpt, parseQuestionWindow, parseTemporalWindow, resolveThinkWindow } from '../src/core/think/temporal-window.ts';
 import { __setEmbedTransportForTests } from '../src/core/ai/gateway.ts';
 
 const win = (since: string, until?: string) => parseTemporalWindow(since, until)!;
+
+test('a dated section supplies just its own evidence, excluding examples and adjacent dated headings', () => {
+  const body = ['## History', 'mentions 2026-11-19', '~~~~', '## Example 2026-11-19', '~~~', '~~~~',
+    '## Проверка 2026-11-19', 'target', '### Details', 'detail', '## Проверка 2026-11-20', 'other'].join('\n');
+  expect(datedSectionExcerpt(body, win('2026-11-19', '2026-11-19'))).toBe('## Проверка 2026-11-19\ntarget\n### Details\ndetail');
+  expect(datedSectionExcerpt(body, win('2026-11-18', '2026-11-18'))).toBeUndefined();
+  expect(datedSectionExcerpt('## Invalid 2026-02-30\nexample', win('2026-02', '2026-02'))).toBeUndefined();
+});
 
 describe('parseQuestionWindow: one explicit date, or nothing', () => {
   test('an ISO day, an ISO month and a month name with a year each bound the question to that span', () => {
@@ -79,5 +87,15 @@ describe('runThink reports the window and its origin', () => {
     const r = await runThink(engine, { question: 'operations review', stubResponse: stub });
     expect(r.window_source).toBeUndefined();
     expect((r.feedback_evidence ?? []).map((e) => e.slug).sort()).toEqual(['brain/ops/2026-06-01', 'brain/ops/2026-09-10']);
+  });
+
+  test('an older page qualifies by section only when the question supplied the date', async () => {
+    const slug = 'projects/lantern';
+    await importFromContent(engine, slug, '---\ntitle: Lantern inventory\ntype: note\ndate: 2026-08-21\n---\n\n## Inspection 2026-11-19\nLantern inventory item AX1042\n', { noEmbed: true, sourceId: 'default' });
+    const question = 'Lantern inventory inspection 2026-11-19';
+    const implied = await runThink(engine, { question, stubResponse: stub });
+    expect(implied.feedback_evidence?.map(e => e.slug)).toContain(slug);
+    const explicit = await runThink(engine, { question, since: '2026-11-19', until: '2026-11-19', stubResponse: stub });
+    expect((explicit.feedback_evidence ?? []).map(e => e.slug)).not.toContain(slug);
   });
 });

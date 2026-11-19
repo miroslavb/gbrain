@@ -967,3 +967,6 @@ legacy private cells. Carry legacy claims explicitly as world in replacement
 fixtures; retain hidden takes/timeline and malformed-fence refusal, byte/hash/
 revision preservation, released reservations and pre-staging source-grant denial.
 These synthetic segmented fixtures never enable the production storage switch.
+For synthesis windows inferred from a question, dated Markdown sections in
+retrieved text can qualify an older page. Explicit caller bounds filter page
+dates. Keep regression coverage for adjacent sections and fenced examples.

@@ -656,7 +656,7 @@ export async function runThink(
     question: opts.question,
     anchor: opts.anchor,
     questionEmbedding,
-    ...(window ? { window } : {}),
+    ...(resolvedWindow ? { window: resolvedWindow.window, windowSource: resolvedWindow.source } : {}),
     takesHoldersAllowList: opts.remote === false ? opts.takesHoldersAllowList : opts.takesHoldersAllowList ?? ['world'],
     excludePrivate: opts.excludePrivate ?? await resolveExcludePrivatePages(engine, opts.remote),
     remote: opts.remote,

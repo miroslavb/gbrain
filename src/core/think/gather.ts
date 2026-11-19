@@ -25,7 +25,7 @@ import { boundedProjectedPrefix } from '../page-window/document.ts';
 import { overlaidBoundedRows, pageLeadSource } from '../page-window/bounded-lead.ts';
 import type { Page, SearchResult } from '../types.ts';
 import { DEFAULT_PAGES_BUDGET, PAGES_BLOCK_EXCERPT_FLOOR_CHARS, type PagesBudget } from './pages-budget.ts';
-import { filterPagesToWindow, type TemporalWindow } from './temporal-window.ts';
+import { datedSectionExcerpt, filterPagesToWindow, type TemporalWindow } from './temporal-window.ts';
 import { pageContentDate } from './temporal-context.ts';
 import { sanitizeQueryForPrompt } from '../search/expansion.ts';
 import { evidenceTitle } from '../search/evidence-date.ts';
@@ -46,6 +46,7 @@ export interface ThinkGatherOpts {
   /** Optional pre-computed embedding for the question. Lets the caller share embedding cost. */
   questionEmbedding?: Float32Array;
   window?: TemporalWindow;
+  windowSource?: 'question' | 'caller';
   /** When set, MCP-bound calls forward this allow-list to takes_search. Local CLI leaves unset. */
   takesHoldersAllowList?: string[];
   excludePrivate?: boolean;
@@ -190,9 +191,18 @@ export async function runGather(
       return [] as SearchResult[];
     }),
   ]).then(([hybrid, floor]) => {
-    const seen = new Set<string>();
-    const combined = [...hybrid, ...floor].filter(page => !seen.has(page.slug) && !!seen.add(page.slug));
-    const filtered = filterPagesToWindow(combined, window);
+    const byPage = new Map<number, SearchResult>();
+    const sectionHits = new Set<number>();
+    for (const page of [...hybrid, ...floor]) {
+      if (!byPage.has(page.page_id)) byPage.set(page.page_id, page);
+      if (opts.windowSource !== 'question' || sectionHits.has(page.page_id) || page.chunk_source !== 'compiled_truth') continue;
+      const excerpt = datedSectionExcerpt(page.chunk_text, window);
+      if (excerpt) {
+        byPage.set(page.page_id, { ...page, chunk_text: excerpt });
+        sectionHits.add(page.page_id);
+      }
+    }
+    const filtered = filterPagesToWindow([...byPage.values()], window, p => sectionHits.has(p.page_id));
     windowDiagnostic = { dropped: filtered.droppedOutOfWindow, undatedKept: filtered.undatedKept };
     return filtered.kept.slice(0, gatherLimit);
   }) : hybridSearch(engine, opts.question, {
